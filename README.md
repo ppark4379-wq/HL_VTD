@@ -71,4 +71,8 @@ main 브랜치는 항상 실행 가능한 코드를 유지합니다.
 feat/vtd-network
 feat/planning-pedestrian
 feat/lateral-control
+<<<<<<< HEAD
 fix/traffic-light
+=======
+fix/traffic-light
+>>>>>>> 6c177dd8e53960672f35f5a6d800a05256276969
