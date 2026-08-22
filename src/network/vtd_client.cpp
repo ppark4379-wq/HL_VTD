@@ -15,9 +15,6 @@
 #include <unistd.h>
 #endif
 
-namespace hlvtd::network {
-namespace {
-
 #ifdef _WIN32
 using NativeSocket = SOCKET;
 constexpr NativeSocket INVALID_NATIVE_SOCKET = INVALID_SOCKET;
@@ -66,8 +63,6 @@ void enableTcpNoDelay(NativeSocket socket) {
     setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled));
 #endif
 }
-
-}  // namespace
 
 VtdClientData makeVtdClient(const VtdNetworkConfig& config) {
     if (config.host_ip.empty()) {
@@ -240,5 +235,3 @@ std::size_t receiveVtdData(
     }
     return static_cast<std::size_t>(result);
 }
-
-}  // namespace hlvtd::network

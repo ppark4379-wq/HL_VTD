@@ -1,14 +1,12 @@
 #pragma once
 
-#include "data/gt_structs.hpp"
+#include "data/gt/gt_structs.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
-
-namespace hlvtd::network {
 
 inline constexpr std::size_t GT_FRAME_SIZE = 1109;
 
@@ -43,5 +41,3 @@ struct GtReceiverData {
     std::vector<std::uint8_t> streamBuffer;
     GtFrame latestGt;
 };
-
-}  // namespace hlvtd::network

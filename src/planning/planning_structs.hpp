@@ -58,13 +58,6 @@ struct LaneMatch {
     size_t pointIndex{};
 };
 
-// 팀원 GT 구조체가 확정되기 전 테스트용 Ego 입력.
-struct EgoPose {
-    double x{};
-    double y{};
-    double heading{};
-};
-
 // 아래 자료형은 XODR 파싱과 lane graph 생성에만 사용하는 내부 데이터다.
 struct Polynomial {
     double s{};
@@ -175,4 +168,37 @@ struct PathGeneratorData {
     vector<JunctionLaneLink> junctionLinks;
     map<LaneKey, LaneSegment> laneSegments;
     map<LaneKey, vector<LaneKey>> laneGraph;
+};
+
+// Pure Pursuit와 곡률 기반 속도 계획에 사용하는 설정값.
+struct PathPlannerConfig {
+    double wheelbase{2.944};
+    double straightLookahead{8.0};
+    double curveLookahead{5.0};
+    double curveThreshold{0.02};
+    double curvatureCheckDistance{25.0};
+    double straightSpeed{8.0};
+    double curveSpeed{4.0};
+    double schoolZoneSpeed{8.0};
+    double goalTolerance{1.5};
+};
+
+// 한 프레임의 경로추종 플래닝 결과.
+struct PathPlan {
+    bool valid{};
+    bool goalReached{};
+    size_t nearestIndex{};
+    size_t targetIndex{};
+    double lookahead{};
+    double maxCurvature{};
+    double targetSpeed{};
+    double steering{};
+};
+
+// 플래너가 시작 시 로드한 경로와 현재 탐색 상태.
+struct PathPlannerData {
+    PathPlannerConfig config;
+    vector<Waypoint> waypoints;
+    size_t nearestIndex{};
+    PathPlan latestPlan;
 };

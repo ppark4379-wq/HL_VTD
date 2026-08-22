@@ -325,16 +325,10 @@ vector<LaneMatch> findContainingLanes(const PathGeneratorData& data,
     return candidates;
 }
 
-    // Ego에는 heading까지 사용하여 반대 방향 차선 오매칭을 줄인다.
-LaneMatch matchEgoToLane(const PathGeneratorData& data, const EgoPose& ego) {
-    return matchWorldToLane(data, ego.x, ego.y, ego.heading);
+// Ego GT의 heading까지 사용하여 반대 방향 차선 오매칭을 줄인다.
+LaneMatch matchEgoToLane(const PathGeneratorData& data, const GtFrame& gt) {
+    return matchWorldToLane(data, gt.ego.x, gt.ego.y, gt.ego.heading);
 }
-
-    // 팀원 GT 구조체가 완성되면 아래처럼 호출부에서 이름만 맞춘다.
-    // 구조체 수정: GroundTruthState/ego/x/y/heading은 실제 팀원 구조체명으로 변경.
-    // LaneMatch matchEgoToLane(const GroundTruthState& gt) const {
-    //     return matchWorldToLane(gt.ego.x, gt.ego.y, gt.ego.heading);
-    // }
 
     // 모든 checkpoint의 주변 lane 후보를 먼저 만든다.
     // 시작부터 끝까지 연결되는 후보 조합 중 총 주행거리가 가장 짧은 조합을
@@ -714,13 +708,12 @@ string laneChangeMarkAt(const LaneDefinition& lane, double s) {
     return selected->laneChange;
 }
 
-    // 두 인접 차선의 경계는 두 lane 중 |id|가 더 큰(중심에서 먼) lane의
-    // roadMark가 정의한다 (ASAM OpenDRIVE 표준 규약). laneChange는 lane id가
-    // 증가하는 방향으로의 변경 허용 여부를 뜻하므로 부호와 무관하게
-    // toLaneId와 fromLaneId의 대소 비교만으로 방향을 판단할 수 있다.
+    // lane의 roadMark는 해당 lane의 외측 경계선을 정의한다.
+    // 따라서 인접한 lane 사이 경계는 |id|가 더 작은(중심에 가까운)
+    // lane의 외측 roadMark에서 읽어야 한다.
 bool laneChangeAllowed(const LaneSection& section, int fromLaneId,
                        int toLaneId, double s) {
-    const int ownerId = abs(fromLaneId) > abs(toLaneId) ? fromLaneId : toLaneId;
+    const int ownerId = abs(fromLaneId) < abs(toLaneId) ? fromLaneId : toLaneId;
     const auto owner = section.lanes.find(ownerId);
     if (owner == section.lanes.end()) return false;
     const string mark = laneChangeMarkAt(owner->second, s);

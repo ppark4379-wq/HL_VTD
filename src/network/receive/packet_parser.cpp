@@ -1,11 +1,8 @@
-#include "network/packet_parser.hpp"
+#include "network/receive/packet_parser.hpp"
 
 #include "network/network_structs.hpp"
 
 #include <cstring>
-
-namespace hlvtd::network {
-namespace {
 
 std::uint32_t readUint32LE(const std::uint8_t* data) {
     return static_cast<std::uint32_t>(data[0]) |
@@ -27,8 +24,6 @@ float readFloat32LE(const std::uint8_t* data) {
     std::memcpy(&value, &bits, sizeof(value));
     return value;
 }
-
-}  // namespace
 
 bool parseGtFrame(
     const std::uint8_t* data,
@@ -79,5 +74,3 @@ bool parseGtFrame(
     offset += 1;
     return offset == GT_FRAME_SIZE;
 }
-
-}  // namespace hlvtd::network

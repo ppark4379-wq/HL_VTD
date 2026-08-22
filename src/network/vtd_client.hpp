@@ -5,8 +5,6 @@
 
 #include <cstddef>
 
-namespace hlvtd::network {
-
 VtdClientData makeVtdClient(const VtdNetworkConfig& config);
 
 void connectVtdClient(VtdClientData& client);
@@ -23,5 +21,3 @@ std::size_t receiveVtdData(
     VtdClientData& client,
     void* buffer,
     std::size_t capacity);
-
-}  // namespace hlvtd::network

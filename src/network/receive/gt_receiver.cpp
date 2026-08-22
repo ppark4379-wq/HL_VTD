@@ -1,9 +1,7 @@
-#include "network/gt_receiver.hpp"
+#include "network/receive/gt_receiver.hpp"
 
-#include "network/packet_parser.hpp"
+#include "network/receive/packet_parser.hpp"
 #include "network/vtd_client.hpp"
-
-namespace hlvtd::network {
 
 GtReceiverData makeGtReceiver(const VtdNetworkConfig& config) {
     GtReceiverData receiver;
@@ -65,5 +63,3 @@ bool receiveGtFrame(GtReceiverData& receiver) {
 const GtFrame& getLatestGtFrame(const GtReceiverData& receiver) {
     return receiver.latestGt;
 }
-
-}  // namespace hlvtd::network

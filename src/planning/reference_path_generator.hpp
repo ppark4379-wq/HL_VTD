@@ -1,5 +1,6 @@
 #pragma once
 
+#include "data/gt/gt_structs.hpp"
 #include "planning_structs.hpp"
 
 #include <optional>
@@ -28,8 +29,8 @@ LaneMatch matchWorldToLane(
 std::vector<LaneMatch> findContainingLanes(const PathGeneratorData& data,
                                            double x, double y);
 
-// Ego의 VTD 월드 위치와 heading을 현재 road/lane에 매칭한다.
-LaneMatch matchEgoToLane(const PathGeneratorData& data, const EgoPose& ego);
+// 수신한 GT의 Ego 월드 위치와 heading을 현재 road/lane에 매칭한다.
+LaneMatch matchEgoToLane(const PathGeneratorData& data, const GtFrame& gt);
 
 // CSV의 모든 checkpoint를 각각 road/lane에 매칭한다.
 std::vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data);

@@ -1,0 +1,31 @@
+# Pure Pursuit 경로추종 설정
+pure_pursuit:
+  wheelbase: 2.944                 # [m] Hyundai IONIQ 6
+  straight_lookahead: 8.0         # [m] 직선 구간 Ld
+  curve_lookahead: 5.0            # [m] 곡선 구간 Ld
+  curve_threshold: 0.02           # [1/m] 곡선 판정 곡률
+  curvature_check_distance: 25.0  # [m] 앞쪽 곡률 탐색 거리
+  goal_tolerance: 1.5             # [m] 도착 판정 거리
+
+# 속도 계획 설정. 대회 공지 후 제한속도에 맞게 수정한다.
+speed:
+  straight_target: 8.33            # [m/s] 28.8 km/h
+  curve_target: 8.33               # [m/s] 14.4 km/h
+  school_zone_target: 8.0         # [m/s] 임시값, 공식 채점 기준 후 수정
+
+# 종방향 PD 속도 제어 설정
+speed_pd:
+  kp: 1.0
+  kd: 0.15
+
+# 제어기 출력 포화값
+# max_steering은 제공된 차량 제원의 MaxSteering 값이다.
+# 가속도 최솟값/최댓값은 VTD 공식 제한이 아닌 임시 안전 튜닝값이다.
+limits:
+  min_acceleration: -4.0          # [m/s^2] 임시 PD 출력 하한
+  max_acceleration: 2.0           # [m/s^2] 임시 PD 출력 상한
+  max_steering: 0.48              # [rad] 차량 제원에 명시된 최대 조향각
+
+# 제어 주기. 실제 루프에서 계산한 dt를 우선 사용한다.
+runtime:
+  nominal_dt: 0.02                # [s] 50 Hz

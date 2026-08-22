@@ -6,9 +6,17 @@ add_executable(hl_vtd
     src/main.cpp
     src/network/network_config.cpp
     src/network/vtd_client.cpp
-    src/network/packet_parser.cpp
-    src/network/gt_receiver.cpp
-    src/network/gt_printer.cpp
+    src/network/receive/packet_parser.cpp
+    src/network/receive/gt_receiver.cpp
+    src/network/receive/gt_printer.cpp
+    src/network/send/control_sender.cpp
+    src/planning/path_planner.cpp
+    src/planning/planning_process.cpp
+    src/control/controller.cpp
+    src/control/control_process.cpp
+    src/control/control_config.cpp
+    src/utils/csv_utils.cpp
+    src/utils/math_utils.cpp
 )
 
 target_compile_features(hl_vtd PRIVATE cxx_std_17)

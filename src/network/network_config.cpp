@@ -7,9 +7,6 @@
 #include <string_view>
 #include <unordered_set>
 
-namespace hlvtd::network {
-namespace {
-
 std::string_view trim(std::string_view value) {
     while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) {
         value.remove_prefix(1);
@@ -74,8 +71,6 @@ void markOnce(std::unordered_set<std::string>& fields,
         fail(line_number, "duplicate key '" + full_key + "'");
     }
 }
-
-}  // namespace
 
 NetworkConfig loadNetworkConfig(const std::filesystem::path& path) {
     std::ifstream input(path);
@@ -151,5 +146,3 @@ NetworkConfig loadNetworkConfig(const std::filesystem::path& path) {
 
     return config;
 }
-
-}  // namespace hlvtd::network

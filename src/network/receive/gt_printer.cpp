@@ -1,8 +1,6 @@
-#include "network/gt_printer.hpp"
+#include "network/receive/gt_printer.hpp"
 
 #include <iostream>
-
-namespace hlvtd::network {
 
 void printEgoState(const EgoState& ego) {
     std::cout << "Ego x=" << ego.x
@@ -40,5 +38,3 @@ void printGtFrame(const GtFrame& gt) {
     printEgoState(gt.ego);
     printObjectStates(gt);
 }
-
-}  // namespace hlvtd::network
