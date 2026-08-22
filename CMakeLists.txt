@@ -6,6 +6,9 @@ add_executable(hl_vtd
     src/main.cpp
     src/network/network_config.cpp
     src/network/vtd_client.cpp
+    src/network/packet_parser.cpp
+    src/network/gt_receiver.cpp
+    src/network/gt_printer.cpp
 )
 
 target_compile_features(hl_vtd PRIVATE cxx_std_17)

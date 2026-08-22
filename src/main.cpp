@@ -1,8 +1,7 @@
+#include "network/gt_receiver.hpp"
+#include "network/gt_printer.hpp"
 #include "network/network_config.hpp"
-#include "network/vtd_client.hpp"
 
-#include <array>
-#include <cstddef>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -38,6 +37,18 @@ CliOptions parseOptions(int argc, char* argv[]) {
     return options;
 }
 
+void printNetworkConfig(
+    const CliOptions& options,
+    const hlvtd::network::NetworkConfig& config) {
+    std::cout << "[network] config: " << options.config_path << '\n'
+              << "[network] VTD TCP: " << config.vtd.host_ip << ':'
+              << config.vtd.tcp_port << '\n'
+              << "[network] VTD RTSP: " << config.vtd.host_ip << ':'
+              << config.vtd.rtsp_port << '\n'
+              << "[network] controller UDP: " << config.controller.ip << ':'
+              << config.controller.udp_port << '\n';
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -45,30 +56,22 @@ int main(int argc, char* argv[]) {
         const auto options = parseOptions(argc, argv);
         const auto config = hlvtd::network::loadNetworkConfig(options.config_path);
 
-        std::cout << "[network] config: " << options.config_path << '\n'
-                  << "[network] VTD TCP: " << config.vtd.host_ip << ':'
-                  << config.vtd.tcp_port << '\n'
-                  << "[network] VTD RTSP: " << config.vtd.host_ip << ':'
-                  << config.vtd.rtsp_port << '\n'
-                  << "[network] controller UDP: " << config.controller.ip << ':'
-                  << config.controller.udp_port << '\n';
+        printNetworkConfig(options, config);
 
         if (options.check_config_only) {
             std::cout << "[network] config is valid\n";
             return 0;
         }
 
-        std::cout << "[network] connecting to VTD..." << std::endl;
+        auto receiver = hlvtd::network::makeGtReceiver(config.vtd);
+        hlvtd::network::connectGtReceiver(receiver);
 
-        hlvtd::network::VtdClient client(config.vtd.host_ip, config.vtd.tcp_port);
-        client.connect();
-        std::cout << "[network] connected" << std::endl;
-
-        // Packet parsing will replace this drain loop once the packet format is final.
-        std::array<std::byte, 64 * 1024> buffer{};
-        while (client.receive(buffer.data(), buffer.size()) != 0) {
+        while (hlvtd::network::receiveGtFrame(receiver)) {
+            hlvtd::network::printGtFrame(
+                hlvtd::network::getLatestGtFrame(receiver));
         }
-        std::cout << "[network] VTD closed the connection\n";
+
+        hlvtd::network::disconnectGtReceiver(receiver);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "[error] " << error.what() << '\n';

@@ -2,7 +2,6 @@
 
 #include <limits>
 #include <stdexcept>
-#include <utility>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -21,52 +20,85 @@ namespace {
 
 #ifdef _WIN32
 using NativeSocket = SOCKET;
-constexpr NativeSocket kInvalidSocket = INVALID_SOCKET;
-int lastSocketError() { return WSAGetLastError(); }
-void closeSocket(NativeSocket socket) { closesocket(socket); }
-#else
-using NativeSocket = int;
-constexpr NativeSocket kInvalidSocket = -1;
-int lastSocketError() { return errno; }
-void closeSocket(NativeSocket socket) { ::close(socket); }
-#endif
+constexpr NativeSocket INVALID_NATIVE_SOCKET = INVALID_SOCKET;
 
-NativeSocket asNative(std::intptr_t socket) {
-    return static_cast<NativeSocket>(socket);
+int getLastSocketError() {
+    return WSAGetLastError();
 }
 
-std::runtime_error socketError(const std::string& operation, int error) {
-    return std::runtime_error(operation + " failed (socket error " + std::to_string(error) + ")");
+void closeNativeSocket(NativeSocket socket) {
+    closesocket(socket);
+}
+#else
+using NativeSocket = int;
+constexpr NativeSocket INVALID_NATIVE_SOCKET = -1;
+
+int getLastSocketError() {
+    return errno;
+}
+
+void closeNativeSocket(NativeSocket socket) {
+    ::close(socket);
+}
+#endif
+
+NativeSocket getNativeSocket(const VtdClientData& client) {
+    return static_cast<NativeSocket>(client.socket);
+}
+
+std::runtime_error makeSocketError(
+    const std::string& operation,
+    int error) {
+    return std::runtime_error(
+        operation + " failed (socket error " + std::to_string(error) + ")");
+}
+
+void enableTcpNoDelay(NativeSocket socket) {
+    const int enabled = 1;
+#ifdef _WIN32
+    setsockopt(
+        socket,
+        IPPROTO_TCP,
+        TCP_NODELAY,
+        reinterpret_cast<const char*>(&enabled),
+        sizeof(enabled));
+#else
+    setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled));
+#endif
 }
 
 }  // namespace
 
-VtdClient::VtdClient(std::string host, std::uint16_t port)
-    : host_(std::move(host)), port_(port) {
-    if (host_.empty()) {
+VtdClientData makeVtdClient(const VtdNetworkConfig& config) {
+    if (config.host_ip.empty()) {
         throw std::invalid_argument("VTD host must not be empty");
     }
-    if (port_ == 0) {
+    if (config.tcp_port == 0) {
         throw std::invalid_argument("VTD TCP port must be between 1 and 65535");
     }
+
+    VtdClientData client;
+    client.host = config.host_ip;
+    client.port = config.tcp_port;
+    return client;
 }
 
-VtdClient::~VtdClient() {
-    disconnect();
+bool isVtdClientConnected(const VtdClientData& client) noexcept {
+    return client.socket != -1;
 }
 
-void VtdClient::connect() {
-    if (isConnected()) {
+void connectVtdClient(VtdClientData& client) {
+    if (isVtdClientConnected(client)) {
         return;
     }
 
 #ifdef _WIN32
     WSADATA data{};
-    const int startup_result = WSAStartup(MAKEWORD(2, 2), &data);
-    if (startup_result != 0) {
-        throw socketError("WSAStartup", startup_result);
+    const int startupResult = WSAStartup(MAKEWORD(2, 2), &data);
+    if (startupResult != 0) {
+        throw makeSocketError("WSAStartup", startupResult);
     }
-    winsock_initialized_ = true;
+    client.winsockInitialized = true;
 #endif
 
     addrinfo hints{};
@@ -75,70 +107,71 @@ void VtdClient::connect() {
     hints.ai_protocol = IPPROTO_TCP;
 
     addrinfo* addresses = nullptr;
-    const std::string port_text = std::to_string(port_);
-    const int lookup_result = getaddrinfo(host_.c_str(), port_text.c_str(), &hints, &addresses);
-    if (lookup_result != 0) {
+    const std::string portText = std::to_string(client.port);
+    const int lookupResult =
+        getaddrinfo(client.host.c_str(), portText.c_str(), &hints, &addresses);
+    if (lookupResult != 0) {
 #ifdef _WIN32
-        const std::string detail = gai_strerrorA(lookup_result);
+        const std::string detail = gai_strerrorA(lookupResult);
 #else
-        const std::string detail = gai_strerror(lookup_result);
+        const std::string detail = gai_strerror(lookupResult);
 #endif
-        disconnect();
-        throw std::runtime_error("cannot resolve VTD host '" + host_ + "': " + detail);
+        disconnectVtdClient(client);
+        throw std::runtime_error(
+            "cannot resolve VTD host '" + client.host + "': " + detail);
     }
 
-    int connection_error = 0;
-    for (addrinfo* address = addresses; address != nullptr; address = address->ai_next) {
+    int connectionError = 0;
+    for (addrinfo* address = addresses;
+         address != nullptr;
+         address = address->ai_next) {
         NativeSocket candidate =
             ::socket(address->ai_family, address->ai_socktype, address->ai_protocol);
-        if (candidate == kInvalidSocket) {
-            connection_error = lastSocketError();
+        if (candidate == INVALID_NATIVE_SOCKET) {
+            connectionError = getLastSocketError();
             continue;
         }
 
-        const int no_delay = 1;
-#ifdef _WIN32
-        setsockopt(candidate, IPPROTO_TCP, TCP_NODELAY,
-                   reinterpret_cast<const char*>(&no_delay), sizeof(no_delay));
-#else
-        setsockopt(candidate, IPPROTO_TCP, TCP_NODELAY, &no_delay, sizeof(no_delay));
-#endif
-
-        if (::connect(candidate, address->ai_addr, static_cast<int>(address->ai_addrlen)) == 0) {
-            socket_ = static_cast<std::intptr_t>(candidate);
+        enableTcpNoDelay(candidate);
+        if (::connect(
+                candidate,
+                address->ai_addr,
+                static_cast<int>(address->ai_addrlen)) == 0) {
+            client.socket = static_cast<std::intptr_t>(candidate);
             break;
         }
 
-        connection_error = lastSocketError();
-        closeSocket(candidate);
+        connectionError = getLastSocketError();
+        closeNativeSocket(candidate);
     }
     freeaddrinfo(addresses);
 
-    if (!isConnected()) {
-        disconnect();
-        throw socketError("connection to " + host_ + ':' + port_text, connection_error);
+    if (!isVtdClientConnected(client)) {
+        disconnectVtdClient(client);
+        throw makeSocketError(
+            "connection to " + client.host + ':' + portText,
+            connectionError);
     }
 }
 
-void VtdClient::disconnect() noexcept {
-    if (isConnected()) {
-        closeSocket(asNative(socket_));
-        socket_ = -1;
+void disconnectVtdClient(VtdClientData& client) noexcept {
+    if (isVtdClientConnected(client)) {
+        closeNativeSocket(getNativeSocket(client));
+        client.socket = -1;
     }
 #ifdef _WIN32
-    if (winsock_initialized_) {
+    if (client.winsockInitialized) {
         WSACleanup();
-        winsock_initialized_ = false;
+        client.winsockInitialized = false;
     }
 #endif
 }
 
-bool VtdClient::isConnected() const noexcept {
-    return socket_ != -1;
-}
-
-void VtdClient::sendAll(const void* data, std::size_t size) {
-    if (!isConnected()) {
+void sendVtdData(
+    VtdClientData& client,
+    const void* data,
+    std::size_t size) {
+    if (!isVtdClientConnected(client)) {
         throw std::runtime_error("cannot send: VTD client is not connected");
     }
     if (size != 0 && data == nullptr) {
@@ -154,16 +187,18 @@ void VtdClient::sendAll(const void* data, std::size_t size) {
             remaining > static_cast<std::size_t>(std::numeric_limits<int>::max())
                 ? std::numeric_limits<int>::max()
                 : remaining);
-        const int result = ::send(asNative(socket_), bytes + sent, chunk, 0);
+        const int result =
+            ::send(getNativeSocket(client), bytes + sent, chunk, 0);
         if (result == SOCKET_ERROR) {
 #else
-        const auto result = ::send(asNative(socket_), bytes + sent, remaining, 0);
+        const auto result =
+            ::send(getNativeSocket(client), bytes + sent, remaining, 0);
         if (result < 0) {
             if (errno == EINTR) {
                 continue;
             }
 #endif
-            throw socketError("send", lastSocketError());
+            throw makeSocketError("send", getLastSocketError());
         }
         if (result == 0) {
             throw std::runtime_error("send failed: VTD closed the connection");
@@ -172,8 +207,11 @@ void VtdClient::sendAll(const void* data, std::size_t size) {
     }
 }
 
-std::size_t VtdClient::receive(void* buffer, std::size_t capacity) {
-    if (!isConnected()) {
+std::size_t receiveVtdData(
+    VtdClientData& client,
+    void* buffer,
+    std::size_t capacity) {
+    if (!isVtdClientConnected(client)) {
         throw std::runtime_error("cannot receive: VTD client is not connected");
     }
     if (capacity == 0) {
@@ -188,16 +226,17 @@ std::size_t VtdClient::receive(void* buffer, std::size_t capacity) {
         capacity > static_cast<std::size_t>(std::numeric_limits<int>::max())
             ? std::numeric_limits<int>::max()
             : capacity);
-    const int result = ::recv(asNative(socket_), static_cast<char*>(buffer), chunk, 0);
+    const int result =
+        ::recv(getNativeSocket(client), static_cast<char*>(buffer), chunk, 0);
     if (result == SOCKET_ERROR) {
 #else
     std::ptrdiff_t result = 0;
     do {
-        result = ::recv(asNative(socket_), buffer, capacity, 0);
+        result = ::recv(getNativeSocket(client), buffer, capacity, 0);
     } while (result < 0 && errno == EINTR);
     if (result < 0) {
 #endif
-        throw socketError("receive", lastSocketError());
+        throw makeSocketError("receive", getLastSocketError());
     }
     return static_cast<std::size_t>(result);
 }

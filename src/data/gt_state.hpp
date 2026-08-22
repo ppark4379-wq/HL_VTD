@@ -65,4 +65,4 @@ struct GtFrame
     std::array<ObjectState, 30> objects;
 
     TrafficLightState trafficLight;
-};
+};jdy
