@@ -155,13 +155,13 @@ repo/
 ### Build
 
 ```bash
-./scripts/build.sh
+bash scripts/build.sh
 ```
 
 ### Run
 
 ```bash
-./scripts/run.sh
+bash scripts/run.sh
 ```
 
 ---

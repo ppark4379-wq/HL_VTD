@@ -1,0 +1,8 @@
+vtd:
+  host_ip: "165.246.170.76"
+  tcp_port: 9910
+  rtsp_port: 8554
+
+controller:
+  ip: "165.246.170.86"
+  udp_port: 9912
