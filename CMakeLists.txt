@@ -17,6 +17,7 @@ add_executable(hl_vtd
     src/control/controller.cpp
     src/control/control_process.cpp
     src/control/control_config.cpp
+    src/logger/logger.cpp
     src/utils/csv_utils.cpp
     src/utils/math_utils.cpp
     src/data/gt/gt_processor.cpp

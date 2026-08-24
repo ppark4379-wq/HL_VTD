@@ -1,0 +1,4 @@
+scenario_id,category,scenario_file,map_area,eval_codes,test_purpose,ego_speed_mps,object_condition,expected_behavior,status,notes
+B03,basic,,ZONE_CURVE_LOW_01,S2.1.01;S2.1.02;S2.1.03,커브 차로 유지 및 상시 법규 로그 확인,,,차로 유지,planned,설계 예시 행이며 실제 Scenario 파일은 미제작
+T02,traffic,,ZONE_INTERSECTION_01,S5.1.01,적색신호 정지,,,적색신호 전에 정지,planned,설계 예시 행이며 실제 Scenario 파일은 미제작
+O01,obstacle,,ZONE_STRAIGHT_01,S6.1.01,전방 장애물 또는 도로 파손 대응,,front obstacle,감속·정지 또는 안전 회피,planned,설계 예시 행이며 실제 Scenario 파일은 미제작

@@ -67,3 +67,7 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Local scenario design/reference files
+/scenario/scenario_README.md
+/scenario/scenario_README.md:Zone.Identifier

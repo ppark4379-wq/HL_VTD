@@ -4,10 +4,12 @@
 #include "network/send/control_sender.hpp"
 #include "control/control_config.hpp"
 #include "control/control_process.hpp"
+#include "logger/logger.hpp"
 #include "planning/planning_process.hpp"
 #include "data/gt/gt_processor.hpp"
 #include "planning/reference_path_generator.hpp"
 
+#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -21,6 +23,8 @@ struct CliOptions {
     std::filesystem::path config_path = "config/network.yaml";
     std::filesystem::path control_config_path = "config/control.yaml";
     std::filesystem::path reference_path = "output/reference_path.csv";
+    CsvLoggerConfig logger;
+    bool logging = false;
     bool check_config_only = false;
     bool receive_only = false;
     bool debug_objects = false;
@@ -45,6 +49,22 @@ CliOptions parseOptions(int argc, char* argv[]) {
                 throw std::invalid_argument("--path requires a file path");
             }
             options.reference_path = argv[i];
+        } else if (argument == "--log") {
+            if (++i >= argc) {
+                throw std::invalid_argument("--log requires a file path");
+            }
+            options.logger.outputPath = argv[i];
+            options.logging = true;
+        } else if (argument == "--scenario-id") {
+            if (++i >= argc) {
+                throw std::invalid_argument("--scenario-id requires a value");
+            }
+            options.logger.scenarioId = argv[i];
+        } else if (argument == "--run-id") {
+            if (++i >= argc) {
+                throw std::invalid_argument("--run-id requires a value");
+            }
+            options.logger.runId = argv[i];
         } else if (argument == "--check-config") {
             options.check_config_only = true;
         } else if (argument == "--receive-only") {
@@ -54,7 +74,8 @@ CliOptions parseOptions(int argc, char* argv[]) {
         } else if (argument == "--help" || argument == "-h") {
             std::cout
                 << "Usage: hl_vtd [--config PATH] [--control-config PATH] "
-                   "[--path PATH] [--receive-only] [--debug-objects] "
+                   "[--path PATH] [--log CSV] [--scenario-id ID] "
+                   "[--run-id ID] [--receive-only] [--debug-objects] "
                    "[--check-config]\n";
             std::exit(0);
         } else {
@@ -130,9 +151,17 @@ int main(int argc, char* argv[]) {
         ControlProcessData control;
         control.controller.config = drivingConfig.controller;
 
+        CsvLoggerData logger;
+        if (options.logging) {
+            initializeCsvLogger(logger, options.logger);
+            std::cout << "[logger] output: " << logger.outputPath << '\n';
+        }
+
         auto receiver = makeGtReceiver(config.vtd);
         connectGtReceiver(receiver);
 
+        using LogClock = std::chrono::steady_clock;
+        const auto logStartTime = LogClock::now();
         std::size_t frameCount = 0;
 
         while (receiveGtFrame(receiver)) {
@@ -146,6 +175,14 @@ int main(int argc, char* argv[]) {
 
             if (!options.receive_only) {
                 sendControlCommand(receiver.client, command);
+            }
+
+            if (options.logging) {
+                const double elapsedWallTime = std::chrono::duration<double>(
+                    LogClock::now() - logStartTime).count();
+                const LogFrameInput logInput{
+                    frameCount, elapsedWallTime, gt, plan, control};
+                runLoggingProcess(logger, logInput);
             }
 
             if (frameCount % 10 == 0) {
