@@ -38,3 +38,22 @@ void printGtFrame(const GtFrame& gt) {
     printEgoState(gt.ego);
     printObjectStates(gt);
 }
+
+void printWorldObjectState(const WorldObjectState& object) {
+    std::cout << "[object] id=" << object.raw.id
+              << " x=" << object.raw.x
+              << " y=" << object.raw.y
+              << " laneValid=" << object.laneValid
+              << " roadId=" << object.roadId
+              << " laneId=" << object.laneId
+              << " pathValid=" << object.pathValid
+              << " pathS=" << object.pathS
+              << " pathD=" << object.pathD
+              << '\n';
+}
+
+void printWorldObjectStates(const WorldState& world) {
+    for (const WorldObjectState& object : world.objects) {
+        printWorldObjectState(object);
+    }
+}

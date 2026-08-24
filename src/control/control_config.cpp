@@ -51,6 +51,14 @@ bool setConfigValue(const map<string, double>& values,
     return true;
 }
 
+bool isDrivingConfigValid(const DrivingConfig& config) {
+    return config.controller.maxErrorDerivative > 0.0 &&
+           config.controller.maxAccelerationRate > 0.0 &&
+           config.runtime.nominalDt > 0.0 &&
+           config.runtime.speedFilterAlpha > 0.0 &&
+           config.runtime.speedFilterAlpha <= 1.0;
+}
+
 // YAML의 모든 튜닝값을 실제 플래너/제어기 설정으로 로드한다.
 bool loadDrivingConfig(DrivingConfig& config,
                        const string& yamlPath) {
@@ -80,12 +88,19 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.controller.kp) &&
         setConfigValue(values, "speed_pd.kd",
                        config.controller.kd) &&
+        setConfigValue(values, "speed_pd.max_error_derivative",
+                       config.controller.maxErrorDerivative) &&
         setConfigValue(values, "limits.min_acceleration",
                        config.controller.minAcceleration) &&
         setConfigValue(values, "limits.max_acceleration",
                        config.controller.maxAcceleration) &&
+        setConfigValue(values, "limits.max_acceleration_rate",
+                       config.controller.maxAccelerationRate) &&
         setConfigValue(values, "limits.max_steering",
                        config.controller.maxSteering) &&
         setConfigValue(values, "runtime.nominal_dt",
-                       config.nominalDt);
+                       config.runtime.nominalDt) &&
+        setConfigValue(values, "runtime.speed_filter_alpha",
+                       config.runtime.speedFilterAlpha) &&
+        isDrivingConfigValid(config);
 }

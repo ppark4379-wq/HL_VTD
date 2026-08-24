@@ -10,6 +10,8 @@ struct ControllerConfig {
     double kd{0.15};
     double minAcceleration{-4.0};
     double maxAcceleration{2.0};
+    double maxErrorDerivative{10.0};
+    double maxAccelerationRate{6.0};
     double maxSteering{0.48};
 };
 
@@ -17,7 +19,9 @@ struct ControllerConfig {
 struct ControllerData {
     ControllerConfig config;
     double previousSpeedError{};
+    double previousAcceleration{};
     bool hasPreviousError{};
+    bool hasPreviousAcceleration{};
 };
 
 // VTD로 전송할 제어 명령. 직렬화 시 padding 없이 별도로 패킷화해야 한다.
@@ -32,14 +36,22 @@ struct ControlProcessData {
     ControllerData controller;
     double previousX{};
     double previousY{};
+    double rawEgoSpeed{};
     double egoSpeed{};
     bool hasPreviousPosition{};
+    bool hasSpeedEstimate{};
     ControlCommand latestCommand;
+};
+
+// GT 프레임 기반 제어 주기와 속도 필터 설정.
+struct ControlRuntimeConfig {
+    double nominalDt{0.05};
+    double speedFilterAlpha{0.25};
 };
 
 // control.yaml에서 읽은 전체 주행 설정.
 struct DrivingConfig {
     PathPlannerConfig planner;
     ControllerConfig controller;
-    double nominalDt{0.02};
+    ControlRuntimeConfig runtime;
 };

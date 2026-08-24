@@ -17,6 +17,7 @@ speed:
 speed_pd:
   kp: 1.0
   kd: 0.15
+  max_error_derivative: 10.0      # [m/s^2] D항 순간 증폭 제한
 
 # 제어기 출력 포화값
 # max_steering은 제공된 차량 제원의 MaxSteering 값이다.
@@ -24,8 +25,10 @@ speed_pd:
 limits:
   min_acceleration: -4.0          # [m/s^2] 임시 PD 출력 하한
   max_acceleration: 2.0           # [m/s^2] 임시 PD 출력 상한
+  max_acceleration_rate: 6.0      # [m/s^3] 프레임 간 가속도 명령 변화 제한
   max_steering: 0.48              # [rad] 차량 제원에 명시된 최대 조향각
 
-# 제어 주기. 실제 루프에서 계산한 dt를 우선 사용한다.
+# GT 패킷 기준 제어 주기와 위치 차분 속도 필터.
 runtime:
-  nominal_dt: 0.02                # [s] 50 Hz
+  nominal_dt: 0.05                # [s] 20 Hz
+  speed_filter_alpha: 0.25        # (0, 1], 작을수록 부드럽게 반영

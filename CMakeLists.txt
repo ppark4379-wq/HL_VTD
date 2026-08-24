@@ -12,11 +12,14 @@ add_executable(hl_vtd
     src/network/send/control_sender.cpp
     src/planning/path_planner.cpp
     src/planning/planning_process.cpp
+    src/planning/reference_path_generator.cpp
+    src/data/map/map_loader.cpp
     src/control/controller.cpp
     src/control/control_process.cpp
     src/control/control_config.cpp
     src/utils/csv_utils.cpp
     src/utils/math_utils.cpp
+    src/data/gt/gt_processor.cpp
 )
 
 target_compile_features(hl_vtd PRIVATE cxx_std_17)

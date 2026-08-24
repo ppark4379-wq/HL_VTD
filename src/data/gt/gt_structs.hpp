@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 // VTD에서 수신한 Ego 차량의 GT 상태.
 struct EgoState {
@@ -32,9 +33,44 @@ struct TrafficLightState {
     std::uint8_t state{};
 };
 
-// TCP/UDP 패킷 하나를 파싱해 저장하는 전체 GT 프레임.
+// TCP 패킷 하나를 파싱해 저장하는 전체 GT 프레임.
 struct GtFrame {
     EgoState ego;
     std::array<ObjectState, 30> objects;
+    TrafficLightState trafficLight;
+};
+
+
+// ---------------- 판제용 Object 정보 ----------------
+
+// BEV 상의 점 하나
+struct Point2D {
+    double x{};
+    double y{};
+};
+
+// 회전된 Bounding Box의 네 꼭짓점
+struct Obb2D {
+    std::array<Point2D, 4> corners{};
+};
+
+// 판제에서 사용할 Object 상태
+struct WorldObjectState {
+    ObjectState raw;
+
+    Obb2D obb;
+
+    bool laneValid{};
+    int roadId{};
+    int laneId{};
+
+    bool pathValid{};
+    double pathS{};
+    double pathD{};
+};
+
+struct WorldState {
+    EgoState ego;
+    std::vector<WorldObjectState> objects;
     TrafficLightState trafficLight;
 };

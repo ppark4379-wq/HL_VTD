@@ -5,8 +5,9 @@
 #include "control/control_config.hpp"
 #include "control/control_process.hpp"
 #include "planning/planning_process.hpp"
+#include "data/gt/gt_processor.hpp"
+#include "planning/reference_path_generator.hpp"
 
-#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -22,6 +23,7 @@ struct CliOptions {
     std::filesystem::path reference_path = "output/reference_path.csv";
     bool check_config_only = false;
     bool receive_only = false;
+    bool debug_objects = false;
 };
 
 CliOptions parseOptions(int argc, char* argv[]) {
@@ -47,10 +49,13 @@ CliOptions parseOptions(int argc, char* argv[]) {
             options.check_config_only = true;
         } else if (argument == "--receive-only") {
             options.receive_only = true;
+        } else if (argument == "--debug-objects") {
+            options.debug_objects = true;
         } else if (argument == "--help" || argument == "-h") {
             std::cout
                 << "Usage: hl_vtd [--config PATH] [--control-config PATH] "
-                   "[--path PATH] [--receive-only] [--check-config]\n";
+                   "[--path PATH] [--receive-only] [--debug-objects] "
+                   "[--check-config]\n";
             std::exit(0);
         } else {
             throw std::invalid_argument("unknown argument: " + argument);
@@ -114,29 +119,30 @@ int main(int argc, char* argv[]) {
                 "cannot load reference path: " + options.reference_path.string());
         }
 
+        PathGeneratorData mapData;
+        const std::string xodrPath =
+            "src/data/map/HL_FMA_VTD_LivingLab.xodr";
+        if (!loadMap(mapData, xodrPath)) {
+            throw std::runtime_error("cannot load XODR map: " + xodrPath);
+        }
+        std::cout << "[map] XODR loaded\n";
+
         ControlProcessData control;
         control.controller.config = drivingConfig.controller;
 
         auto receiver = makeGtReceiver(config.vtd);
         connectGtReceiver(receiver);
 
-        using Clock = std::chrono::steady_clock;
-        auto previousTime = Clock::now();
         std::size_t frameCount = 0;
 
         while (receiveGtFrame(receiver)) {
             const GtFrame& gt = getLatestGtFrame(receiver);
-            const auto currentTime = Clock::now();
-            double dt = std::chrono::duration<double>(
-                currentTime - previousTime).count();
-            previousTime = currentTime;
-            if (frameCount == 0 || dt <= 0.0 || dt > 1.0) {
-                dt = drivingConfig.nominalDt;
-            }
+            const WorldState world =
+                makeWorldState(gt, mapData, planner.waypoints);
 
-            const PathPlan plan = runPlanningProcess(planner, gt);
+            const PathPlan plan = runPlanningProcess(planner, gt, world);
             const ControlCommand command =
-                runControlProcess(control, gt, plan, dt);
+                runControlProcess(control, gt, plan, drivingConfig.runtime);
 
             if (!options.receive_only) {
                 sendControlCommand(receiver.client, command);
@@ -144,6 +150,9 @@ int main(int argc, char* argv[]) {
 
             if (frameCount % 10 == 0) {
                 printDrivingStatus(gt, plan, control);
+                if (options.debug_objects) {
+                    printWorldObjectStates(world);
+                }
             }
             ++frameCount;
 

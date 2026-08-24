@@ -10,5 +10,7 @@ bool initializePlanning(PathPlannerData& planner,
                         const std::string& referencePathCsv);
 
 // GT 한 프레임을 입력받아 한 번의 경로추종 플래닝을 수행한다.
-PathPlan runPlanningProcess(PathPlannerData& planner,
-                            const GtFrame& gt);
+PathPlan runPlanningProcess(
+    PathPlannerData& planner,
+    const GtFrame& gt,
+    const WorldState& world);

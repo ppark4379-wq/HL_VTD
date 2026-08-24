@@ -11,7 +11,12 @@ bool initializePlanning(PathPlannerData& planner,
 }
 
 // 경로추종 플래닝의 최상위 호출 흐름.
-PathPlan runPlanningProcess(PathPlannerData& planner,
-                            const GtFrame& gt) {
+PathPlan runPlanningProcess(
+    PathPlannerData& planner,
+    const GtFrame& gt,
+    const WorldState& world) {
+    // 현재 경로 추종은 기존 GT의 Ego 정보를 사용한다.
+    // 이후 장애물/차선 기반 판단은 WorldState를 사용한다.
+    (void)world;
     return runPurePursuit(planner, gt);
 }
