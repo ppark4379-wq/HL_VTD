@@ -1,4 +1,9 @@
-scenario_id,category,scenario_file,map_area,eval_codes,test_purpose,ego_speed_mps,object_condition,expected_behavior,status,notes
-B03,basic,,ZONE_CURVE_LOW_01,S2.1.01;S2.1.02;S2.1.03,커브 차로 유지 및 상시 법규 로그 확인,,,차로 유지,planned,설계 예시 행이며 실제 Scenario 파일은 미제작
-T02,traffic,,ZONE_INTERSECTION_01,S5.1.01,적색신호 정지,,,적색신호 전에 정지,planned,설계 예시 행이며 실제 Scenario 파일은 미제작
-O01,obstacle,,ZONE_STRAIGHT_01,S6.1.01,전방 장애물 또는 도로 파손 대응,,front obstacle,감속·정지 또는 안전 회피,planned,설계 예시 행이며 실제 Scenario 파일은 미제작
+scenario_id,category,package_path,eval_codes,status,notes
+B01,basic,basic/B01_lane_keep,S2.1.01,packaged,XML·route·manifest 정적 검증 대상
+B02,basic,basic/B02_speed_limit,S1.1.01,route_ready,팀원 XML·route 존재; manifest 미작성
+B03,basic,basic/B03_curve_lane_keep,S2.1.01;S2.1.02;S2.1.03,route_ready,팀원 XML·route 존재; manifest 미작성
+T01,traffic,traffic/T01_green_light,S5.1.03,route_ready,팀원 XML·route 존재; manifest 미작성
+T02,traffic,traffic/T02_red_light,S5.1.01,packaged,SignalController 20 적색 유지; 실제 판제 주행 검증 전
+V03,vehicle,vehicle/V03_lead_brake,internal.dynamic_vehicle_brake,packaged,내부 동적 이벤트 Tag; 실제 판제 주행 검증 전
+P01,pedestrian,pedestrian/P01_pedestrian_crossing,,route_ready,팀원 XML·route 존재; 평가 코드 미확정; manifest 미작성
+O01,obstacle,obstacle/O01_front_obstacle,S6.1.01,route_ready,팀원 XML·route 존재; manifest 미작성

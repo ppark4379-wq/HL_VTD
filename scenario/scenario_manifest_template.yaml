@@ -1,0 +1,42 @@
+# Phase 1 common manifest template.
+# With route.mode=packaged, route.default is relative to the package directory.
+# Validation tolerances below are project preflight settings, not competition
+# scoring thresholds. Dynamic-event tags are internal unless explicitly mapped
+# to an official evaluation code.
+schema_version: 1
+
+scenario:
+  id:
+  category:
+  name:
+  description:
+  file:
+  format:
+  map:
+
+runtime:
+  simulator:
+  simulator_version:
+
+route:
+  default:
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m:
+  start_heading_tolerance_deg:
+
+parameters: {}
+
+entities: []
+
+events: []
+
+expected_outcomes: []
+
+evaluation:
+  codes: []
+  required_metrics: []
+  thresholds_status: pending

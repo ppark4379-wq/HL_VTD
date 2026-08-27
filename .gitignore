@@ -68,6 +68,10 @@ vcpkg_installed/
 Testing/
 .cache/
 
+# Python bytecode cache
+__pycache__/
+*.pyc
+
 # Local scenario design/reference files
-/scenario/scenario_README.md
-/scenario/scenario_README.md:Zone.Identifier
+/scenario/SCENARIO_DESIGN_V2.md
+/scenario/SCENARIO_DESIGN_V2.md:Zone.Identifier

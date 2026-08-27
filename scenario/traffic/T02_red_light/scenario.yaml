@@ -1,0 +1,69 @@
+schema_version: 1
+
+scenario:
+  id: T02
+  category: traffic
+  name: red_light
+  description: 적색신호 정지
+  file: T02_red_light.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+
+  red_phase_duration_s:
+    type: float
+    unit: s
+    default: 60.0
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+
+  - name: SignalController20
+    type: traffic_light
+    role: relevant_signal
+    source_id: 20
+
+events:
+  - name: red_light_controller_20
+    subject: SignalController20
+    trigger:
+      type: simulation_start
+    action:
+      type: maintain_signal_state
+      state: stop
+      duration_parameter: red_phase_duration_s
+
+expected_outcomes:
+  - detect_red_light
+  - stop_before_stop_line
+
+evaluation:
+  codes:
+    - S5.1.01
+  required_metrics:
+    - traffic_light_state
+    - ego_speed
+    - stop_line_distance
+    - target_accel
+  thresholds_status: pending

@@ -702,21 +702,20 @@ Catalog의 현재 스키마:
 ```text
 scenario_id
 category
-scenario_file
-map_area
+package_path
 eval_codes
-test_purpose
-ego_speed_mps
-object_condition
-expected_behavior
 status
 notes
 ```
 
+`package_path`는 Scenario Package 폴더의 `scenario/` 기준 상대경로다(예:
+`vehicle/V03_lead_brake`). 상세 설정은 각 Package의 `scenario.yaml`이
+Source of Truth이며, Catalog는 전체 목록과 진행 상태만 관리한다.
+
 하나의 Scenario가 여러 평가항목과 연결될 수 있으므로 `eval_codes`에는
-세미콜론으로 구분한 복수 코드를 기록할 수 있다. 현재 실제 VTD Scenario
-파일은 없으므로 Catalog 행은 구조 확인용 `planned` 예시이며, 실제
-제작된 Case로 해석하지 않는다.
+세미콜론으로 구분한 복수 코드를 기록할 수 있다. 시나리오별 현재 구현 및
+검증 상태는 `scenario_catalog.csv`에서 관리하며, README에는 개별
+시나리오의 현재 상태를 중복 기록하지 않는다.
 
 검증 결과는 기존 구조대로 `output/verification/` 아래에 저장한다.
 

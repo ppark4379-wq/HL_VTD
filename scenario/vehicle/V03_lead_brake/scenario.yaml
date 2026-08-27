@@ -1,0 +1,94 @@
+schema_version: 1
+
+scenario:
+  id: V03
+  category: vehicle
+  name: lead_brake
+  description: 선행차 급정거 대응
+  file: V03_lead_brake.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 8.333333333333334
+
+  lead_speed_mps:
+    type: float
+    unit: m/s
+    default: 5.555555555555555
+
+  trigger_distance_m:
+    type: float
+    unit: m
+    default: 14.0
+
+  lead_target_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+
+  lead_speed_change_rate_mps2:
+    type: float
+    unit: m/s2
+    default: 35.0
+
+  action_delay_s:
+    type: float
+    unit: s
+    default: 0.0
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+
+  - name: "New Player01"
+    type: vehicle
+    role: relevant_object
+
+events:
+  - name: lead_vehicle_brake
+    subject: "New Player01"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_parameter: trigger_distance_m
+    action:
+      type: speed_change
+      target_speed_parameter: lead_target_speed_mps
+      rate_parameter: lead_speed_change_rate_mps2
+      delay_parameter: action_delay_s
+
+expected_outcomes:
+  - detect_relevant_object
+  - decelerate
+  - avoid_collision
+
+evaluation:
+  codes:
+    - internal.dynamic_vehicle_brake
+  required_metrics:
+    - object_gap
+    - relative_speed
+    - ttc
+    - ego_speed
+    - target_accel
+    - collision
+  thresholds_status: pending
