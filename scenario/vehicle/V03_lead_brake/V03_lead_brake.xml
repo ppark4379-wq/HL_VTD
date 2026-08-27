@@ -17,26 +17,25 @@
             <Waypoint PathOption="shortest" s="7.7725832019308314e+01" TrackId="1928"/>
         </Path>
         <Player>
-            <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_ActiveBlue" Name="Ego"/>
+            <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_Black" Name="Ego"/>
             <Init>
-                <Speed Value="0.0000000000000000e+00"/>
-                <PosAbsolute X="3.4422927856445312e+02" Y="-1.1028851318359375e+02" Z="4.1500000000000000e+01" Direction="5.2900052038517895e+00" AlignToRoad="true"/>
+                <Speed Value="8.3333333333333339e+00"/>
+                <PosAbsolute X="3.5510278701782227e+02" Y="-1.2765158843994141e+02" Z="4.1637069847530697e+01" Direction="5.2539297829833229e+00" AlignToRoad="true"/>
             </Init>
         </Player>
         <Player>
-            <Description Driver="KeepLaneDriver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="LeadVehicle"/>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player01"/>
             <Init>
-                <Speed Value="8.3333333333333339e+00"/>
-                <PosRelative Orientation="1" Distance="3.0000000000000000e+01" Lane="-1" Pivot="Ego" t="0.0000000000000000e+00"/>
-                <EditorPos X="3.6362835339262995e+02" Y="-1.3413667296361845e+02" Direction="5.3035049556163694e+00"/>
+                <Speed Value="5.5555555555555554e+00"/>
+                <PosAbsolute X="3.7333444213867188e+02" Y="-1.5411180114746094e+02" Z="4.2774352385320945e+01" Direction="5.3837625928542376e+00" AlignToRoad="true"/>
             </Init>
         </Player>
         <PlayerActions Player="Ego"/>
-        <PlayerActions Player="LeadVehicle">
-            <Action Name="lead_brake_trigger">
-                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="3.5000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="3.5000000000000000e+01" X="3.4422927856445312e+02" Y="-1.1028851318359375e+02"/>
-                <SpeedChange Rate="6.0000000000000000e+00" Target="0.0000000000000000e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="5.0000000000000000e+00"/>
+        <PlayerActions Player="New Player01">
+            <Action Name="">
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.4000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="1.4000000000000000e+01" X="3.5510278701782227e+02" Y="-1.2765158843994141e+02"/>
+                <SpeedChange Rate="3.5000000000000000e+01" Target="0.0000000000000000e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
             </Action>
         </PlayerActions>
     </TrafficControl>
