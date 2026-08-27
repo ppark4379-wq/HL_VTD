@@ -1,0 +1,50 @@
+schema_version: 1
+
+scenario:
+  id: B02
+  category: basic
+  name: speed_limit
+  description: 제한속도 준수 및 장거리 기본 경로 추종
+  file: B02_speed_limit.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 16.666666666666668
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+
+events: []
+
+expected_outcomes:
+  - follow_route
+  - comply_with_speed_limit
+
+evaluation:
+  codes:
+    - S1.1.01
+  required_metrics:
+    - ego_speed
+    - current_speed_limit
+    - overspeed
+  thresholds_status: pending

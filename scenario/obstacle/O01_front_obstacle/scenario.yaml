@@ -1,0 +1,115 @@
+schema_version: 1
+
+scenario:
+  id: O01
+  category: obstacle
+  name: front_obstacle
+  description: 전방 정적 장애물 및 도로 파손 구간 대응
+  file: O01_front_obstacle.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+
+  - name: "New Player"
+    type: vehicle
+    role: obstacle_candidate
+
+  - name: "New Player01"
+    type: vehicle
+    role: obstacle_candidate
+
+  - name: "New Object"
+    type: obstacle
+    role: obstacle_candidate
+
+  - name: "New Object Copy "
+    type: obstacle
+    role: obstacle_candidate
+
+  - name: "New Object Copy 01"
+    type: obstacle
+    role: obstacle_candidate
+
+  - name: "New Object Copy 02"
+    type: obstacle
+    role: obstacle_candidate
+
+  - name: "New Object Copy 03"
+    type: obstacle
+    role: obstacle_candidate
+
+  - name: "New Object Copy 04"
+    type: obstacle
+    role: obstacle_candidate
+
+  - name: "New Object01"
+    type: obstacle
+    role: obstacle_candidate
+
+  - name: "New Object02"
+    type: obstacle
+    role: obstacle_candidate
+
+  - name: "New Object03"
+    type: obstacle
+    role: obstacle_candidate
+
+  - name: "New Object04"
+    type: obstacle
+    role: obstacle_candidate
+
+  - name: "New Object05"
+    type: obstacle
+    role: obstacle_candidate
+
+  - name: "New Object06"
+    type: obstacle
+    role: obstacle_candidate
+
+  - name: "New Object06 Copy "
+    type: obstacle
+    role: obstacle_candidate
+
+events: []
+
+expected_outcomes:
+  - detect_obstacle
+  - decelerate_or_avoid
+  - avoid_collision
+
+evaluation:
+  codes:
+    - S6.1.01
+  required_metrics:
+    - relevant_object_id
+    - relevant_object_type
+    - object_gap
+    - ttc
+    - ego_speed
+    - target_accel
+    - collision
+  thresholds_status: pending

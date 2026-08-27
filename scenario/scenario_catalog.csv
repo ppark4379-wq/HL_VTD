@@ -1,9 +1,9 @@
 scenario_id,category,package_path,eval_codes,status,notes
 B01,basic,basic/B01_lane_keep,S2.1.01,packaged,XML·route·manifest 정적 검증 대상
-B02,basic,basic/B02_speed_limit,S1.1.01,route_ready,팀원 XML·route 존재; manifest 미작성
-B03,basic,basic/B03_curve_lane_keep,S2.1.01;S2.1.02;S2.1.03,route_ready,팀원 XML·route 존재; manifest 미작성
-T01,traffic,traffic/T01_green_light,S5.1.03,route_ready,팀원 XML·route 존재; manifest 미작성
+B02,basic,basic/B02_speed_limit,S1.1.01,packaged,XML·route·manifest 정적 검증 대상
+B03,basic,basic/B03_curve_lane_keep,S2.1.01;S2.1.02;S2.1.03,packaged,XML·route·manifest 정적 검증 대상
+T01,traffic,traffic/T01_green_light,S5.1.03,packaged,SignalController 12 녹색 유지; 실제 판제 주행 검증 전
 T02,traffic,traffic/T02_red_light,S5.1.01,packaged,SignalController 20 적색 유지; 실제 판제 주행 검증 전
 V03,vehicle,vehicle/V03_lead_brake,internal.dynamic_vehicle_brake,packaged,내부 동적 이벤트 Tag; 실제 판제 주행 검증 전
-P01,pedestrian,pedestrian/P01_pedestrian_crossing,,route_ready,팀원 XML·route 존재; 평가 코드 미확정; manifest 미작성
-O01,obstacle,obstacle/O01_front_obstacle,S6.1.01,route_ready,팀원 XML·route 존재; manifest 미작성
+P01,pedestrian,pedestrian/P01_pedestrian_crossing,internal.dynamic_pedestrian_crossing,packaged,내부 동적 이벤트 Tag; 실제 판제 주행 검증 전
+O01,obstacle,obstacle/O01_front_obstacle,S6.1.01,packaged,XML·route·manifest 정적 검증 대상

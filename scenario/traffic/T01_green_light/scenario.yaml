@@ -1,0 +1,69 @@
+schema_version: 1
+
+scenario:
+  id: T01
+  category: traffic
+  name: green_light
+  description: 녹색신호 정상 통과
+  file: T01_green_light.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+
+  green_phase_duration_s:
+    type: float
+    unit: s
+    default: 15.0
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+
+  - name: SignalController12
+    type: traffic_light
+    role: relevant_signal
+    source_id: 12
+
+events:
+  - name: green_light_controller_12
+    subject: SignalController12
+    trigger:
+      type: simulation_start
+    action:
+      type: maintain_signal_state
+      state: go
+      duration_parameter: green_phase_duration_s
+
+expected_outcomes:
+  - detect_green_light
+  - pass_without_unnecessary_stop
+
+evaluation:
+  codes:
+    - S5.1.03
+  required_metrics:
+    - traffic_light_state
+    - ego_speed
+    - stop_line_distance
+    - stop_line_crossed
+  thresholds_status: pending

@@ -353,12 +353,23 @@ def player_descriptions(root: ET.Element) -> dict[str, ET.Element]:
     return descriptions
 
 
+def named_elements(root: ET.Element, element_name: str) -> dict[str, ET.Element]:
+    elements: dict[str, ET.Element] = {}
+    for element in elements_by_name(root, element_name):
+        name = element.get("Name")
+        if name:
+            elements[name] = element
+    return elements
+
+
 def validate_xml_entities(
     report: ValidationReport,
     manifest: dict[str, Any],
     root: ET.Element,
 ) -> None:
     descriptions = player_descriptions(root)
+    characters = named_elements(root, "Character")
+    objects = named_elements(root, "Object")
     ego = descriptions.get("Ego")
     if ego is None:
         report.add("FAIL", "Ego player not found in Scenario XML")
@@ -383,6 +394,7 @@ def validate_xml_entities(
         if not isinstance(entity, dict):
             continue
         name = entity.get("name")
+        entity_type = entity.get("type")
         source_id = entity.get("source_id")
         if source_id is not None:
             if str(source_id) in signal_ids:
@@ -395,10 +407,27 @@ def validate_xml_entities(
                     "FAIL",
                     f"entity not found: {name} (SignalController {source_id})",
                 )
-        elif name in descriptions:
-            report.add("PASS", f"entity found: {name}")
         else:
-            report.add("FAIL", f"entity not found in Scenario XML: {name}")
+            if entity_type == "vehicle":
+                candidates = descriptions
+                xml_type = "Player"
+            elif entity_type == "pedestrian":
+                candidates = characters
+                xml_type = "Character"
+            elif entity_type in {"object", "obstacle"}:
+                candidates = objects
+                xml_type = "Object"
+            else:
+                candidates = {**descriptions, **characters, **objects}
+                xml_type = "named entity"
+
+            if name in candidates:
+                report.add("PASS", f"entity found: {name} ({xml_type})")
+            else:
+                report.add(
+                    "FAIL",
+                    f"entity not found in Scenario XML: {name} ({xml_type})",
+                )
 
 
 def parse_route_csv(
@@ -497,26 +526,108 @@ def resolve_packaged_route(
     return route_file
 
 
-def ego_initial_pose(root: ET.Element) -> tuple[float, float, float] | None:
+def ego_init_element(root: ET.Element) -> ET.Element | None:
     for player in elements_by_name(root, "Player"):
         description = child_by_name(player, "Description")
         if description is None or description.get("Name") != "Ego":
             continue
-        init = child_by_name(player, "Init")
-        if init is None:
-            return None
-        position = child_by_name(init, "PosAbsolute")
-        if position is None:
-            return None
-        try:
-            return (
-                float(position.attrib["X"]),
-                float(position.attrib["Y"]),
-                float(position.attrib["Direction"]),
-            )
-        except (KeyError, ValueError):
-            return None
+        return child_by_name(player, "Init")
     return None
+
+
+def ego_initial_pose(root: ET.Element) -> tuple[float, float, float] | None:
+    init = ego_init_element(root)
+    if init is None:
+        return None
+    position = child_by_name(init, "PosAbsolute")
+    if position is None:
+        return None
+    try:
+        values = (
+            float(position.attrib["X"]),
+            float(position.attrib["Y"]),
+            float(position.attrib["Direction"]),
+        )
+    except (KeyError, ValueError):
+        return None
+    return values if all(math.isfinite(value) for value in values) else None
+
+
+def validate_pos_route_reference(
+    report: ValidationReport,
+    root: ET.Element,
+    path_ref: ET.Element,
+) -> None:
+    failures_before = report.failure_count
+    path_id = path_ref.get("PathId")
+    if not non_empty_string(path_id):
+        report.add("FAIL", "Ego PosRoute PathRef.PathId is required")
+        return
+
+    matching_paths = [
+        path
+        for path in elements_by_name(root, "Path")
+        if path.get("PathId") == path_id
+    ]
+    if len(matching_paths) != 1:
+        report.add(
+            "FAIL",
+            f"Ego PosRoute PathId={path_id} must resolve to exactly one Path",
+        )
+        return
+
+    for attribute in ("StartS", "TargetS"):
+        raw_value = path_ref.get(attribute)
+        try:
+            value = float(raw_value) if raw_value is not None else math.nan
+        except ValueError:
+            value = math.nan
+        if not math.isfinite(value):
+            report.add(
+                "FAIL",
+                f"Ego PosRoute PathRef.{attribute} must be a finite number",
+            )
+
+    start_lane = path_ref.get("StartLane")
+    try:
+        int(start_lane)
+    except (TypeError, ValueError):
+        report.add("FAIL", "Ego PosRoute PathRef.StartLane must be an integer")
+
+    if not non_empty_string(path_ref.get("EndAction")):
+        report.add("FAIL", "Ego PosRoute PathRef.EndAction is required")
+
+    waypoints = [
+        child
+        for child in matching_paths[0]
+        if local_name(child.tag) == "Waypoint"
+    ]
+    if len(waypoints) < 2:
+        report.add("FAIL", f"Ego PosRoute PathId={path_id} needs two Waypoints")
+    for index, waypoint in enumerate(waypoints):
+        track_id = waypoint.get("TrackId")
+        waypoint_s = waypoint.get("s")
+        try:
+            int(track_id)
+            value = float(waypoint_s) if waypoint_s is not None else math.nan
+        except (TypeError, ValueError):
+            report.add(
+                "FAIL",
+                f"Ego PosRoute PathId={path_id} Waypoint {index} is invalid",
+            )
+            continue
+        if not math.isfinite(value):
+            report.add(
+                "FAIL",
+                f"Ego PosRoute PathId={path_id} Waypoint {index}.s is not finite",
+            )
+
+    if report.failure_count == failures_before:
+        report.add(
+            "PASS",
+            f"Ego PosRoute PathRef: PathId={path_id}, "
+            f"{len(waypoints)} waypoints",
+        )
 
 
 def angle_difference_degrees(left: float, right: float) -> float:
@@ -535,7 +646,20 @@ def validate_start_alignment(
         return
     pose = ego_initial_pose(root)
     if pose is None:
-        report.add("SKIP", "Ego absolute initial pose unavailable")
+        init = ego_init_element(root)
+        pos_route = child_by_name(init, "PosRoute") if init is not None else None
+        if pos_route is None:
+            report.add("FAIL", "Ego initial position is missing or invalid")
+            return
+        path_ref = child_by_name(init, "PathRef")
+        if path_ref is None:
+            report.add("FAIL", "Ego PosRoute requires PathRef")
+            return
+        validate_pos_route_reference(report, root, path_ref)
+        report.add(
+            "SKIP",
+            "PosRoute start distance/heading requires map-based resolution",
+        )
         return
     validation = manifest.get("validation", {})
     distance_tolerance = validation.get("start_position_tolerance_m")

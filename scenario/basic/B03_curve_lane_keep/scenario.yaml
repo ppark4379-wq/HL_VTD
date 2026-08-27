@@ -1,0 +1,55 @@
+schema_version: 1
+
+scenario:
+  id: B03
+  category: basic
+  name: curve_lane_keep
+  description: 곡선 구간 차로 유지 및 도로 경계 준수
+  file: B03_curve_lane_keep.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+
+events: []
+
+expected_outcomes:
+  - follow_route
+  - maintain_lane
+  - avoid_road_boundary_intrusion
+
+evaluation:
+  codes:
+    - S2.1.01
+    - S2.1.02
+    - S2.1.03
+  required_metrics:
+    - lateral_error
+    - lane_boundary_crossing
+    - centerline_crossing
+    - sidewalk_intrusion
+    - command_steering
+  thresholds_status: pending
