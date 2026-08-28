@@ -32,3 +32,4 @@ limits:
 runtime:
   nominal_dt: 0.05                # [s] 20 Hz
   speed_filter_alpha: 0.25        # (0, 1], 작을수록 부드럽게 반영
+  max_valid_position_speed: 80.0  # [m/s] 초기화·리스폰 위치 점프 검출 기준

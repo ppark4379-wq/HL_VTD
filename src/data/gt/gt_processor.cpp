@@ -40,21 +40,22 @@ Obb2D makeObjectObb(const ObjectState& object) {
     return obb;
 }
 
-void projectObjectToPath(
-    WorldObjectState& state,
+void projectPointToPath(
+    double pointX,
+    double pointY,
+    bool& pathValid,
+    double& pathS,
+    double& pathD,
     const std::vector<Waypoint>& path) {
 
     if (path.size() < 2) {
-        state.pathValid = false;
+        pathValid = false;
         return;
     }
 
     double bestDistance = std::numeric_limits<double>::max();
     double bestS = 0.0;
     double bestD = 0.0;
-
-    const double objectX = state.raw.x;
-    const double objectY = state.raw.y;
 
     for (std::size_t i = 0; i + 1 < path.size(); ++i) {
         const Waypoint& p0 = path[i];
@@ -71,8 +72,8 @@ void projectObjectToPath(
 
         // Object를 현재 path segment에 정사영
         double t =
-            ((objectX - p0.x) * dx +
-             (objectY - p0.y) * dy)
+            ((pointX - p0.x) * dx +
+             (pointY - p0.y) * dy)
             / lengthSquared;
 
         // Segment 범위를 벗어나지 않도록 제한
@@ -81,8 +82,8 @@ void projectObjectToPath(
         const double projectedX = p0.x + t * dx;
         const double projectedY = p0.y + t * dy;
 
-        const double offsetX = objectX - projectedX;
-        const double offsetY = objectY - projectedY;
+        const double offsetX = pointX - projectedX;
+        const double offsetY = pointY - projectedY;
 
         const double distance =
             std::hypot(offsetX, offsetY);
@@ -108,10 +109,22 @@ void projectObjectToPath(
     }
 
     if (bestDistance < std::numeric_limits<double>::max()) {
-        state.pathValid = true;
-        state.pathS = bestS;
-        state.pathD = bestD;
+        pathValid = true;
+        pathS = bestS;
+        pathD = bestD;
     }
+}
+
+void projectObjectToPath(
+    WorldObjectState& state,
+    const std::vector<Waypoint>& path) {
+    projectPointToPath(
+        state.raw.x,
+        state.raw.y,
+        state.pathValid,
+        state.pathS,
+        state.pathD,
+        path);
 }
 
 WorldObjectState makeWorldObjectState(
@@ -155,6 +168,26 @@ WorldState makeWorldState(
     WorldState world;
     world.ego = gt.ego;
     world.trafficLight = gt.trafficLight;
+
+    const LaneMatch egoMatch = matchWorldToLane(
+        mapData,
+        gt.ego.x,
+        gt.ego.y,
+        static_cast<double>(gt.ego.heading));
+    world.egoLaneValid = egoMatch.valid;
+    if (egoMatch.valid) {
+        world.egoRoadId = egoMatch.roadId;
+        world.egoLaneId = egoMatch.laneId;
+        world.egoLaneWidth = egoMatch.laneWidth;
+        world.egoLaneCenterDistance = egoMatch.distance;
+    }
+    projectPointToPath(
+        gt.ego.x,
+        gt.ego.y,
+        world.egoPathValid,
+        world.egoPathS,
+        world.egoPathD,
+        globalPath);
 
     for (const auto& object : gt.objects) {
         if (object.id == 0) {

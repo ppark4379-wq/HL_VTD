@@ -47,6 +47,7 @@ struct ControlProcessData {
 struct ControlRuntimeConfig {
     double nominalDt{0.05};
     double speedFilterAlpha{0.25};
+    double maxValidPositionSpeed{80.0};
 };
 
 // control.yaml에서 읽은 전체 주행 설정.

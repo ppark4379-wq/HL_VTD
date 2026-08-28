@@ -56,7 +56,8 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.controller.maxAccelerationRate > 0.0 &&
            config.runtime.nominalDt > 0.0 &&
            config.runtime.speedFilterAlpha > 0.0 &&
-           config.runtime.speedFilterAlpha <= 1.0;
+           config.runtime.speedFilterAlpha <= 1.0 &&
+           config.runtime.maxValidPositionSpeed > 0.0;
 }
 
 // YAML의 모든 튜닝값을 실제 플래너/제어기 설정으로 로드한다.
@@ -102,5 +103,7 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.runtime.nominalDt) &&
         setConfigValue(values, "runtime.speed_filter_alpha",
                        config.runtime.speedFilterAlpha) &&
+        setConfigValue(values, "runtime.max_valid_position_speed",
+                       config.runtime.maxValidPositionSpeed) &&
         isDrivingConfigValid(config);
 }

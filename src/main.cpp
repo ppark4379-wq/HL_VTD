@@ -181,7 +181,7 @@ int main(int argc, char* argv[]) {
                 const double elapsedWallTime = std::chrono::duration<double>(
                     LogClock::now() - logStartTime).count();
                 const LogFrameInput logInput{
-                    frameCount, elapsedWallTime, gt, plan, control};
+                    frameCount, elapsedWallTime, gt, world, plan, control};
                 runLoggingProcess(logger, logInput);
             }
 

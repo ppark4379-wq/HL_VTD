@@ -7,3 +7,4 @@ T02,traffic,traffic/T02_red_light,S5.1.01,packaged,SignalController 20 적색 �
 V03,vehicle,vehicle/V03_lead_brake,internal.dynamic_vehicle_brake,packaged,내부 동적 이벤트 Tag; 실제 판제 주행 검증 전
 P01,pedestrian,pedestrian/P01_pedestrian_crossing,internal.dynamic_pedestrian_crossing,packaged,내부 동적 이벤트 Tag; 실제 판제 주행 검증 전
 O01,obstacle,obstacle/O01_front_obstacle,S6.1.01,packaged,XML·route·manifest 정적 검증 대상
+V04,vehicle,vehicle/V04_cut_in,internal.dynamic_vehicle_cut_in,packaged,내부 동적 이벤트 Tag; 옆 차선 차량 Cut-in; 실제 판제 주행 검증 전

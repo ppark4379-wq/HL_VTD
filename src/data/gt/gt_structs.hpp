@@ -71,6 +71,14 @@ struct WorldObjectState {
 
 struct WorldState {
     EgoState ego;
+    bool egoLaneValid{};
+    int egoRoadId{};
+    int egoLaneId{};
+    double egoLaneWidth{};
+    double egoLaneCenterDistance{};
+    bool egoPathValid{};
+    double egoPathS{};
+    double egoPathD{};
     std::vector<WorldObjectState> objects;
     TrafficLightState trafficLight;
 };

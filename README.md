@@ -1,168 +1,141 @@
-## Architecture
+# HL_VTD
+
+VTD Ground Truth를 수신해 경로를 계획하고 Ego 제어 명령을 전송하는 HL FMA 자율주행 제어기 프로젝트입니다.
 
 ```text
-VTD
- ↓
-Network
- ↓
-Data
- ↓
-Planning
- ↓
-Control
- ↓
-VTD
+VTD → Network → GT Data → Planning → Control → VTD
+                              ↓
+                            Logger
 ```
 
-Logger는 각 단계의 상태와 제어값을 기록합니다.
-
----
-
-## Directory Structure
+## 디렉터리 구조
 
 ```text
-## Directory Structure
-
-repo/
-├── README.md
-│   # 프로젝트 소개 / 실행 방법 / Git 협업 규칙
-│
-├── CMakeLists.txt
-│   # C++ 프로젝트 빌드 설정
-│
-├── docs/
-│   ├── interface_api.md
-│   │   # VTD → Controller / Controller → VTD 인터페이스 정리
-│   │
-│   ├── eval_criteria.md
-│   │   # 대회 평가항목 / 감점 조건 / 대응 방향 정리
-│   │
-│   └── network_setup.md
-│       # VTD IP / TCP·UDP Port / 연동 절차 정리
-│
-├── config/
-│   ├── network.yaml
-│   │   # Host IP / TCP·UDP Port 등 통신 설정
-│   │
-│   ├── vehicle.yaml
-│   │   # 차량 제원 / 최대 조향각 / 가감속 제한값
-│   │
-│   └── control.yaml
-│       # PID Gain / Lookahead / TTC 기준값 등
-│       # Planning·Control 튜닝 파라미터 관리
-│
-├── src/
-│   │
-│   ├── network/
-│   │   ├── vtd_client.hpp
-│   │   ├── vtd_client.cpp
-│   │   │   # VTD 연결 / 상태 수신 / 제어 명령 송신
-│   │   │
-│   │   ├── packet_parser.hpp
-│   │   └── packet_parser.cpp
-│   │       # 수신 패킷을 Ego / Object / TrafficLight 데이터로 변환
-│   │
-│   ├── data/
-│   │   ├── types.hpp
-│   │   │   # EgoState / ObjectState / TrafficLightState
-│   │   │   # ControlCommand 등 공통 데이터 구조 정의
-│   │   │
-│   │   ├── state_manager.hpp
-│   │   ├── state_manager.cpp
-│   │   │   # 현재 Ego / 주변 객체 / 신호등 상태 관리
-│   │   │
-│   │   ├── map_loader.hpp
-│   │   ├── map_loader.cpp
-│   │   │   # OpenDRIVE(.xodr) 도로 데이터 로드
-│   │   │
-│   │   ├── lane_data.hpp
-│   │   └── lane_data.cpp
-│   │       # 현재 차선 / 차선 중심선 / 실선·점선
-│   │       # 제한속도 등 도로정보 관리
-│   │
-│   ├── planning/
-│   │   ├── risk_assessment.hpp
-│   │   ├── risk_assessment.cpp
-│   │   │   # 차량·보행자 거리 / 상대속도 / TTC / 충돌위험 계산
-│   │   │
-│   │   ├── traffic_rule.hpp
-│   │   ├── traffic_rule.cpp
-│   │   │   # 신호등 / 제한속도 / 스쿨존 / 차선 규칙 판단
-│   │   │
-│   │   ├── event_handler.hpp
-│   │   ├── event_handler.cpp
-│   │   │   # 보행자 / 앞차 급정거 / 장애물 등 이벤트 대응 판단
-│   │   │
-│   │   ├── path_planner.hpp
-│   │   └── path_planner.cpp
-│   │       # 주행 경로 / 목표 차선 / 목표 속도 생성
-│   │
-│   ├── control/
-│   │   ├── lateral_controller.hpp
-│   │   ├── lateral_controller.cpp
-│   │   │   # 횡방향 제어 / Steering 계산
-│   │   │
-│   │   ├── longitudinal_controller.hpp
-│   │   ├── longitudinal_controller.cpp
-│   │   │   # 종방향 제어 / 속도 유지 / 감속 / 정지
-│   │   │
-│   │   ├── controller.hpp
-│   │   └── controller.cpp
-│   │       # Planning 결과를 받아 최종 Steering / Accel / TurnSignal 생성
-│   │
-│   ├── logger/
-│   │   ├── logger.hpp
-│   │   └── logger.cpp
-│   │       # Ego / Object / Planning / Control 데이터를 로그로 저장
-│   │
-│   └── main.cpp
-│       # 전체 프로그램 실행 및 모듈 연결
-│
-├── scenario/
+HL_VTD/
+├── config/                 네트워크·차량·제어 설정
+├── docs/                   인터페이스·평가기준·네트워크 문서
+├── scenario/               VTD XML, manifest, route를 묶은 시나리오 패키지
 │   ├── basic/
-│   │   # 차선 유지 / 제한속도 / 신호등 등 기본 시나리오
-│   │
-│   ├── pedestrian/
-│   │   # 보행자 출현 / 횡단 등 보행자 시나리오
-│   │
+│   ├── traffic/
 │   ├── vehicle/
-│   │   # 선행차 / 차량 등장 / 급정거 등 차량 시나리오
-│   │
+│   ├── pedestrian/
 │   ├── obstacle/
-│   │   # 정적 장애물 / 도로 장애물 시나리오
-│   │
 │   └── mixed/
-│       # 신호 + 보행자 / 실선 + 장애물 등 복합 시나리오
-│
-├── tools/
-│   ├── plot_log.py
-│   │   # Logger 데이터를 그래프로 시각화
-│   │
-│   └── evaluate.py
-│       # 시나리오별 주행 결과 및 평가 결과 정리
-│
-└── scripts/
-    ├── build.sh
-    │   # 프로젝트 빌드
-    │
-    └── run.sh
-        # 프로그램 실행
+├── scripts/                빌드·기본 실행 스크립트
+├── src/
+│   ├── network/            VTD 연결, GT 수신, 제어 명령 송신
+│   ├── data/               GT 처리, OpenDRIVE와 경로 데이터
+│   ├── planning/           참조경로 생성과 주행 계획
+│   ├── control/            횡·종방향 제어
+│   ├── logger/             실행 CSV 기록
+│   └── main.cpp
+├── tools/verification/     패키지 검증·실행·평가·그래프 도구
+└── output/verification/    시나리오별 실행 결과
 ```
----
 
-## Development
+## 빌드
 
-### Build
+최초 실행 또는 C++ 코드 변경 후 저장소 루트에서 빌드합니다. XML·YAML·CSV만 수정한 경우에는 다시 빌드할 필요가 없습니다.
 
 ```bash
+cd /home/autonav/바탕화면/HL_VTD
 bash scripts/build.sh
 ```
 
-### Run
+## 시나리오 실행
+
+1. VTD GUI에서 `00_HL_VTD` Setup을 선택합니다.
+2. 실행할 패키지와 같은 XML을 선택하고 초록 체크 Apply를 누릅니다.
+3. 아직 VTD Play는 누르지 않습니다.
+4. 터미널에서 Runner를 실행합니다.
 
 ```bash
-bash scripts/run.sh
+cd /home/autonav/바탕화면/HL_VTD
+
+python3 tools/verification/run_scenario.py \
+  scenario/vehicle/V04_cut_in \
+  --run-id test_01
 ```
 
----
+Validator가 `RESULT: PASS`를 출력하고 HL_VTD가 GT를 기다리면 VTD Play를 누릅니다. 경로 끝에 도달하면 `[drive] goal reached`와 함께 종료됩니다.
+
+다음 시험에서는 기존 로그 덮어쓰기를 피하도록 실행 ID를 변경합니다.
+
+```bash
+python3 tools/verification/run_scenario.py \
+  scenario/vehicle/V04_cut_in \
+  --run-id test_02
 ```
+
+## 실행 전 패키지 검사
+
+VTD나 HL_VTD를 실행하지 않고 XML·YAML·route 정합성만 검사합니다.
+
+```bash
+python3 tools/verification/validate_scenario.py \
+  scenario/vehicle/V04_cut_in
+```
+
+실행할 파일, 경로와 명령만 확인하려면 다음을 사용합니다.
+
+```bash
+python3 tools/verification/run_scenario.py \
+  scenario/vehicle/V04_cut_in \
+  --run-id test_01 \
+  --dry-run
+```
+
+## 출력 구조
+
+Runner는 시나리오 ID와 실행 ID를 사용해 결과를 분리합니다.
+
+```text
+output/verification/
+└── V04/
+    ├── test_01/
+    │   ├── run.csv
+    │   ├── summary.csv       evaluate.py 실행 시 생성
+    │   └── run_plot.png      plot_log.py 실행 시 생성
+    └── test_02/
+        └── run.csv
+```
+
+실행 요약과 그래프는 다음 명령으로 생성합니다.
+
+```bash
+python3 tools/verification/evaluate.py \
+  output/verification/V04/test_01/run.csv \
+  --summary output/verification/V04/test_01/summary.csv
+
+python3 tools/verification/plot_log.py \
+  output/verification/V04/test_01/run.csv \
+  --output output/verification/V04/test_01/run_plot.png
+```
+
+공식 기준 중 로그에서 계산 가능한 항목을 평가하려면 `--official`을 사용합니다. 제한속도가 로그에 없으면 시험 구간 제한속도를 직접 전달할 수 있습니다.
+
+```bash
+python3 tools/verification/evaluate.py \
+  output/verification/B02/test_01/run.csv \
+  --official \
+  --speed-limit-kmh 30 \
+  --summary output/verification/B02/test_01/summary.csv
+```
+
+현재 `evaluate.py`는 제한속도·보호구역 속도·중앙선/보도 지속 침범·실선 변경·횡단보도 정차·충돌·리스폰을 해당 로그 필드가 있을 때 구간별로 평가합니다. 입력 데이터가 없는 공식 항목은 `UNAVAILABLE`로 표시하며 임의로 PASS 처리하지 않습니다. 일반 기준과 공식 기준을 모두 지정하지 않으면 기존 `result`는 `NOT_EVALUATED`가 정상입니다. 자세한 내용은 [docs/eval_criteria.md](docs/eval_criteria.md)에 정리합니다.
+
+## 네트워크
+
+현재 `config/network.yaml`은 연구실 연동 환경을 사용합니다. 2026 대회 공지 네트워크는 다음과 같습니다.
+
+| 구분 | 주소·포트 |
+|---|---|
+| 제어기 PC | `192.168.50.10/24` |
+| VTD Host | `192.168.50.11/24` |
+| VTD TCP | `9910` |
+| VTD RTSP | `8554` |
+| Controller UDP | `9912` |
+
+대회 당일에는 연구실 설정과 대회 설정을 별도 파일로 관리해야 합니다. HL_VTD 바이너리는 `--config` 선택을 지원하지만 현재 `run_scenario.py`에는 해당 옵션이 없으므로, Runner의 설정 선택 기능을 추가하기 전까지는 실행 전에 `config/network.yaml`의 환경을 반드시 확인해야 합니다.
+
+자세한 내용은 [docs/network_setup.md](docs/network_setup.md), 패킷 구조는 [docs/interface_api.md](docs/interface_api.md), 시나리오 설계는 [scenario/README.md](scenario/README.md)를 참고합니다.

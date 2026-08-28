@@ -1,5 +1,26 @@
 # Network setup
 
+## 2026 대회 공지 설정
+
+2026-08-27 대회 안내문에 공지된 네트워크는 다음과 같습니다.
+
+```yaml
+vtd:
+  host_ip: "192.168.50.11"
+  tcp_port: 9910
+  rtsp_port: 8554
+
+controller:
+  ip: "192.168.50.10"
+  udp_port: 9912
+```
+
+두 PC의 서브넷 마스크는 `255.255.255.0`입니다. 현재 저장소의 기본
+`config/network.yaml`은 연구실 연동 주소이므로 대회 환경과 혼동하지
+않아야 합니다.
+
+## 설정 파일
+
 The program loads all network addresses from `config/network.yaml` at startup.
 
 ```yaml
@@ -26,7 +47,7 @@ bash scripts/build.sh
 bash scripts/run.sh
 ```
 
-To use another settings file without editing the default file:
+HL_VTD 바이너리를 직접 실행할 때 다른 설정 파일을 사용하려면:
 
 ```bash
 ./build/hl_vtd --config /path/to/network.yaml

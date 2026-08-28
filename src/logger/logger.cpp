@@ -16,7 +16,18 @@ constexpr const char* kCsvHeader =
     "traffic_light_id,traffic_light_state,"
     "plan_valid,goal_reached,nearest_path_index,target_path_index,"
     "lookahead,max_curvature,target_speed,planned_steering,"
-    "command_steering,target_accel,turn_signal\n";
+    "command_steering,target_accel,turn_signal,"
+    "ego_reference_x,ego_reference_y,rear_axle_x,rear_axle_y,"
+    "front_bumper_x,front_bumper_y,"
+    "current_road_id,current_lane_id,lane_width_m,"
+    "lane_center_distance_m,path_s_m,path_d_m,"
+    "nearest_object_heading,nearest_object_length,nearest_object_width,"
+    "nearest_object_longitudinal_m,nearest_object_lateral_m,"
+    "nearest_object_relative_speed_mps,nearest_object_ttc_s,"
+    "evaluation_section_id,current_speed_limit_kmh,school_zone_active,"
+    "stop_line_distance_m,crosswalk_active,lane_change_active,"
+    "solid_line_crossing,centerline_intrusion_m,sidewalk_intrusion_m,"
+    "pedestrian_crossing_complete,collision,respawn_count\n";
 
 struct ObjectLogSummary {
     std::size_t count{};
@@ -47,7 +58,7 @@ bool isPopulatedObject(const ObjectState& object) {
            std::fabs(object.height) > epsilon;
 }
 
-ObjectLogSummary summarizeObjects(const GtFrame& gt) {
+ObjectLogSummary summarizeObjects(const GtFrame& gt, double egoSpeed) {
     ObjectLogSummary summary;
     summary.nearest.distance = std::numeric_limits<double>::infinity();
 
@@ -66,21 +77,53 @@ ObjectLogSummary summarizeObjects(const GtFrame& gt) {
             summary.nearest.id = object.id;
             summary.nearest.x = object.x;
             summary.nearest.y = object.y;
+            summary.nearest.heading = object.heading;
             summary.nearest.speed = object.speed;
+            summary.nearest.length = object.length;
+            summary.nearest.width = object.width;
             summary.nearest.distance = distance;
+
+            const double dx = static_cast<double>(object.x - gt.ego.x);
+            const double dy = static_cast<double>(object.y - gt.ego.y);
+            const double cosine = std::cos(gt.ego.heading);
+            const double sine = std::sin(gt.ego.heading);
+            summary.nearest.longitudinalDistance = dx * cosine + dy * sine;
+            summary.nearest.lateralDistance = -dx * sine + dy * cosine;
+
+            const double objectLongitudinalSpeed =
+                static_cast<double>(object.speed) *
+                std::cos(static_cast<double>(object.heading - gt.ego.heading));
+            summary.nearest.relativeSpeed = egoSpeed - objectLongitudinalSpeed;
+            summary.nearest.ttcValid =
+                summary.nearest.longitudinalDistance > 0.0 &&
+                summary.nearest.relativeSpeed > 0.1;
+            if (summary.nearest.ttcValid) {
+                summary.nearest.ttc =
+                    summary.nearest.longitudinalDistance /
+                    summary.nearest.relativeSpeed;
+            }
         }
     }
     return summary;
 }
 
 LogRecord makeLogRecord(const LogFrameInput& input) {
-    const ObjectLogSummary objects = summarizeObjects(input.gt);
+    const ObjectLogSummary objects = summarizeObjects(
+        input.gt, input.control.egoSpeed);
 
     LogRecord record;
     record.frameIndex = input.frameIndex;
     record.elapsedWallTimeS = input.elapsedWallTimeS;
     record.ego = input.gt.ego;
     record.egoSpeed = input.control.egoSpeed;
+    record.egoLaneValid = input.world.egoLaneValid;
+    record.egoRoadId = input.world.egoRoadId;
+    record.egoLaneId = input.world.egoLaneId;
+    record.egoLaneWidth = input.world.egoLaneWidth;
+    record.egoLaneCenterDistance = input.world.egoLaneCenterDistance;
+    record.egoPathValid = input.world.egoPathValid;
+    record.egoPathS = input.world.egoPathS;
+    record.egoPathD = input.world.egoPathD;
     record.objectCount = objects.count;
     record.nearestObject = objects.nearest;
     record.trafficLight = input.gt.trafficLight;
@@ -151,8 +194,51 @@ void writeCsvRecord(CsvLoggerData& logger,
         << record.plan.steering << ','
         << record.command.steering << ','
         << record.command.targetAccel << ','
-        << static_cast<unsigned int>(record.command.turnSignal)
-        << '\n';
+        << static_cast<unsigned int>(record.command.turnSignal) << ','
+        // 운영측 안내문은 제어 차량 기준 좌표를 후륜축으로 정의한다.
+        << record.ego.x << ','
+        << record.ego.y << ','
+        << record.ego.x << ','
+        << record.ego.y << ',';
+
+    // 현재 GT에는 Ego 차량 길이/앞 오버행이 없어 앞 범퍼는 계산하지 않는다.
+    logger.output << ",,";
+
+    if (record.egoLaneValid) {
+        logger.output
+            << record.egoRoadId << ','
+            << record.egoLaneId << ','
+            << record.egoLaneWidth << ','
+            << record.egoLaneCenterDistance << ',';
+    } else {
+        logger.output << ",,,,";
+    }
+
+    if (record.egoPathValid) {
+        logger.output << record.egoPathS << ',' << record.egoPathD << ',';
+    } else {
+        logger.output << ",,";
+    }
+
+    if (record.nearestObject.valid) {
+        logger.output
+            << record.nearestObject.heading << ','
+            << record.nearestObject.length << ','
+            << record.nearestObject.width << ','
+            << record.nearestObject.longitudinalDistance << ','
+            << record.nearestObject.lateralDistance << ','
+            << record.nearestObject.relativeSpeed << ',';
+        if (record.nearestObject.ttcValid) {
+            logger.output << record.nearestObject.ttc;
+        }
+        logger.output << ',';
+    } else {
+        logger.output << ",,,,,,,";
+    }
+
+    // 아래 공식 평가 필드는 현재 TCP GT에 원천 데이터가 없어 비워 둔다.
+    // 향후 VTD 평가 인터페이스나 시나리오 annotation이 제공하면 채운다.
+    logger.output << ",,,,,,,,,,,\n";
 }
 
 void flushCsvOutput(CsvLoggerData& logger) {

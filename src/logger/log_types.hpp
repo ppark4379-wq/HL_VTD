@@ -30,6 +30,7 @@ struct LogFrameInput {
     std::size_t frameIndex;
     double elapsedWallTimeS;
     const GtFrame& gt;
+    const WorldState& world;
     const PathPlan& plan;
     const ControlProcessData& control;
 };
@@ -41,8 +42,16 @@ struct NearestObjectLog {
     std::uint32_t id{};
     float x{};
     float y{};
+    float heading{};
     float speed{};
+    float length{};
+    float width{};
     double distance{};
+    double longitudinalDistance{};
+    double lateralDistance{};
+    double relativeSpeed{};
+    bool ttcValid{};
+    double ttc{};
 };
 
 // 현재 Logger 구현에서 사용하는 한 프레임의 내부 레코드.
@@ -52,6 +61,14 @@ struct LogRecord {
     double elapsedWallTimeS{};
     EgoState ego;
     double egoSpeed{};
+    bool egoLaneValid{};
+    int egoRoadId{};
+    int egoLaneId{};
+    double egoLaneWidth{};
+    double egoLaneCenterDistance{};
+    bool egoPathValid{};
+    double egoPathS{};
+    double egoPathD{};
     std::size_t objectCount{};
     NearestObjectLog nearestObject;
     TrafficLightState trafficLight;

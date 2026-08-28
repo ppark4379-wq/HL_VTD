@@ -32,6 +32,17 @@ void updatePreviousPosition(ControlProcessData& control,
     control.hasPreviousPosition = true;
 }
 
+void resetSpeedAndControllerState(ControlProcessData& control) {
+    control.rawEgoSpeed = 0.0;
+    control.egoSpeed = 0.0;
+    control.hasSpeedEstimate = false;
+
+    control.controller.previousSpeedError = 0.0;
+    control.controller.previousAcceleration = 0.0;
+    control.controller.hasPreviousError = false;
+    control.controller.hasPreviousAcceleration = false;
+}
+
 }  // namespace
 
 // GT에 Ego speed 필드가 없으므로 연속 월드 위치 차분으로 추정한다.
@@ -45,8 +56,16 @@ double estimateEgoSpeed(ControlProcessData& control,
         return control.egoSpeed;
     }
 
-    control.rawEgoSpeed =
+    const double positionSpeed =
         computePositionSpeed(control, gt, runtime.nominalDt);
+    if (!std::isfinite(positionSpeed) ||
+        positionSpeed > runtime.maxValidPositionSpeed) {
+        updatePreviousPosition(control, gt);
+        resetSpeedAndControllerState(control);
+        return control.egoSpeed;
+    }
+
+    control.rawEgoSpeed = positionSpeed;
     control.egoSpeed = applySpeedFilter(
         control, control.rawEgoSpeed, runtime.speedFilterAlpha);
     updatePreviousPosition(control, gt);

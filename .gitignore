@@ -68,6 +68,10 @@ vcpkg_installed/
 Testing/
 .cache/
 
+# Local VTD verification runs (CSV logs, summaries, plots)
+/output/verification/**
+!/output/verification/.gitkeep
+
 # Python bytecode cache
 __pycache__/
 *.pyc
