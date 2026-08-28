@@ -23,13 +23,28 @@ add_executable(hl_vtd
     src/data/gt/gt_processor.cpp
 )
 
+add_executable(vtd_path_to_checkpoints
+    tools/vtd_path_to_checkpoints.cpp
+    src/planning/vtd_path_generator.cpp
+    src/planning/reference_path_generator.cpp
+    src/data/map/map_loader.cpp
+    src/utils/csv_utils.cpp
+    src/utils/math_utils.cpp
+)
+
 target_compile_features(hl_vtd PRIVATE cxx_std_17)
 target_include_directories(hl_vtd PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_features(vtd_path_to_checkpoints PRIVATE cxx_std_17)
+target_include_directories(vtd_path_to_checkpoints
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 if(MSVC)
     target_compile_options(hl_vtd PRIVATE /W4 /permissive-)
+    target_compile_options(vtd_path_to_checkpoints PRIVATE /W4 /permissive-)
 else()
     target_compile_options(hl_vtd PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(vtd_path_to_checkpoints
+        PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 if(WIN32)
