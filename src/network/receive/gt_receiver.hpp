@@ -14,3 +14,4 @@ bool extractGtFrame(GtReceiverData& receiver);
 bool receiveGtFrame(GtReceiverData& receiver);
 
 const GtFrame& getLatestGtFrame(const GtReceiverData& receiver);
+double getLatestGtReceiveTime(const GtReceiverData& receiver);

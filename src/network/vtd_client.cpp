@@ -1,6 +1,8 @@
 #include "network/vtd_client.hpp"
 
 #include <limits>
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 #ifdef _WIN32
@@ -80,6 +82,33 @@ VtdClientData makeVtdClient(const VtdNetworkConfig& config) {
 
 bool isVtdClientConnected(const VtdClientData& client) noexcept {
     return client.socket != -1;
+}
+
+bool didVtdReceiveTimeOut(const VtdClientData& client) noexcept {
+    return client.receiveTimedOut;
+}
+
+void setVtdReceiveTimeout(VtdClientData& client, double timeoutSeconds) {
+    if (!isVtdClientConnected(client) || timeoutSeconds <= 0.0) return;
+#ifdef _WIN32
+    const DWORD milliseconds = static_cast<DWORD>(std::clamp(
+        std::ceil(timeoutSeconds * 1000.0), 1.0,
+        static_cast<double>(std::numeric_limits<DWORD>::max())));
+    if (setsockopt(getNativeSocket(client), SOL_SOCKET, SO_RCVTIMEO,
+                   reinterpret_cast<const char*>(&milliseconds),
+                   sizeof(milliseconds)) != 0) {
+        throw makeSocketError("setsockopt(SO_RCVTIMEO)", getLastSocketError());
+    }
+#else
+    timeval timeout{};
+    timeout.tv_sec = static_cast<long>(timeoutSeconds);
+    timeout.tv_usec = static_cast<long>(
+        (timeoutSeconds - timeout.tv_sec) * 1000000.0);
+    if (setsockopt(getNativeSocket(client), SOL_SOCKET, SO_RCVTIMEO,
+                   &timeout, sizeof(timeout)) != 0) {
+        throw makeSocketError("setsockopt(SO_RCVTIMEO)", getLastSocketError());
+    }
+#endif
 }
 
 void connectVtdClient(VtdClientData& client) {
@@ -216,6 +245,7 @@ std::size_t receiveVtdData(
         throw std::invalid_argument("cannot receive into a null buffer");
     }
 
+    client.receiveTimedOut = false;
 #ifdef _WIN32
     const int chunk = static_cast<int>(
         capacity > static_cast<std::size_t>(std::numeric_limits<int>::max())
@@ -224,12 +254,21 @@ std::size_t receiveVtdData(
     const int result =
         ::recv(getNativeSocket(client), static_cast<char*>(buffer), chunk, 0);
     if (result == SOCKET_ERROR) {
+        const int error = getLastSocketError();
+        if (error == WSAETIMEDOUT || error == WSAEWOULDBLOCK) {
+            client.receiveTimedOut = true;
+            return 0;
+        }
 #else
     std::ptrdiff_t result = 0;
     do {
         result = ::recv(getNativeSocket(client), buffer, capacity, 0);
     } while (result < 0 && errno == EINTR);
     if (result < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            client.receiveTimedOut = true;
+            return 0;
+        }
 #endif
         throw makeSocketError("receive", getLastSocketError());
     }

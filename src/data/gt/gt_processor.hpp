@@ -1,7 +1,9 @@
 #pragma once
 
 #include "data/gt/gt_structs.hpp"
-#include "planning/reference_path_generator.hpp"
+#include "planning/global/reference_path_generator.hpp"
+
+#include <optional>
 
 // BEV 기준 2D OBB의 네 꼭짓점을 계산
 Obb2D makeObjectObb(const ObjectState& object);
@@ -16,4 +18,5 @@ WorldObjectState makeWorldObjectState(
 WorldState makeWorldState(
     const GtFrame& gt,
     const PathGeneratorData& mapData,
-    const std::vector<Waypoint>& globalPath);
+    const std::vector<Waypoint>& globalPath,
+    std::optional<double> expectedEgoRouteS = std::nullopt);

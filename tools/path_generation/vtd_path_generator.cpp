@@ -1,6 +1,6 @@
-#include "vtd_path_generator.hpp"
+#include "path_generation/vtd_path_generator.hpp"
 
-#include "reference_path_generator.hpp"
+#include "planning/global/reference_path_generator.hpp"
 #include "utils/math_utils.hpp"
 
 #include <algorithm>
@@ -158,7 +158,7 @@ Waypoint roadLaneToWaypoint(const PathGeneratorData& data,
             std::to_string(roadS));
     }
 
-    const RoadPose reference = roadPose(road, roadS);
+    const RoadPose reference = roadToWorld(road, roadS);
     const double offset = laneOffset(road, section, laneId, roadS);
     Waypoint point;
     point.x = reference.x - offset * std::sin(reference.yaw);

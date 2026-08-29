@@ -1,7 +1,10 @@
 #pragma once
 
+#include "utils/geometry_structs.hpp"
+
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 // VTD에서 수신한 Ego 차량의 GT 상태.
@@ -41,19 +44,6 @@ struct GtFrame {
 };
 
 
-// ---------------- 판제용 Object 정보 ----------------
-
-// BEV 상의 점 하나
-struct Point2D {
-    double x{};
-    double y{};
-};
-
-// 회전된 Bounding Box의 네 꼭짓점
-struct Obb2D {
-    std::array<Point2D, 4> corners{};
-};
-
 // 판제에서 사용할 Object 상태
 struct WorldObjectState {
     ObjectState raw;
@@ -63,22 +53,40 @@ struct WorldObjectState {
     bool laneValid{};
     int roadId{};
     int laneId{};
+    int sectionIndex{};
+    double roadS{};
 
     bool pathValid{};
     double pathS{};
     double pathD{};
+
+    bool isAhead{};
+    bool isOnEgoPath{};
+    bool isInsideCrosswalk{};
+    bool isCollisionRisk{};
+    double relativeS{};
+    double relativeD{};
+    double ttc{std::numeric_limits<double>::infinity()};
 };
 
 struct WorldState {
     EgoState ego;
+    Obb2D egoObb;
+    double receiveTime{};
+    double egoSpeed{};
+    bool inputValid{};
+    bool respawnDetected{};
     bool egoLaneValid{};
     int egoRoadId{};
     int egoLaneId{};
+    int egoSectionIndex{};
+    double egoRoadS{};
     double egoLaneWidth{};
     double egoLaneCenterDistance{};
     bool egoPathValid{};
     double egoPathS{};
     double egoPathD{};
+    double frontBumperPathS{};
     std::vector<WorldObjectState> objects;
     TrafficLightState trafficLight;
 };

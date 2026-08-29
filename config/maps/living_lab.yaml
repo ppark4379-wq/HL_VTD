@@ -1,0 +1,64 @@
+# HL FMA LivingLab 지도별 정적 규칙.
+map:
+  xodr: src/data/map/HL_FMA_VTD_LivingLab.xodr
+  static_features: config/maps/living_lab.generated.yaml
+
+# 운영측 좌표를 받으면 채운다. 완료 지점은 정지점이 아니라 통과선이다.
+finish:
+  x: 0.0
+  y: 0.0
+  route_s: 0.0
+  configured: false
+
+# 보호구역(붉은 노면) 구간과 그 밖의 구간 제한속도.
+# XODR에 표준 <speed>도 붉은 노면 object도 없다. 전체 object 이름을 확인했고
+# 붉은 노면을 나타내는 항목은 존재하지 않는다. 직접 측정해서 채워야 한다.
+#
+# 참고: extract_static_zones가 찾은 노면 제한속도 표시 위치
+#   route_s 593.9  30 km/h  (roadmark_speed_30.flt)
+#   route_s 635.8  30 km/h  (roadmark_speed_30.flt)
+#   -> 이후 50 km/h 표시가 없으므로 보호구역이 경로 끝까지 이어질 가능성이 있다.
+#
+# 비워두면 speed.straight_target_kph(46)로 전 구간을 주행한다.
+# 보호구역이 실제로 존재하는데 비워두면 30 km/h 구간을 46으로 통과해
+# 20 km/h 초과 중대(-6)가 된다. VTD 화면에서 붉은 노면 시작·끝을 확인한 뒤
+# 반드시 채울 것.
+speed_zones: []
+# speed_zones:
+#   - id: school_zone_1
+#     speed_limit_kph: 27.0
+#     route_s_begin: 590.0
+#     route_s_end: 816.0
+
+stop_lines: []
+crosswalks: []
+# state=6 패킷 자체에는 점멸 색이 없다. VTD Scenario에서 적색점멸로
+# 설정한 신호의 controller id(=패킷 trafficLight.id)만 red로 등록한다.
+traffic_lights: []
+
+# 실제 값을 받으면 빈 배열 대신 아래 형식으로 작성한다.
+# polygon은 "x,y; x,y; x,y; x,y" 형식이며 route_s는 reference path 누적거리다.
+# speed_zones 는 두 가지 방식을 지원한다. 주행 구간은 route_s 범위가 간단하다.
+#   - id: school_1
+#     speed_limit_kph: 27.0
+#     route_s_begin: 590.0
+#     route_s_end: 700.0
+#   - id: parking_lot
+#     speed_limit_kph: 18.0
+#     polygon: "0,0; 10,0; 10,10; 0,10"
+# stop_lines:
+#   - id: 1
+#     controller_id: 11
+#     road_id: 10
+#     lane_ids: [-1, -2]
+#     begin: [0, 0]
+#     end: [0, 5]
+#     route_s: 120.0
+# crosswalks:
+#   - id: 1
+#     polygon: "0,0; 10,0; 10,5; 0,5"
+#     entry_route_s: 118.0
+#     exit_route_s: 126.0
+# traffic_lights:
+#   - controller_id: 11
+#     flashing_type: red

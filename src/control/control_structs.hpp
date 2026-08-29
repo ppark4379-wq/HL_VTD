@@ -31,16 +31,22 @@ struct ControlCommand {
     std::uint8_t turnSignal{};
 };
 
-// GT에 Ego speed가 없어 위치 차분으로 속도를 계산하기 위한 상태.
+struct SafetyReport {
+    bool commandOverridden{};
+    bool emergencyBrakeApplied{};
+    bool invalidInput{};
+    bool invalidCommand{};
+};
+
+// 제어 프로세스의 설정, 프레임 간 유지 상태, 이번 프레임 결과.
+// Ego 속도 추정은 World process가 담당하므로 여기서는 읽기만 한다.
 struct ControlProcessData {
-    ControllerData controller;
-    double previousX{};
-    double previousY{};
-    double rawEgoSpeed{};
-    double egoSpeed{};
-    bool hasPreviousPosition{};
-    bool hasSpeedEstimate{};
-    ControlCommand latestCommand;
+    ControllerData controller;   // 유지 상태 (PD 이전값)
+    double egoSpeed{};           // World에서 받은 값 (읽기 전용 사본)
+    ControlCommand nominalCommand;  // Safety 적용 전
+    ControlCommand safeCommand;     // VTD로 실제 전송하는 명령
+    ControlCommand latestCommand;   // 로깅용 = safeCommand
+    SafetyReport safety;
 };
 
 // GT 프레임 기반 제어 주기와 속도 필터 설정.
@@ -48,11 +54,14 @@ struct ControlRuntimeConfig {
     double nominalDt{0.05};
     double speedFilterAlpha{0.25};
     double maxValidPositionSpeed{80.0};
+    double inputTimeout{0.25};
 };
 
 // control.yaml에서 읽은 전체 주행 설정.
 struct DrivingConfig {
     PathPlannerConfig planner;
+    PlanningBehaviorConfig behavior;
+    LaneChangeConfig laneChange;
     ControllerConfig controller;
     ControlRuntimeConfig runtime;
 };

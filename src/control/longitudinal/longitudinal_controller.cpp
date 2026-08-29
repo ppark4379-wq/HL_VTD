@@ -1,11 +1,6 @@
-#include "control/controller.hpp"
+#include "control/longitudinal/longitudinal_controller.hpp"
 
 #include <algorithm>
-
-// Pure Pursuit 조향각을 차량의 최대 조향각 이내로 제한한다.
-double limitSteering(double steering, double maxSteering) {
-    return std::clamp(steering, -maxSteering, maxSteering);
-}
 
 double limitAccelerationRate(ControllerData& controller,
                              double acceleration,
@@ -52,18 +47,11 @@ double computePdAcceleration(ControllerData& controller,
     return limitAccelerationRate(controller, boundedAcceleration, dt);
 }
 
-// 플래너의 조향각과 목표속도를 VTD 제어 명령으로 변환한다.
-ControlCommand makeControlCommand(ControllerData& controller,
-                                  const PathPlan& plan,
-                                  double currentSpeed,
-                                  double dt) {
-    ControlCommand command;
-    if (!plan.valid) return command;
-
-    command.steering = static_cast<float>(
-        limitSteering(plan.steering, controller.config.maxSteering));
-    command.targetAccel = static_cast<float>(
-        computePdAcceleration(controller, currentSpeed, plan.targetSpeed, dt));
-    command.turnSignal = 0;
-    return command;
+void runLongitudinalControl(ControllerData& state,
+                            ControlCommand& output,
+                            double currentSpeed,
+                            double targetSpeed,
+                            double dt) {
+    output.targetAccel = static_cast<float>(
+        computePdAcceleration(state, currentSpeed, targetSpeed, dt));
 }
