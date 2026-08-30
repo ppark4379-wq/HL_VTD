@@ -10,8 +10,13 @@ struct ControllerConfig {
     double kd{0.15};
     double minAcceleration{-4.0};
     double maxAcceleration{2.0};
+    // 이 속도 이하에서 목표속도도 0이면 PD 대신 확정 감속으로 붙잡는다.
+    double stopHoldSpeedThreshold{0.8};
     double maxErrorDerivative{10.0};
     double maxAccelerationRate{6.0};
+    // 조향에도 변화율 제한을 둔다. 가속도에만 있고 조향에는 없어서
+    // 저속·짧은 Ld 구간에서 앞바퀴가 프레임마다 크게 튄다.
+    double maxSteeringRate{0.9};   // [rad/s]
     double maxSteering{0.48};
 };
 
@@ -20,6 +25,8 @@ struct ControllerData {
     ControllerConfig config;
     double previousSpeedError{};
     double previousAcceleration{};
+    double previousSteering{};
+    bool hasPreviousSteering{};
     bool hasPreviousError{};
     bool hasPreviousAcceleration{};
 };

@@ -67,6 +67,9 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.behavior.stopHoldTime >= 1.0 &&
            config.behavior.followTimeGap > 0.0 &&
            config.behavior.minimumFollowDistance > 0.0 &&
+           config.behavior.crosswalkApproachSpeed > 0.0 &&
+           config.behavior.crosswalkNearbyObjectDistance > 0.0 &&
+           config.behavior.crosswalkClearanceSpeed > 0.0 &&
            config.behavior.signalStopSearchDistance > 0.0 &&
            config.behavior.emergencyTTC > 0.0 &&
            config.behavior.collisionPredictionStep > 0.0 &&
@@ -102,6 +105,10 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.planner.straightLookahead) &&
         setConfigValue(values, "pure_pursuit.curve_lookahead",
                        config.planner.curveLookahead) &&
+        setConfigValue(values, "pure_pursuit.min_lookahead",
+                       config.planner.minLookahead) &&
+        setConfigValue(values, "pure_pursuit.lookahead_speed_gain",
+                       config.planner.lookaheadSpeedGain) &&
         setConfigValue(values, "pure_pursuit.curve_threshold",
                        config.planner.curveThreshold) &&
         setConfigValue(values, "pure_pursuit.curvature_check_distance",
@@ -134,6 +141,18 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.collisionPredictionStep) &&
         setConfigValue(values, "planning.local_path_horizon",
                        config.behavior.localPathHorizon) &&
+        setSpeedConfigValue(values, "planning.crosswalk_approach_kph",
+                       config.behavior.crosswalkApproachSpeed) &&
+        setConfigValue(values, "planning.crosswalk_approach_distance",
+                       config.behavior.crosswalkApproachDistance) &&
+        setConfigValue(values, "planning.crosswalk_nearby_object_distance",
+                       config.behavior.crosswalkNearbyObjectDistance) &&
+        setSpeedConfigValue(values, "planning.crosswalk_clearance_kph",
+                       config.behavior.crosswalkClearanceSpeed) &&
+        setConfigValue(values, "planning.crosswalk_stop_line_search",
+                       config.behavior.crosswalkStopLineSearch) &&
+        setConfigValue(values, "planning.crosswalk_pedestrian_prediction",
+                       config.behavior.crosswalkPedestrianPrediction) &&
         setConfigValue(values, "planning.signal_stop_search_distance",
                        config.behavior.signalStopSearchDistance) &&
         setConfigValue(values, "lane_change.obstacle_trigger_minimum_distance",
@@ -170,6 +189,8 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.controller.maxAcceleration) &&
         setConfigValue(values, "limits.max_acceleration_rate",
                        config.controller.maxAccelerationRate) &&
+        setConfigValue(values, "limits.max_steering_rate",
+                       config.controller.maxSteeringRate) &&
         setConfigValue(values, "limits.max_steering",
                        config.controller.maxSteering) &&
         setConfigValue(values, "runtime.nominal_dt",

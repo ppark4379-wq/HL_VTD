@@ -18,6 +18,21 @@ void runControlProcess(ControlProcessData& data,
     runLongitudinalControl(data.controller, data.nominalCommand,
                            world.egoSpeed, planning.targetSpeed,
                            std::max(dt, 1e-3));
+    // 조향 변화율 제한. 경로 추종 자체는 그대로 두고 명령만 매끄럽게 만든다.
+    {
+        const double step = std::max(dt, 1e-3) *
+                            data.controller.config.maxSteeringRate;
+        const double previous = data.controller.hasPreviousSteering
+                                    ? data.controller.previousSteering
+                                    : static_cast<double>(
+                                          data.nominalCommand.steering);
+        const double limited = std::clamp(
+            static_cast<double>(data.nominalCommand.steering),
+            previous - step, previous + step);
+        data.controller.previousSteering = limited;
+        data.controller.hasPreviousSteering = true;
+        data.nominalCommand.steering = static_cast<float>(limited);
+    }
     data.nominalCommand.turnSignal = planning.turnSignal;
 
     applySafetyLimiter(data.safeCommand, data.safety,

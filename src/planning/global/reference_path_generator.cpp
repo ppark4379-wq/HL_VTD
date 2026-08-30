@@ -815,6 +815,24 @@ std::string laneChangeMarkAt(const LaneDefinition& lane, double s) {
     // lane의 roadMark는 해당 lane의 외측 경계선을 정의한다.
     // 따라서 인접한 lane 사이 경계는 |id|가 더 작은(중심에 가까운)
     // lane의 외측 roadMark에서 읽어야 한다.
+// 한 lane section 안에서도 roadMark는 중간에 바뀐다(앞 25 m 실선, 이후 점선 등).
+// laneGraph는 "이 구간에서 차선변경이 가능한 조합인가"만 표현하면 되므로
+// 구간 내 어느 지점에서든 허용되면 연결로 본다. 실제 지점에서의 허용 여부는
+// 기동을 세울 때 laneChangeAllowed가 정확한 s로 다시 판정한다.
+bool laneChangeEverAllowed(const LaneSection& section, int fromLaneId,
+                           int toLaneId) {
+    const int ownerId =
+        std::abs(fromLaneId) < std::abs(toLaneId) ? fromLaneId : toLaneId;
+    const auto owner = section.lanes.find(ownerId);
+    if (owner == section.lanes.end()) return false;
+    for (const auto& mark : owner->second.roadMarks) {
+        if (mark.laneChange == "both") return true;
+        if (mark.laneChange == "increase" && toLaneId > fromLaneId) return true;
+        if (mark.laneChange == "decrease" && toLaneId < fromLaneId) return true;
+    }
+    return false;
+}
+
 bool laneChangeAllowed(const LaneSection& section, int fromLaneId,
                        int toLaneId, double s) {
     const int ownerId = std::abs(fromLaneId) < std::abs(toLaneId) ? fromLaneId : toLaneId;
@@ -958,8 +976,8 @@ void buildLaneGraph(PathGeneratorData& data) {
                             adjacent->second.type != "driving") {
                             continue;
                         }
-                        if (!laneChangeAllowed(section, laneId, adjacentId,
-                                               section.s)) {
+                        if (!laneChangeEverAllowed(section, laneId,
+                                                   adjacentId)) {
                             continue;
                         }
                         addLaneEdge(data,

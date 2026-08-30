@@ -94,12 +94,17 @@ double findMaxCurvature(const std::vector<Waypoint>& waypoints,
     return maximum;
 }
 
-// 곡선에서는 짧은 lookahead, 직선에서는 긴 lookahead를 선택한다.
+// 곡선에서는 짧은 lookahead, 직선에서는 긴 lookahead를 고른 뒤,
+// 현재 속도에 비례해 한 번 더 줄인다(하한 minLookahead).
 double chooseLookahead(double maxCurvature,
-                       const PathPlannerConfig& config) {
-    return maxCurvature >= config.curveThreshold
-               ? config.curveLookahead
-               : config.straightLookahead;
+                       const PathPlannerConfig& config,
+                       double egoSpeed) {
+    const double base = maxCurvature >= config.curveThreshold
+                            ? config.curveLookahead
+                            : config.straightLookahead;
+    const double speedBased =
+        config.lookaheadSpeedGain * std::max(0.0, egoSpeed);
+    return std::clamp(speedBased, config.minLookahead, base);
 }
 
 // Ego heading과 target을 바라보는 방향의 각도 차이를 -pi~pi로 만든다.
@@ -126,7 +131,8 @@ double chooseTargetSpeed(double maxCurvature,
 }
 
 // 최근접점, 곡률, lookahead target, 조향각, 목표속도를 순서대로 계산한다.
-PathPlan runPurePursuit(PathPlannerData& planner, const GtFrame& gt) {
+PathPlan runPurePursuit(PathPlannerData& planner, const GtFrame& gt,
+                        double egoSpeed) {
     PathPlan plan;
     if (planner.waypoints.empty()) return plan;
 
@@ -135,7 +141,8 @@ PathPlan runPurePursuit(PathPlannerData& planner, const GtFrame& gt) {
     plan.maxCurvature = findMaxCurvature(
         planner.waypoints, plan.nearestIndex,
         planner.config.curvatureCheckDistance);
-    plan.lookahead = chooseLookahead(plan.maxCurvature, planner.config);
+    plan.lookahead = chooseLookahead(plan.maxCurvature, planner.config,
+                                     egoSpeed);
     plan.targetIndex = findTargetWaypoint(
         planner.waypoints, plan.nearestIndex, plan.lookahead);
 

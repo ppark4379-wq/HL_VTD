@@ -112,6 +112,8 @@ struct BehaviorState {
     LaneChangePhase laneChange{LaneChangePhase::None};
     SystemHealth health{SystemHealth::Ok};
     double recoveryHoldTime{};
+    // 차선변경으로 회피 중인 장애물. Follow 판단에서 제외한다. 없으면 -1.
+    int avoidedObstacleId{-1};
 };
 
 // 이번 프레임의 행동 결정 결과.

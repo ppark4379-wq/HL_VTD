@@ -28,4 +28,5 @@ void makeLaneChangeLocalPath(LocalPathData& output,
 PathPlan trackLaneChangePath(LaneChangeData& state,
                              const PathPlannerConfig& plannerConfig,
                              const GtFrame& gt,
-                             double speedLimit);
+                             double speedLimit,
+                             double egoSpeed);

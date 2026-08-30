@@ -44,4 +44,5 @@ double chooseTargetSpeed(double maxCurvature,
 
 // 위 단계를 순서대로 실행해 한 프레임의 경로추종 결과를 만든다.
 PathPlan runPurePursuit(PathPlannerData& planner,
-                        const GtFrame& gt);
+                        const GtFrame& gt,
+                        double egoSpeed);

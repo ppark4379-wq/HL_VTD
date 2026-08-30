@@ -8,10 +8,15 @@
 namespace {
 
 // 현재 차선 전방에서 가장 가까운 객체를 찾는다.
-const WorldObjectState* findLeadObject(const WorldState& world) {
+const WorldObjectState* findLeadObject(const WorldState& world,
+                                      int avoidedObstacleId) {
     const WorldObjectState* lead = nullptr;
     for (const auto& object : world.objects) {
         if (!object.isAhead || !object.isOnEgoPath) continue;
+        // 차선변경으로 비켜 가는 중인 장애물은 선행차가 아니다. 이걸 앞차로
+        // 잡으면 최소 추종거리 규칙이 회피 기동 중에 정지를 강제한다.
+        if (avoidedObstacleId >= 0 &&
+            static_cast<int>(object.raw.id) == avoidedObstacleId) continue;
         if (lead == nullptr || object.relativeS < lead->relativeS) {
             lead = &object;
         }
@@ -89,7 +94,8 @@ void updateBehavior(BehaviorState& state,
     }
 
     // Follow 진입과 해제에 서로 다른 임계값을 써서 경계에서의 진동을 막는다.
-    const WorldObjectState* lead = findLeadObject(world);
+    const WorldObjectState* lead =
+        findLeadObject(world, state.avoidedObstacleId);
     if (lead != nullptr) {
         const double desiredGap =
             config.minimumFollowDistance +

@@ -12,6 +12,11 @@ struct PathPlannerConfig {
     double wheelbase{2.944};
     double straightLookahead{8.0};
     double curveLookahead{5.0};
+    // 저속에서 Ld가 길면 목표점이 멀어 조향을 살살 꺾는다. 정지 상태에서
+    // 시작하는 장애물 회피가 이것 때문에 실패한다. 반대로 고속에서 Ld가
+    // 짧으면 과조향으로 흔들린다. 그래서 Ld를 속도에 비례시키고 위아래를 자른다.
+    double minLookahead{3.0};
+    double lookaheadSpeedGain{0.6};
     double curveThreshold{0.02};
     double curvatureCheckDistance{25.0};
     double straightSpeed{8.0};
@@ -43,6 +48,18 @@ struct PlanningBehaviorConfig {
     // 신호 정지선을 찾는 최대 전방 거리.
     // GT trafficLight.id(= XODR controller id)가 일치하는 정지선만 본다.
     double signalStopSearchDistance{80.0};
+    // 횡단보도 진입/점유가 예상되는 객체가 있을 때만 적용하는 접근속도.
+    // 처음부터 빈 횡단보도는 전역경로의 원래 목표속도로 통과한다.
+    double crosswalkApproachSpeed{5.5};      // [m/s]
+    double crosswalkApproachDistance{25.0};  // [m] 이 거리부터 감속
+    double crosswalkNearbyObjectDistance{3.0}; // [m] 주변 객체 조기감속 범위
+    // 한 번 정지 원인이 된 객체가 횡단보도를 완전히 비운 뒤, Ego가
+    // 횡단보도를 빠져나갈 때까지 적용하는 통과속도.
+    double crosswalkClearanceSpeed{6.9};     // [m/s]
+    // 횡단보도 밖이라도 이 시간 뒤 예상 위치가 안이면 점유로 본다.
+    double crosswalkPedestrianPrediction{2.0}; // [s]
+    // 횡단보도 앞 이 거리 안의 정지선을 정지 목표로 삼는다.
+    double crosswalkStopLineSearch{15.0};    // [m]
 };
 
 struct PathPlan {
@@ -108,6 +125,9 @@ struct PlanningProcessData {
     LaneChangeConfig laneChangeConfig;
     PlanningFrameData frame;
     PlanningResult result;
+    // 객체 위험을 한 번이라도 확인한 횡단보도. 객체가 빠져나간 뒤에도
+    // Ego가 횡단보도를 완전히 통과할 때까지 clearance 속도를 적용한다.
+    std::vector<int> activeCrosswalkIds;
     double previousRouteS{};
     bool hasPreviousRouteS{};
 };

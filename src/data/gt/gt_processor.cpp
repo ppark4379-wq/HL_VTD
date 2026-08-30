@@ -198,6 +198,46 @@ WorldState makeWorldState(
         world.egoPathD,
         globalPath, expectedEgoRouteS, gt.ego.heading);
 
+    // 교차로 안에서는 여러 connector road의 lane이 거의 겹쳐 있고 진행방향도
+    // 비슷해서, 순수 최근접 탐색인 worldToLane이 기준 경로와 다른 connector를
+    // 고르는 일이 생긴다. 그러면 Ego의 road/lane과 경로 웨이포인트의 road/lane이
+    // 어긋나 차선변경·회피 계획이 전부 실패한다.
+    // 기준 경로는 어느 road/lane을 지나는지 이미 알고 있으므로, Ego가 실제로
+    // 그 lane 안에 들어 있을 때는 경로 쪽 판정을 우선한다.
+    if (world.egoPathValid && !globalPath.empty()) {
+        const auto hint = std::lower_bound(
+            globalPath.begin(), globalPath.end(), world.egoPathS,
+            [](const Waypoint& point, double value) { return point.s < value; });
+        const Waypoint* routePoint =
+            hint == globalPath.end() ? &globalPath.back() : &(*hint);
+        if (hint != globalPath.begin() && hint != globalPath.end()) {
+            const Waypoint& previous = *(hint - 1);
+            if (std::abs(previous.s - world.egoPathS) <
+                std::abs(routePoint->s - world.egoPathS)) {
+                routePoint = &previous;
+            }
+        }
+        if (!world.egoLaneValid || routePoint->roadId != world.egoRoadId ||
+            routePoint->laneId != world.egoLaneId) {
+            for (const LaneMatch& candidate :
+                 findContainingLanes(mapData, gt.ego.x, gt.ego.y)) {
+                if (!candidate.valid ||
+                    candidate.roadId != routePoint->roadId ||
+                    candidate.laneId != routePoint->laneId) {
+                    continue;
+                }
+                world.egoLaneValid = true;
+                world.egoRoadId = candidate.roadId;
+                world.egoLaneId = candidate.laneId;
+                world.egoSectionIndex = candidate.sectionIndex;
+                world.egoRoadS = candidate.roadS;
+                world.egoLaneWidth = candidate.laneWidth;
+                world.egoLaneCenterDistance = candidate.distance;
+                break;
+            }
+        }
+    }
+
     for (const auto& object : gt.objects) {
         if (object.id == 0 || !validObject(object)) {
             continue;

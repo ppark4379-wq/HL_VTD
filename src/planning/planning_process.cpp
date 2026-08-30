@@ -69,6 +69,85 @@ void addStopRequest(StopManagerData& manager, StopReason reason,
     manager.requests.push_back({reason, true, routeS, holdTime, sourceId});
 }
 
+bool crosswalkHasRiskObject(const Crosswalk& crosswalk,
+                            const WorldState& world,
+                            double predictionHorizon) {
+    return std::any_of(
+        world.objects.begin(), world.objects.end(),
+        [&](const WorldObjectState& object) {
+            if (containsPoint(crosswalk.polygon,
+                              {object.raw.x, object.raw.y})) return true;
+            if (std::any_of(
+                    object.obb.corners.begin(), object.obb.corners.end(),
+                    [&](const Point2D& point) {
+                        return containsPoint(crosswalk.polygon, point);
+                    })) {
+                return true;
+            }
+            if (predictionHorizon <= 0.0 ||
+                std::abs(object.raw.speed) < 0.3) return false;
+            const double predictedX =
+                object.raw.x + object.raw.speed *
+                                   std::cos(object.raw.heading) *
+                                   predictionHorizon;
+            const double predictedY =
+                object.raw.y + object.raw.speed *
+                                   std::sin(object.raw.heading) *
+                                   predictionHorizon;
+            return containsPoint(crosswalk.polygon,
+                                 {predictedX, predictedY});
+        });
+}
+
+double pointToSegmentDistance(const Point2D& point,
+                              const Point2D& begin,
+                              const Point2D& end) {
+    const double dx = end.x - begin.x;
+    const double dy = end.y - begin.y;
+    const double lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared <= 1e-9) {
+        return std::hypot(point.x - begin.x, point.y - begin.y);
+    }
+    const double t = std::clamp(
+        ((point.x - begin.x) * dx + (point.y - begin.y) * dy) /
+            lengthSquared,
+        0.0, 1.0);
+    return std::hypot(point.x - (begin.x + t * dx),
+                      point.y - (begin.y + t * dy));
+}
+
+bool pointNearCrosswalk(const Crosswalk& crosswalk,
+                        const Point2D& point,
+                        double margin) {
+    if (containsPoint(crosswalk.polygon, point)) return true;
+    if (margin <= 0.0 || crosswalk.polygon.size() < 2) return false;
+    for (std::size_t index = 0; index < crosswalk.polygon.size(); ++index) {
+        const Point2D& begin = crosswalk.polygon[index];
+        const Point2D& end =
+            crosswalk.polygon[(index + 1) % crosswalk.polygon.size()];
+        if (pointToSegmentDistance(point, begin, end) <= margin) return true;
+    }
+    return false;
+}
+
+bool crosswalkHasNearbyObject(const Crosswalk& crosswalk,
+                              const WorldState& world,
+                              double margin) {
+    return std::any_of(
+        world.objects.begin(), world.objects.end(),
+        [&](const WorldObjectState& object) {
+            if (pointNearCrosswalk(crosswalk,
+                                   {object.raw.x, object.raw.y}, margin)) {
+                return true;
+            }
+            return std::any_of(
+                object.obb.corners.begin(), object.obb.corners.end(),
+                [&](const Point2D& corner) {
+                    return pointNearCrosswalk(crosswalk, corner, margin);
+                });
+        });
+}
+
 bool shouldStopForYellow(StopManagerData& manager,
                          const WorldState& world,
                          const StopLine& line,
@@ -145,21 +224,22 @@ void updateStopRequests(PlanningProcessData& data,
         // 점유 검사를 유지한다. 진입점을 넘었다는 이유로 보행자 정지를
         // 해제하면 횡단 중인 보행자 앞으로 다시 출발할 수 있다.
         if (crosswalk.exitRouteS < world.egoPathS) continue;
-        const bool occupied = std::any_of(
-            world.objects.begin(), world.objects.end(),
-            [&](const WorldObjectState& object) {
-                if (containsPoint(crosswalk.polygon,
-                                  {object.raw.x, object.raw.y})) return true;
-                return std::any_of(
-                    object.obb.corners.begin(), object.obb.corners.end(),
-                    [&](const Point2D& point) {
-                        return containsPoint(crosswalk.polygon, point);
-                    });
-            });
+        const bool occupied = crosswalkHasRiskObject(
+            crosswalk, world, data.config.crosswalkPedestrianPrediction);
         if (occupied) {
+            // 횡단보도 위에 1 km/h 이하로 3초 이상 서 있으면 감점이다.
+            // 횡단보도 입구를 목표로 삼으면 제동 오차만큼 밀려 횡단보도
+            // 위에 서게 되므로, 그 앞 정지선이 있으면 정지선을 목표로 한다.
+            // 여유는 정지 프로파일의 stop_safety_margin이 이미 적용한다.
+            double target = crosswalk.entryRouteS;
+            for (const auto& line : zones.stopLines) {
+                if (line.routeS > crosswalk.entryRouteS + 1e-3) continue;
+                if (crosswalk.entryRouteS - line.routeS >
+                    data.config.crosswalkStopLineSearch) continue;
+                target = std::min(target, line.routeS);
+            }
             addStopRequest(data.stopManager, StopReason::CrosswalkBlocked,
-                           std::max(crosswalk.entryRouteS,
-                                    world.frontBumperPathS),
+                           std::max(target, world.frontBumperPathS),
                            crosswalk.id);
         }
     }
@@ -283,12 +363,44 @@ void runPlanningProcess(PlanningProcessData& data,
                         double dt) {
     resetPlanningFrame(data);
 
-    PathPlan tracking = runPurePursuit(data.pathPlanner, gt);
+    PathPlan tracking = runPurePursuit(data.pathPlanner, gt, world.egoSpeed);
     data.frame.constraints.mapMatchValid = world.inputValid;
     data.frame.constraints.speedLimit = findZoneSpeedLimit(
         map.staticZones, {world.ego.x, world.ego.y},
         world.egoPathValid ? world.egoPathS : -1.0,
         tracking.targetSpeed);
+
+    // 위험 객체가 있는 횡단보도에만 접근 감속을 적용한다. 처음부터 빈
+    // 횡단보도는 원래 경로 목표속도로 통과한다. 객체가 완전히 빠져나간 뒤에는
+    // 별도의 clearance 속도로 횡단보도를 빠져나가고 원래 속도로 복귀한다.
+    for (const auto& crosswalk : map.staticZones.crosswalks) {
+        auto active = std::find(data.activeCrosswalkIds.begin(),
+                                data.activeCrosswalkIds.end(), crosswalk.id);
+        if (crosswalk.exitRouteS < world.egoPathS) {
+            if (active != data.activeCrosswalkIds.end()) {
+                data.activeCrosswalkIds.erase(active);
+            }
+            continue;
+        }
+        const bool risk = crosswalkHasRiskObject(
+            crosswalk, world, data.config.crosswalkPedestrianPrediction);
+        const bool nearby = crosswalkHasNearbyObject(
+            crosswalk, world, data.config.crosswalkNearbyObjectDistance);
+        if (risk && active == data.activeCrosswalkIds.end()) {
+            data.activeCrosswalkIds.push_back(crosswalk.id);
+        }
+        if (!risk && !nearby && active == data.activeCrosswalkIds.end()) continue;
+        const double distance = crosswalk.entryRouteS - world.frontBumperPathS;
+        if ((risk || nearby) &&
+            distance > data.config.crosswalkApproachDistance) continue;
+        const double limit = (risk || nearby)
+                                 ? data.config.crosswalkApproachSpeed
+                                 : data.config.crosswalkClearanceSpeed;
+        data.frame.constraints.speedLimit =
+            data.frame.constraints.speedLimit > 0.0
+                ? std::min(data.frame.constraints.speedLimit, limit)
+                : limit;
+    }
 
     tryPrepareObstacleLaneChange(
         data.laneChange, data.laneChangeConfig, data.config, world, map,
@@ -310,7 +422,7 @@ void runPlanningProcess(PlanningProcessData& data,
     if (data.laneChange.phase == LaneChangePhase::Execute) {
         tracking = trackLaneChangePath(
             data.laneChange, data.pathPlanner.config, gt,
-            data.laneChangeConfig.maximumLaneChangeSpeed);
+            data.laneChangeConfig.maximumLaneChangeSpeed, world.egoSpeed);
         makeLaneChangeLocalPath(data.frame.localPath, data.laneChange);
     } else {
         if (data.laneChange.phase == LaneChangePhase::Settle &&
@@ -319,7 +431,7 @@ void runPlanningProcess(PlanningProcessData& data,
             data.laneChange.reconnectLaneValid) {
             data.pathPlanner.nearestIndex =
                 data.laneChange.reconnectGlobalIndex;
-            tracking = runPurePursuit(data.pathPlanner, gt);
+            tracking = runPurePursuit(data.pathPlanner, gt, world.egoSpeed);
         }
         generateLocalPath(data.frame.localPath, data.pathPlanner,
                           tracking.nearestIndex,
@@ -328,6 +440,10 @@ void runPlanningProcess(PlanningProcessData& data,
     if (!world.inputValid || world.respawnDetected) {
         data.behaviorState.health = SystemHealth::Recovery;
     }
+    data.behaviorState.avoidedObstacleId =
+        data.laneChange.phase == LaneChangePhase::Execute
+            ? data.laneChange.obstacleId
+            : -1;
     updateBehavior(data.behaviorState, data.frame.behavior,
                    data.frame.constraints, data.frame.stop, world,
                    tracking.targetSpeed, data.config, dt);
