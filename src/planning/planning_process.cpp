@@ -232,11 +232,11 @@ void updateStopRequests(PlanningProcessData& data,
             // 위에 서게 되므로, 그 앞 정지선이 있으면 정지선을 목표로 한다.
             // 여유는 정지 프로파일의 stop_safety_margin이 이미 적용한다.
             double target = crosswalk.entryRouteS;
-            for (const auto& line : zones.stopLines) {
-                if (line.routeS > crosswalk.entryRouteS + 1e-3) continue;
-                if (crosswalk.entryRouteS - line.routeS >
+            for (const auto& candidate : zones.stopLines) {
+                if (candidate.routeS > crosswalk.entryRouteS + 1e-3) continue;
+                if (crosswalk.entryRouteS - candidate.routeS >
                     data.config.crosswalkStopLineSearch) continue;
-                target = std::min(target, line.routeS);
+                target = std::min(target, candidate.routeS);
             }
             addStopRequest(data.stopManager, StopReason::CrosswalkBlocked,
                            std::max(target, world.frontBumperPathS),
