@@ -72,18 +72,33 @@ class VtdScpClient:
     def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
         self.close()
 
-    def connect(self) -> None:
+    def connect(self, timeout: float | None = None) -> None:
         if self._socket is not None:
             return
+        connect_timeout = self.timeout if timeout is None else timeout
         try:
             self._socket = socket.create_connection(
-                (self.host, self.port), timeout=self.timeout
+                (self.host, self.port), timeout=connect_timeout
             )
             self._socket.settimeout(self.timeout)
         except OSError as error:
             raise ScpError(
                 f"cannot connect to VTD SCP at {self.host}:{self.port}: {error}"
             ) from error
+
+    def reconnect(self, timeout: float) -> None:
+        self.close()
+        deadline = time.monotonic() + timeout
+        last_error: ScpError | None = None
+        while time.monotonic() < deadline:
+            try:
+                self.connect(timeout=min(1.0, max(0.1, deadline - time.monotonic())))
+                return
+            except ScpError as error:
+                last_error = error
+                time.sleep(0.2)
+        detail = f": {last_error}" if last_error is not None else ""
+        raise ScpError(f"VTD SCP did not reconnect within {timeout:g}s{detail}")
 
     def close(self) -> None:
         if self._socket is not None:
@@ -181,6 +196,35 @@ class VtdScpClient:
             f"(last state: {last_state})"
         )
 
+    def wait_for_scenario(self, expected: Path, timeout: float) -> None:
+        deadline = time.monotonic() + timeout
+        next_query = 0.0
+        last_filename = "none"
+        while time.monotonic() < deadline:
+            now = time.monotonic()
+            if now >= next_query:
+                self.send('<Query entity="taskControl"><Scenario/></Query>')
+                next_query = now + 0.5
+            try:
+                _, _, payload = self.receive(
+                    timeout=min(0.5, max(0.01, deadline - time.monotonic()))
+                )
+            except TimeoutError:
+                continue
+            try:
+                root = ET.fromstring(payload)
+            except ET.ParseError:
+                continue
+            for element in root.iter("Scenario"):
+                filename = element.attrib.get("filename", "")
+                last_filename = filename or last_filename
+                if filename == str(expected):
+                    return
+        raise ScpError(
+            f"VTD did not register scenario {expected} within {timeout:g}s "
+            f"(last scenario: {last_filename})"
+        )
+
     def configure_scenario(
         self,
         scenario_path: Path,
@@ -192,11 +236,18 @@ class VtdScpClient:
         self.send("<SimCtrl><Stop/></SimCtrl>")
         self.send("<SimCtrl><Config/></SimCtrl>")
         time.sleep(max(0.0, settle_delay))
-        self.send(scenario_load_command(scenario_path, inline=inline))
+        self.reconnect(timeout)
         self.send("<SimCtrl><Apply/></SimCtrl>")
         self.wait_for_state("READY", timeout)
+        self.send(scenario_load_command(scenario_path, inline=inline))
+        if inline:
+            time.sleep(max(0.0, settle_delay))
+        else:
+            self.wait_for_scenario(scenario_path, timeout)
 
     def start(self, timeout: float) -> None:
+        self.send("<SimCtrl><Init/></SimCtrl>")
+        self.wait_for_state("POST-INIT", timeout)
         self.send("<SimCtrl><Start/></SimCtrl>")
         self.wait_for_state("RUN", timeout)
 

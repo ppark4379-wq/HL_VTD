@@ -111,19 +111,36 @@ class VtdScpTests(unittest.TestCase):
                 pack_message(response, sender="TaskControl", receiver="any")
             )
 
+        def respond_scenario(connection: socket.socket, filename: str) -> None:
+            response = (
+                '<Reply entity="taskControl"><Scenario '
+                f'filename="{filename}" contentViaSCP="false"/></Reply>'
+            )
+            connection.sendall(
+                pack_message(response, sender="TaskControl", receiver="any")
+            )
+
         def serve() -> None:
-            connection, _ = server.accept()
             state = "READY"
+            connection, _ = server.accept()
             with connection:
-                for _ in range(9):
+                for _ in range(2):
+                    received.append(receive_packet(connection))
+            connection, _ = server.accept()
+            with connection:
+                for _ in range(10):
                     command = receive_packet(connection)
                     received.append(command)
-                    if command == "<SimCtrl><Start/></SimCtrl>":
+                    if command == "<SimCtrl><Init/></SimCtrl>":
+                        state = "POST-INIT"
+                    elif command == "<SimCtrl><Start/></SimCtrl>":
                         state = "RUN"
                     elif command == "<SimCtrl><Stop/></SimCtrl>":
                         state = "READY"
-                    elif command.startswith("<Query "):
+                    elif "<SimState/>" in command:
                         respond(connection, state)
+                    elif "<Scenario/>" in command:
+                        respond_scenario(connection, str(scenario))
             server.close()
 
         with tempfile.TemporaryDirectory() as directory:
@@ -132,7 +149,9 @@ class VtdScpTests(unittest.TestCase):
             thread = threading.Thread(target=serve)
             thread.start()
             with VtdScpClient("127.0.0.1", port, timeout=2.0) as client:
-                client.configure_scenario(scenario, timeout=2.0, settle_delay=0.0)
+                client.configure_scenario(
+                    scenario, timeout=2.0, settle_delay=0.05
+                )
                 client.start(timeout=2.0)
                 client.stop(timeout=2.0)
             thread.join(timeout=2.0)
@@ -140,10 +159,11 @@ class VtdScpTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(received[0], "<SimCtrl><Stop/></SimCtrl>")
         self.assertEqual(received[1], "<SimCtrl><Config/></SimCtrl>")
-        self.assertTrue(received[2].startswith("<SimCtrl><LoadScenario filename="))
-        self.assertEqual(received[3], "<SimCtrl><Apply/></SimCtrl>")
-        self.assertEqual(received[5], "<SimCtrl><Start/></SimCtrl>")
-        self.assertEqual(received[7], "<SimCtrl><Stop/></SimCtrl>")
+        self.assertEqual(received[2], "<SimCtrl><Apply/></SimCtrl>")
+        self.assertTrue(received[4].startswith("<SimCtrl><LoadScenario filename="))
+        self.assertEqual(received[6], "<SimCtrl><Init/></SimCtrl>")
+        self.assertEqual(received[8], "<SimCtrl><Start/></SimCtrl>")
+        self.assertEqual(received[10], "<SimCtrl><Stop/></SimCtrl>")
 
 
 if __name__ == "__main__":
