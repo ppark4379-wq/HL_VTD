@@ -28,7 +28,8 @@ double findMaxCurvature(const std::vector<Waypoint>& waypoints,
 
 // 직선/곡선 여부에 따라 lookahead distance를 선택한다.
 double chooseLookahead(double maxCurvature,
-                       const PathPlannerConfig& config);
+                       const PathPlannerConfig& config,
+                       double egoSpeed);
 
 // Ego heading과 lookahead target 방향 사이의 각도 오차를 계산한다.
 double computeHeadingError(const GtFrame& gt, const Waypoint& target);

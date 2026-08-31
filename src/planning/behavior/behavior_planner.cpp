@@ -24,6 +24,34 @@ const WorldObjectState* findLeadObject(const WorldState& world,
     return lead;
 }
 
+// 차량 중심이 아직 Ego 차선 안에 안 들어왔더라도 옆 차선에서
+// 가까이 나란히 달리면 끼어들기 후 제동거리를 미리 확보한다.
+const WorldObjectState* findNearbyForwardObject(
+    const WorldState& world,
+    int avoidedObstacleId,
+    double maximumDistance,
+    double lateralDistance) {
+    const WorldObjectState* nearest = nullptr;
+    for (const auto& object : world.objects) {
+        // 이 로직은 끼어드는 이동 차량을 위한 사전 감속이다.
+        // 콘·표지물 같은 정지 객체를 옆 차선 차량으로 오인하지 않는다.
+        if (std::abs(object.raw.speed) < 0.3 ||
+            !object.pathValid || !object.isAhead ||
+            object.relativeS >= maximumDistance ||
+            std::abs(object.relativeD) > lateralDistance) {
+            continue;
+        }
+        if (avoidedObstacleId >= 0 &&
+            static_cast<int>(object.raw.id) == avoidedObstacleId) {
+            continue;
+        }
+        if (nearest == nullptr || object.relativeS < nearest->relativeS) {
+            nearest = &object;
+        }
+    }
+    return nearest;
+}
+
 // 앞차 속도를 Ego 진행방향 성분으로 환산한다.
 double longitudinalSpeedOf(const WorldObjectState& object,
                            const WorldState& world) {
@@ -90,6 +118,23 @@ void updateBehavior(BehaviorState& state,
         output.targetSpeed = std::min(
             limitedCruise,
             std::sqrt(2.0 * config.comfortableDeceleration * distance));
+        return;
+    }
+
+    // 현재 속도에 비례해 탐색거리를 늘린다. 50 km/h에서 기본값은
+    // 5 m + 1.8 s * 13.9 m/s = 약 30 m이다.
+    const double cautionDistance =
+        config.minimumFollowDistance +
+        config.followTimeGap * std::max(0.0, world.egoSpeed);
+    const WorldObjectState* nearby = findNearbyForwardObject(
+        world, state.avoidedObstacleId, cautionDistance,
+        config.nearbyObjectLateralDistance);
+    if (nearby != nullptr) {
+        state.longitudinal = LonMode::Follow;
+        output.longitudinal = LonMode::Follow;
+        output.targetSpeed = std::min(
+            {limitedCruise, config.nearbyObjectCautionSpeed,
+             std::max(0.0, longitudinalSpeedOf(*nearby, world))});
         return;
     }
 

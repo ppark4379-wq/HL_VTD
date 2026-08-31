@@ -63,10 +63,16 @@ bool setSpeedConfigValue(const std::map<std::string, double>& values,
 }
 
 bool isDrivingConfigValid(const DrivingConfig& config) {
-    return config.behavior.comfortableDeceleration > 0.0 &&
+    return config.planner.sharpCurveThreshold >
+               config.planner.curveThreshold &&
+           config.planner.sharpCurveSpeed > 0.0 &&
+           config.planner.sharpCurveSpeed <= config.planner.curveSpeed &&
+           config.behavior.comfortableDeceleration > 0.0 &&
            config.behavior.stopHoldTime >= 1.0 &&
            config.behavior.followTimeGap > 0.0 &&
            config.behavior.minimumFollowDistance > 0.0 &&
+           config.behavior.nearbyObjectCautionSpeed > 0.0 &&
+           config.behavior.nearbyObjectLateralDistance > 0.0 &&
            config.behavior.crosswalkApproachSpeed > 0.0 &&
            config.behavior.crosswalkNearbyObjectDistance > 0.0 &&
            config.behavior.crosswalkClearanceSpeed > 0.0 &&
@@ -111,6 +117,8 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.planner.lookaheadSpeedGain) &&
         setConfigValue(values, "pure_pursuit.curve_threshold",
                        config.planner.curveThreshold) &&
+        setConfigValue(values, "pure_pursuit.sharp_curve_threshold",
+                       config.planner.sharpCurveThreshold) &&
         setConfigValue(values, "pure_pursuit.curvature_check_distance",
                        config.planner.curvatureCheckDistance) &&
         setConfigValue(values, "pure_pursuit.goal_tolerance",
@@ -119,6 +127,8 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.planner.straightSpeed) &&
         setSpeedConfigValue(values, "speed.curve_target_kph",
                        config.planner.curveSpeed) &&
+        setSpeedConfigValue(values, "speed.sharp_curve_target_kph",
+                       config.planner.sharpCurveSpeed) &&
         setSpeedConfigValue(values, "speed.school_zone_target_kph",
                        config.planner.schoolZoneSpeed) &&
         setConfigValue(values, "planning.comfortable_deceleration",
@@ -133,6 +143,10 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.followTimeGap) &&
         setConfigValue(values, "planning.minimum_follow_distance",
                        config.behavior.minimumFollowDistance) &&
+        setSpeedConfigValue(values, "planning.nearby_object_caution_kph",
+                       config.behavior.nearbyObjectCautionSpeed) &&
+        setConfigValue(values, "planning.nearby_object_lateral_distance",
+                       config.behavior.nearbyObjectLateralDistance) &&
         setConfigValue(values, "planning.emergency_ttc",
                        config.behavior.emergencyTTC) &&
         setConfigValue(values, "planning.collision_prediction_horizon",

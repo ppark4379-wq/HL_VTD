@@ -125,6 +125,9 @@ double computePurePursuitSteering(double headingError,
 // 앞쪽에 곡선이 있으면 감속한 목표속도를 선택한다.
 double chooseTargetSpeed(double maxCurvature,
                          const PathPlannerConfig& config) {
+    if (maxCurvature >= config.sharpCurveThreshold) {
+        return config.sharpCurveSpeed;
+    }
     return maxCurvature >= config.curveThreshold
                ? config.curveSpeed
                : config.straightSpeed;

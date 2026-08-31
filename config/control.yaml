@@ -9,6 +9,7 @@ pure_pursuit:
   min_lookahead: 3.0              # [m] 저속 하한 (정지 상태 회피용)
   lookahead_speed_gain: 0.8       # [s] Ld = 0.8 x 속도
   curve_threshold: 0.02           # [1/m] 곡선 판정 곡률
+  sharp_curve_threshold: 0.20     # [1/m] 급커브 판정; 실측 일반 0.055, 급커브 0.220~0.414
   curvature_check_distance: 25.0  # [m] 앞쪽 곡률 탐색 거리
   goal_tolerance: 1.5             # [m] 도착 판정 거리
 
@@ -20,8 +21,9 @@ pure_pursuit:
 # 초과 1 km/h까지만 허용되므로 목표는 상한보다 3~4 km/h 낮게 잡는다.
 # 보호구역 등 구간 제한은 config/maps/living_lab.yaml의 speed_zones가 덮어쓴다.
 speed:
-  straight_target_kph: 50.0        # 50 km/h 제한 대비 4 km/h 여유
+  straight_target_kph: 45.0        # 50 km/h 제한 대비 4 km/h 여유
   curve_target_kph: 30.0
+  sharp_curve_target_kph: 20.0    # maxCurvature >= sharp_curve_threshold
   school_zone_target_kph: 27.0     # 30 km/h 제한 대비 3 km/h 여유
 
 planning:
@@ -33,6 +35,10 @@ planning:
   stopped_speed_threshold_kph: 0.55 # [km/h] 정지로 인정할 속도
   follow_time_gap: 1.8             # [s] 선행 객체 추종 시간 간격
   minimum_follow_distance: 5.0     # [m] 최소 추종거리
+  # 50 km/h에서 위 두 값을 쓰면 5 + 1.8*13.9 = 약 30 m 전방부터
+  # 옆 차선 차량도 주의속도로 감속한다. 끼어들기 후 제동거리를 남기기 위함.
+  nearby_object_caution_kph: 15.0   # [km/h] 근접 전방 객체 주의속도
+  nearby_object_lateral_distance: 5.5 # [m] 옆 차선 포함 경로 횡방 탐색폭
   emergency_ttc: 1.5               # [s] 긴급제동 TTC
   collision_prediction_horizon: 3.0 # [s] OBB 예측 범위
   collision_prediction_step: 0.2   # [s] OBB 예측 간격

@@ -57,6 +57,7 @@ add_executable(extract_static_zones
 
 add_executable(controller_logic_tests
     tests/controller_logic_tests.cpp
+    src/planning/behavior/behavior_planner.cpp
     src/planning/local/lane_change_planner.cpp
     src/planning/local/path_planner.cpp
     src/planning/collision/collision_checker.cpp
