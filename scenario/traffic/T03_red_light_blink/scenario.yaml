@@ -1,0 +1,58 @@
+schema_version: 1
+
+scenario:
+  id: T03
+  category: traffic
+  name: red_light_blink
+  description: 적색점멸 신호 접근 및 일시정지
+  file: T03_red_light_blink.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+
+events:
+  - name: flashing_red_approach
+    subject: Ego
+    trigger:
+      type: approach_relevant_signal
+    action:
+      type: stop_then_proceed
+
+expected_outcomes:
+  - detect_flashing_red
+  - stop_before_stop_line
+  - resume_after_stop
+
+evaluation:
+  codes:
+    - official.flashing_red_stop
+  required_metrics:
+    - traffic_light_state
+    - ego_speed
+    - stop_line_distance
+    - stop_duration
+  thresholds_status: official

@@ -1,0 +1,59 @@
+schema_version: 1
+
+scenario:
+  id: V01
+  category: vehicle
+  name: lead_vehicle
+  description: 선행차 추종 및 안전거리 유지
+  file: V01_lead_vehicle.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+  lead_vehicle_speed_mps:
+    type: float
+    unit: m/s
+    default: 13.8888889
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+  - name: New Player
+    type: vehicle
+    role: lead_vehicle
+
+events: []
+
+expected_outcomes:
+  - follow_route
+  - maintain_safe_following_distance
+  - avoid_collision
+
+evaluation:
+  codes:
+    - internal.dynamic_vehicle_following
+  required_metrics:
+    - ego_speed
+    - nearest_object_distance
+    - relative_speed
+    - ttc
+  thresholds_status: pending
