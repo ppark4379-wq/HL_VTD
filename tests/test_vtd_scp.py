@@ -79,6 +79,7 @@ class VtdScpTests(unittest.TestCase):
                 received.append(receive_packet(connection))
                 response = (
                     '<Info><SimState source="TaskControl" state="READY"/></Info>'
+                    "\x00"
                 )
                 connection.sendall(
                     pack_message(response, sender="TaskControl", receiver="any")

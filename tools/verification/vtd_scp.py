@@ -136,9 +136,10 @@ class VtdScpClient:
         total_size = SCP_HEADER.size + data_size
         if len(self._buffer) < total_size:
             return None
-        payload = bytes(self._buffer[SCP_HEADER.size:total_size]).decode(
-            "utf-8", errors="replace"
+        payload_bytes = bytes(self._buffer[SCP_HEADER.size:total_size]).rstrip(
+            bytes(1)
         )
+        payload = payload_bytes.decode("utf-8", errors="replace")
         del self._buffer[:total_size]
         return (
             sender.split(bytes(1), 1)[0].decode("utf-8", errors="replace"),
