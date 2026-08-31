@@ -164,7 +164,20 @@ def run_automated(
                 scenario_file, args.vtd_timeout, inline=args.inline_scenario
             )
             print("[auto-vtd] VTD is READY; initializing scenario")
-            scp.initialize(args.vtd_timeout)
+            try:
+                scp.initialize(min(15.0, args.vtd_timeout))
+            except ScpError:
+                print(
+                    "[auto-vtd] IG did not initialize; rebuilding the VTD setup"
+                )
+                scp.configure_scenario(
+                    scenario_file,
+                    args.vtd_timeout,
+                    inline=args.inline_scenario,
+                    force_reconfigure=True,
+                )
+                print("[auto-vtd] VTD setup recovered; retrying initialization")
+                scp.initialize(args.vtd_timeout)
             scp.show_camera_owner("birdCam")
             print("[auto-vtd] birdCam configured to show Ego")
             print("[auto-vtd] VTD is initialized; starting HL_VTD")

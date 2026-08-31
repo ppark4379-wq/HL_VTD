@@ -76,6 +76,25 @@ class VtdScpTests(unittest.TestCase):
             ['<Camera name=\'bird"Cam\' showOwner="true"><Set/></Camera>'],
         )
 
+    def test_force_reconfigure_does_not_reuse_ready_state(self) -> None:
+        client = VtdScpClient.__new__(VtdScpClient)
+        sent: list[str] = []
+        client.get_state = lambda _timeout: "READY"
+        client.send = sent.append
+        client.reconnect = lambda _timeout: None
+        client.wait_for_state = lambda _state, _timeout: None
+        client.wait_for_scenario = lambda _scenario, _timeout: None
+        client.configure_scenario(
+            Path("/tmp/test.xml"),
+            timeout=2.0,
+            settle_delay=0.0,
+            force_reconfigure=True,
+        )
+        self.assertEqual(sent[0], "<SimCtrl><Stop/></SimCtrl>")
+        self.assertEqual(sent[1], "<SimCtrl><Config/></SimCtrl>")
+        self.assertEqual(sent[2], "<SimCtrl><Apply/></SimCtrl>")
+        self.assertTrue(sent[3].startswith("<SimCtrl><LoadScenario "))
+
     def test_wait_for_state_queries_until_expected_response(self) -> None:
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.bind(("127.0.0.1", 0))

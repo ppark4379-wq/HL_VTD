@@ -254,13 +254,14 @@ class VtdScpClient:
         *,
         inline: bool = False,
         settle_delay: float = 1.0,
+        force_reconfigure: bool = False,
     ) -> None:
         state = self.get_state(min(2.0, timeout))
         if state in {"RUN", "PAUSE", "POST-INIT", "INIT", "WAIT-FOR-INIT-CONFIRM"}:
             self.send("<SimCtrl><Stop/></SimCtrl>")
             self.wait_for_state("READY", timeout)
             state = "READY"
-        if state != "READY":
+        if force_reconfigure or state != "READY":
             self.send("<SimCtrl><Stop/></SimCtrl>")
             self.send("<SimCtrl><Config/></SimCtrl>")
             time.sleep(max(0.0, settle_delay))
