@@ -1,5 +1,6 @@
 #include "data/map/static_zones.hpp"
 #include "network/send/control_sender.hpp"
+#include "planning/behavior/behavior_planner.hpp"
 #include "planning/collision/collision_checker.hpp"
 #include "planning/global/reference_path_generator.hpp"
 #include "planning/local/lane_change_planner.hpp"
@@ -295,6 +296,67 @@ void testKeepTargetLaneWhenItRejoinsNextRoad() {
     assert(laneChange.phase == LaneChangePhase::Settle);
 }
 
+void testNearbyAdjacentVehicleCapsSpeedBeforeCutIn() {
+    PlanningBehaviorConfig config;
+    config.followTimeGap = 1.8;
+    config.minimumFollowDistance = 5.0;
+    config.nearbyObjectCautionSpeed = 20.0 / 3.6;
+    config.nearbyObjectLateralDistance = 5.5;
+
+    WorldState world;
+    world.egoSpeed = 50.0 / 3.6;
+    WorldObjectState adjacent;
+    adjacent.raw.id = 2;
+    adjacent.raw.speed = 40.0F / 3.6F;
+    adjacent.raw.heading = 0.0F;
+    adjacent.pathValid = true;
+    adjacent.isAhead = true;
+    adjacent.isOnEgoPath = false;
+    adjacent.relativeS = 25.0;
+    adjacent.relativeD = 3.5;
+    world.objects.push_back(adjacent);
+
+    BehaviorState state;
+    BehaviorDecision output;
+    ConstraintSet constraints;
+    constraints.speedLimit = 50.0 / 3.6;
+    StopDecision stop;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Follow);
+    assert(std::abs(output.targetSpeed - 20.0 / 3.6) < 1e-9);
+
+    // 같은 객체여도 동적 주의거리(약 30 m) 밖이면 순항한다.
+    world.objects.front().relativeS = 35.0;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Cruise);
+    assert(std::abs(output.targetSpeed - 50.0 / 3.6) < 1e-9);
+
+    // 경로 옆의 콘·표지물은 끼어들기 차량이 아니므로 정지하지 않는다.
+    world.objects.front().relativeS = 10.0;
+    world.objects.front().raw.speed = 0.0F;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Cruise);
+    assert(std::abs(output.targetSpeed - 50.0 / 3.6) < 1e-9);
+}
+
+void testSharpCurveHasSeparateSpeed() {
+    PathPlannerConfig config;
+    config.curveThreshold = 0.02;
+    config.sharpCurveThreshold = 0.20;
+    config.straightSpeed = 50.0 / 3.6;
+    config.curveSpeed = 30.0 / 3.6;
+    config.sharpCurveSpeed = 20.0 / 3.6;
+    assert(std::abs(chooseTargetSpeed(0.01, config) -
+                    config.straightSpeed) < 1e-9);
+    assert(std::abs(chooseTargetSpeed(0.055, config) -
+                    config.curveSpeed) < 1e-9);
+    assert(std::abs(chooseTargetSpeed(0.22, config) -
+                    config.sharpCurveSpeed) < 1e-9);
+}
+
 }  // namespace
 
 int main() {
@@ -303,6 +365,8 @@ int main() {
     testPredictedCollisionIsNotCurrentCollision();
     testObstacleLaneChange();
     testKeepTargetLaneWhenItRejoinsNextRoad();
+    testNearbyAdjacentVehicleCapsSpeedBeforeCutIn();
+    testSharpCurveHasSeparateSpeed();
     std::cout << "controller_logic_tests: PASS\n";
     return 0;
 }

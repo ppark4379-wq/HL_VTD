@@ -18,9 +18,11 @@ struct PathPlannerConfig {
     double minLookahead{3.0};
     double lookaheadSpeedGain{0.6};
     double curveThreshold{0.02};
+    double sharpCurveThreshold{0.20};
     double curvatureCheckDistance{25.0};
     double straightSpeed{8.0};
     double curveSpeed{4.0};
+    double sharpCurveSpeed{5.5555555556};
     double schoolZoneSpeed{8.0};
     double goalTolerance{1.5};
 };
@@ -32,6 +34,9 @@ struct PlanningBehaviorConfig {
     double stoppedSpeedThreshold{0.15};
     double followTimeGap{1.8};
     double minimumFollowDistance{5.0};
+    // 옆 차선 차량이 급격히 진입해도 제동 거리를 확보한다.
+    double nearbyObjectCautionSpeed{5.5555555556};
+    double nearbyObjectLateralDistance{5.5};
     double emergencyTTC{1.5};
     double collisionPredictionHorizon{3.0};
     double collisionPredictionStep{0.2};
@@ -109,6 +114,8 @@ struct PlanningResult {
     bool goalReached{};
     double targetSpeed{};
     StopReason stopReason{StopReason::None};
+    LonMode longitudinal{LonMode::Cruise};
+    SystemHealth health{SystemHealth::Ok};
     PathPlan trackingPlan;
     LocalPathData localPath;
     PathSafetyResult pathSafety;

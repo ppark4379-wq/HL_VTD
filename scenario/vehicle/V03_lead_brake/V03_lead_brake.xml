@@ -19,7 +19,7 @@
         <Player>
             <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_Black" Name="Ego"/>
             <Init>
-                <Speed Value="8.3333333333333339e+00"/>
+                <Speed Value="0.0000000000000000e+00"/>
                 <PosAbsolute X="3.5510278701782227e+02" Y="-1.2765158843994141e+02" Z="4.1637069847530697e+01" Direction="5.2539297829833229e+00" AlignToRoad="true"/>
             </Init>
         </Player>

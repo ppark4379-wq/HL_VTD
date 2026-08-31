@@ -13,8 +13,9 @@
     <PulkTraffic/>
     <TrafficControl>
         <Path Name="Path01" PathId="1">
-            <Waypoint PathOption="shortest" s="1.6253097545444487e+02" TrackId="128"/>
-            <Waypoint PathOption="shortest" s="7.7725832019308314e+01" TrackId="1928"/>
+            <Waypoint PathOption="shortest" s="3.4485593329020219e+01" TrackId="429"/>
+            <Waypoint PathOption="shortest" s="6.1133433600081780e+01" TrackId="418"/>
+            <Waypoint PathOption="shortest" s="1.2518601765305371e+02" TrackId="128"/>
         </Path>
         <Player>
             <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_ActiveBlue" Name="Ego"/>
@@ -24,18 +25,20 @@
             </Init>
         </Player>
         <Player>
-            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="LeadVehicle"/>
+            <Description Driver="KeepLaneDriver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="LeadVehicle"/>
             <Init>
-                <Speed Value="4.1666666666666670e+00"/>
-                <PosAbsolute X="3.5732991533636408e+02" Y="-1.2514582845091188e+02" Z="4.1617130159059080e+01" Direction="5.3256818104764072e+00" AlignToRoad="true"/>
+                <Speed Value="5.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="1.0827616920917183e+02" EndAction="continue" TargetS="2.8861950600882591e+02" StartLane="2" PathId="1"/>
             </Init>
         </Player>
         <PlayerActions Player="Ego"/>
         <PlayerActions Player="LeadVehicle">
             <Action Name="cut_in_trigger_rel">
-                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="4.0000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="4.0000000000000000e+01" X="3.4017184448242188e+02" Y="-1.0412120056152344e+02"/>
-                <LaneChange Direction="-1" Force="false" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="4.5000000000000000e+00" Time="3.5000000000000000e+00"/>
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.6000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="1.6000000000000000e+01" X="3.4017184448242188e+02" Y="-1.0412120056152344e+02"/>
+                <LaneChange Direction="-1" Force="false" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Time="2.5000000000000000e+00"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="9.0000000000000000e+00"/>
             </Action>
         </PlayerActions>
     </TrafficControl>

@@ -27,7 +27,7 @@ parameters:
   ego_speed_mps:
     type: float
     unit: m/s
-    default: 16.666666666666668
+    default: 0.0
 
 entities:
   - name: Ego
