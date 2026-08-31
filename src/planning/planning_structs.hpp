@@ -109,6 +109,8 @@ struct PlanningResult {
     bool goalReached{};
     double targetSpeed{};
     StopReason stopReason{StopReason::None};
+    LonMode longitudinal{LonMode::Cruise};
+    SystemHealth health{SystemHealth::Ok};
     PathPlan trackingPlan;
     LocalPathData localPath;
     PathSafetyResult pathSafety;

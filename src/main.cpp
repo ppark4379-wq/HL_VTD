@@ -37,6 +37,29 @@ struct CliOptions {
     std::filesystem::path ready_file;
 };
 
+const char* stopReasonName(StopReason reason) {
+    switch (reason) {
+        case StopReason::None: return "none";
+        case StopReason::RedLight: return "red_light";
+        case StopReason::FlashingRed: return "flashing_red";
+        case StopReason::Pedestrian: return "pedestrian";
+        case StopReason::Obstacle: return "obstacle";
+        case StopReason::CrosswalkBlocked: return "crosswalk_blocked";
+    }
+    return "multiple";
+}
+
+const char* zeroTargetSpeedCause(const PlanningResult& planning) {
+    if (planning.goalReached) return "goal_reached";
+    if (planning.emergencyBrake) return "emergency_brake";
+    if (planning.stopReason != StopReason::None) {
+        return stopReasonName(planning.stopReason);
+    }
+    if (planning.health == SystemHealth::Recovery) return "recovery";
+    if (!planning.valid) return "invalid_plan_or_input";
+    return "planner_speed_constraint";
+}
+
 CliOptions parseOptions(int argc, char* argv[]) {
     CliOptions options;
     for (int i = 1; i < argc; ++i) {
@@ -105,8 +128,9 @@ CliOptions parseOptions(int argc, char* argv[]) {
 }
 
 void printDrivingStatus(const GtFrame& gt,
-                        const PathPlan& plan,
+                        const PlanningResult& planning,
                         const ControlProcessData& control) {
+    const PathPlan& plan = planning.trackingPlan;
     std::cout << "[drive] ego=(" << gt.ego.x << ", " << gt.ego.y << ')'
               << " speed=" << control.egoSpeed
               << " nearest=" << plan.nearestIndex
@@ -117,8 +141,19 @@ void printDrivingStatus(const GtFrame& gt,
               << " targetAccel=" << control.latestCommand.targetAccel
               << " trafficLightId=" << gt.trafficLight.id
               << " trafficLightState="
-              << static_cast<unsigned int>(gt.trafficLight.state)
-              << '\n';
+              << static_cast<unsigned int>(gt.trafficLight.state);
+
+    if (plan.targetSpeed <= 0.0) {
+        std::cout << " zeroSpeedCause=" << zeroTargetSpeedCause(planning)
+                  << " stopReason=" << stopReasonName(planning.stopReason)
+                  << " goalReached=" << planning.goalReached
+                  << " emergencyBrake=" << planning.emergencyBrake
+                  << " collision=" << planning.pathSafety.collision
+                  << " predictedCollision="
+                  << planning.pathSafety.predictedCollision
+                  << " riskObjectId=" << planning.pathSafety.riskObjectId;
+    }
+    std::cout << '\n';
 }
 
 struct FrameClockData {
@@ -284,7 +319,7 @@ int main(int argc, char* argv[]) {
             }
 
             if (frameCount % 10 == 0) {
-                printDrivingStatus(gt, planning.result.trackingPlan, control);
+                printDrivingStatus(gt, planning.result, control);
                 if (options.debug_objects) {
                     printWorldObjectStates(world.state);
                 }

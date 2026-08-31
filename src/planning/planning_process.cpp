@@ -500,6 +500,8 @@ void runPlanningProcess(PlanningProcessData& data,
     data.result.goalReached = tracking.goalReached;
     data.result.targetSpeed = tracking.targetSpeed;
     data.result.stopReason = data.frame.stop.reason;
+    data.result.longitudinal = data.frame.behavior.longitudinal;
+    data.result.health = data.frame.behavior.health;
     data.result.trackingPlan = tracking;
     data.result.localPath = data.frame.localPath;
     data.result.pathSafety = data.frame.pathSafety;
