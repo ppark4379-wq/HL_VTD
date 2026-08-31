@@ -27,7 +27,7 @@
         <Player>
             <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_White" Name="Ego"/>
             <Init>
-                <Speed Value="1.6666666666666668e+01"/>
+                <Speed Value="0.0000000000000000e+00"/>
                 <PosRoute/>
                 <PathRef StartS="0.0000000000000000e+00" EndAction="loop" TargetS="4.9223212837901092e+03" StartLane="1" PathId="1"/>
             </Init>

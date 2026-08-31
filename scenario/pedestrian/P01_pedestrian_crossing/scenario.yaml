@@ -27,7 +27,7 @@ parameters:
   ego_speed_mps:
     type: float
     unit: m/s
-    default: 8.333333333333334
+    default: 0.0
 
   trigger_distance_m:
     type: float
