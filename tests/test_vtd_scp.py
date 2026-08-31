@@ -66,6 +66,16 @@ class VtdScpTests(unittest.TestCase):
             '<SimCtrl><LoadScenario filename="/tmp/V04_cut_in.xml"/></SimCtrl>',
         )
 
+    def test_show_camera_owner_command(self) -> None:
+        client = VtdScpClient.__new__(VtdScpClient)
+        sent: list[str] = []
+        client.send = sent.append
+        client.show_camera_owner('bird"Cam')
+        self.assertEqual(
+            sent,
+            ['<Camera name=\'bird"Cam\' showOwner="true"><Set/></Camera>'],
+        )
+
     def test_wait_for_state_queries_until_expected_response(self) -> None:
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.bind(("127.0.0.1", 0))

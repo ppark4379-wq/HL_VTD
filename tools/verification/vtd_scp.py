@@ -277,6 +277,12 @@ class VtdScpClient:
         self.send("<SimCtrl><Init/></SimCtrl>")
         self.wait_for_state("POST-INIT", timeout)
 
+    def show_camera_owner(self, camera_name: str) -> None:
+        quoted_name = quoteattr(camera_name)
+        self.send(
+            f"<Camera name={quoted_name} showOwner=\"true\"><Set/></Camera>"
+        )
+
     def start(self, timeout: float) -> None:
         self.send("<SimCtrl><Start/></SimCtrl>")
         self.wait_for_state("RUN", timeout)

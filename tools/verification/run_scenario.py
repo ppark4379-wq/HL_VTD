@@ -165,6 +165,8 @@ def run_automated(
             )
             print("[auto-vtd] VTD is READY; initializing scenario")
             scp.initialize(args.vtd_timeout)
+            scp.show_camera_owner("birdCam")
+            print("[auto-vtd] birdCam configured to show Ego")
             print("[auto-vtd] VTD is initialized; starting HL_VTD")
             controller = subprocess.Popen(command, cwd=REPO_ROOT)
             try:
