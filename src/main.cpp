@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -33,6 +34,7 @@ struct CliOptions {
     bool check_config_only = false;
     bool receive_only = false;
     bool debug_objects = false;
+    std::filesystem::path ready_file;
 };
 
 CliOptions parseOptions(int argc, char* argv[]) {
@@ -82,13 +84,18 @@ CliOptions parseOptions(int argc, char* argv[]) {
             options.receive_only = true;
         } else if (argument == "--debug-objects") {
             options.debug_objects = true;
+        } else if (argument == "--ready-file") {
+            if (++i >= argc) {
+                throw std::invalid_argument("--ready-file requires a file path");
+            }
+            options.ready_file = argv[i];
         } else if (argument == "--help" || argument == "-h") {
             std::cout
                 << "Usage: hl_vtd [--config PATH] [--control-config PATH] "
                    "[--path PATH] [--map-config PATH] [--vehicle-config PATH] "
                    "[--log CSV] [--scenario-id ID] "
                    "[--run-id ID] [--receive-only] [--debug-objects] "
-                   "[--check-config]\n";
+                   "[--ready-file PATH] [--check-config]\n";
             std::exit(0);
         } else {
             throw std::invalid_argument("unknown argument: " + argument);
@@ -165,6 +172,15 @@ void printMapReadiness(const StaticZoneData& zones) {
     }
 }
 
+void writeReadyFile(const std::filesystem::path& path) {
+    if (path.empty()) return;
+    std::ofstream stream(path, std::ios::trunc);
+    if (!stream) {
+        throw std::runtime_error("cannot write ready file: " + path.string());
+    }
+    stream << "connected\n";
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -237,6 +253,7 @@ int main(int argc, char* argv[]) {
 
         auto receiver = makeGtReceiver(config.vtd);
         connectGtReceiver(receiver);
+        writeReadyFile(options.ready_file);
         setVtdReceiveTimeout(receiver.client,
                              drivingConfig.runtime.inputTimeout);
 

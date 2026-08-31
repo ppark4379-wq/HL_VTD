@@ -59,6 +59,49 @@ python3 tools/verification/run_scenario.py \
 
 Validator가 `RESULT: PASS`를 출력하고 HL_VTD가 GT를 기다리면 VTD Play를 누릅니다. 경로 끝에 도달하면 `[drive] goal reached`와 함께 종료됩니다.
 
+### VTD 시나리오 자동 실행
+
+VTD 프로그램과 `00_HL_VTD` Setup을 실행해 둔 상태라면 SCP 자동화로
+Scenario 선택, Configure/Apply, Play와 Stop을 한 명령에서 처리할 수 있습니다.
+
+```bash
+python3 tools/verification/run_scenario.py \
+  scenario/vehicle/V04_cut_in \
+  --run-id test_01 \
+  --auto-vtd
+```
+
+자동 실행 순서는 다음과 같습니다.
+
+```text
+Scenario 검증 및 XML 전송
+→ VTD Configure/Apply 완료 대기
+→ HL_VTD 실행 및 TCP 연결 대기
+→ VTD Play
+→ CSV 로깅
+→ 제어기 종료 후 VTD Stop
+```
+
+제어기 PC와 VTD PC가 분리되어 있으면 `config/network.yaml`의
+`vtd.host_ip`를 VTD PC 주소로 설정합니다. SCP는 같은 주소의 TCP 48179번을
+사용하므로 VTD PC 방화벽에서도 이 포트를 허용해야 합니다. Scenario XML은
+SCP 메시지에 포함해 전송하므로 두 PC가 Scenario 폴더를 공유할 필요는
+없지만, XML이 참조하는 VTD Project·Distro 자산은 VTD PC에 설치되어 있어야
+합니다.
+
+별도 네트워크 설정 파일이나 SCP 주소를 지정할 수도 있습니다.
+
+```bash
+python3 tools/verification/run_scenario.py \
+  scenario/vehicle/V04_cut_in \
+  --config config/network.lab.yaml \
+  --scp-host 165.246.170.76 \
+  --auto-vtd \
+  --run-timeout 180
+```
+
+`--auto-vtd`를 생략하면 기존 수동 Load/Apply/Play 방식으로 동작합니다.
+
 다음 시험에서는 기존 로그 덮어쓰기를 피하도록 실행 ID를 변경합니다.
 
 ```bash

@@ -8,10 +8,12 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
-from validate_scenario import REPO_ROOT, validate_scenario
+from validate_scenario import REPO_ROOT, load_manifest, validate_scenario
+from vtd_scp import ScpError, VtdScpClient
 
 
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -38,22 +40,67 @@ def parse_args() -> argparse.Namespace:
         help="Logger run ID (letters, digits, dot, underscore, hyphen)",
     )
     parser.add_argument(
+        "--config",
+        type=Path,
+        default=REPO_ROOT / "config" / "network.yaml",
+        help="HL_VTD network config (default: config/network.yaml)",
+    )
+    parser.add_argument(
+        "--auto-vtd",
+        action="store_true",
+        help="Load, Apply, Play, and Stop VTD through SCP",
+    )
+    parser.add_argument(
+        "--scp-host",
+        default=None,
+        help="VTD SCP host (default: vtd.host_ip from --config)",
+    )
+    parser.add_argument(
+        "--scp-port",
+        type=int,
+        default=48179,
+        help="VTD SCP port (default: 48179)",
+    )
+    parser.add_argument(
+        "--vtd-timeout",
+        type=float,
+        default=60.0,
+        help="Seconds to wait for each VTD state transition",
+    )
+    parser.add_argument(
+        "--run-timeout",
+        type=float,
+        default=None,
+        help="Maximum scenario runtime in seconds (default: unlimited)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the resolved files and command without starting HL_VTD",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not 1 <= args.scp_port <= 65535:
+        parser.error("--scp-port must be between 1 and 65535")
+    if args.vtd_timeout <= 0:
+        parser.error("--vtd-timeout must be greater than zero")
+    if args.run_timeout is not None and args.run_timeout <= 0:
+        parser.error("--run-timeout must be greater than zero")
+    return args
 
 
 def build_command(
     binary: Path,
+    network_config: Path,
     route_file: Path,
     scenario_id: str,
     run_id: str,
     log_file: Path,
+    ready_file: Path | None = None,
 ) -> list[str]:
-    return [
+    command = [
         str(binary),
+        "--config",
+        str(network_config),
         "--path",
         str(route_file),
         "--scenario-id",
@@ -63,6 +110,83 @@ def build_command(
         "--log",
         str(log_file),
     ]
+    if ready_file is not None:
+        command.extend(("--ready-file", str(ready_file)))
+    return command
+
+
+def load_vtd_host(network_config: Path) -> str:
+    config = load_manifest(network_config)
+    vtd = config.get("vtd")
+    if not isinstance(vtd, dict) or not isinstance(vtd.get("host_ip"), str):
+        raise ValueError(f"vtd.host_ip is missing from network config: {network_config}")
+    return vtd["host_ip"]
+
+
+def terminate_process(process: subprocess.Popen[bytes], timeout: float = 5.0) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def run_automated(
+    args: argparse.Namespace,
+    command: list[str],
+    scenario_file: Path,
+    scp_host: str,
+    ready_file: Path,
+) -> int:
+    controller: subprocess.Popen[bytes] | None = None
+    with VtdScpClient(scp_host, args.scp_port, args.vtd_timeout) as scp:
+        print(f"[auto-vtd] connected to SCP {scp_host}:{args.scp_port}")
+        print(f"[auto-vtd] loading and applying {scenario_file.name}")
+        scp.configure_scenario(scenario_file, args.vtd_timeout)
+        print("[auto-vtd] VTD is READY; starting HL_VTD")
+        controller = subprocess.Popen(command, cwd=REPO_ROOT)
+        try:
+            try:
+                controller.wait(timeout=0.1)
+            except subprocess.TimeoutExpired:
+                pass
+            deadline = time.monotonic() + args.vtd_timeout
+            while not ready_file.is_file():
+                early_exit = controller.poll()
+                if early_exit is not None:
+                    raise ScpError(
+                        f"HL_VTD exited before Play with status {early_exit}"
+                    )
+                if time.monotonic() >= deadline:
+                    raise ScpError(
+                        "HL_VTD did not connect to the VTD GT port within "
+                        f"{args.vtd_timeout:g}s"
+                    )
+                try:
+                    controller.wait(timeout=0.1)
+                except subprocess.TimeoutExpired:
+                    pass
+            print("[auto-vtd] sending Play")
+            scp.start(args.vtd_timeout)
+            print("[auto-vtd] VTD is RUNNING; CSV logging is active")
+            try:
+                return controller.wait(timeout=args.run_timeout)
+            except subprocess.TimeoutExpired as error:
+                raise ScpError(
+                    f"scenario exceeded --run-timeout {args.run_timeout:g}s"
+                ) from error
+        finally:
+            if controller is not None:
+                terminate_process(controller)
+            ready_file.unlink(missing_ok=True)
+            try:
+                print("[auto-vtd] stopping VTD")
+                scp.stop(args.vtd_timeout)
+            except ScpError as error:
+                print(f"[auto-vtd] warning: {error}", file=sys.stderr)
 
 
 def main() -> int:
@@ -101,12 +225,15 @@ def main() -> int:
         / run_id
         / "run.csv"
     ).resolve()
+    ready_file = log_file.parent / "controller.ready" if args.auto_vtd else None
     command = build_command(
         binary,
+        args.config.resolve(),
         report.route_file,
         scenario_id,
         run_id,
         log_file,
+        ready_file,
     )
 
     print()
@@ -115,7 +242,16 @@ def main() -> int:
     print(f"Route    : {report.route_file}")
     print(f"Log      : {log_file}")
     print(f"Command  : {shlex.join(command)}")
-    print("VTD      : Load the Scenario file manually; GUI Load/Start is not automated.")
+    if args.auto_vtd:
+        try:
+            scp_host = args.scp_host or load_vtd_host(args.config.resolve())
+        except (OSError, ValueError, RuntimeError) as error:
+            print(f"[run_scenario] {error}", file=sys.stderr)
+            return 2
+        print(f"VTD SCP  : {scp_host}:{args.scp_port} (automatic Load/Apply/Play/Stop)")
+    else:
+        scp_host = ""
+        print("VTD      : Load/Apply/Play manually (use --auto-vtd to automate).")
 
     if args.dry_run:
         print("[run_scenario] dry-run; HL_VTD was not started.")
@@ -128,8 +264,22 @@ def main() -> int:
         return 2
 
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    completed = subprocess.run(command, cwd=REPO_ROOT, check=False)
-    return completed.returncode
+    try:
+        if args.auto_vtd:
+            assert ready_file is not None
+            ready_file.unlink(missing_ok=True)
+            return run_automated(
+                args, command, report.scenario_file.resolve(), scp_host,
+                ready_file,
+            )
+        completed = subprocess.run(command, cwd=REPO_ROOT, check=False)
+        return completed.returncode
+    except KeyboardInterrupt:
+        print("\n[run_scenario] interrupted", file=sys.stderr)
+        return 130
+    except ScpError as error:
+        print(f"[run_scenario] automation failed: {error}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
