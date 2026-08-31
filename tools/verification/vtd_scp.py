@@ -257,7 +257,12 @@ class VtdScpClient:
         force_reconfigure: bool = False,
     ) -> None:
         state = self.get_state(min(2.0, timeout))
-        if state in {"RUN", "PAUSE", "POST-INIT", "INIT", "WAIT-FOR-INIT-CONFIRM"}:
+        if state in {"INIT", "WAIT-FOR-INIT-CONFIRM"}:
+            # A missing IG connection can leave TaskControl stuck in INIT forever.
+            # Stop may not transition back to READY in that condition, so rebuild
+            # the setup directly instead of waiting on an impossible transition.
+            force_reconfigure = True
+        elif state in {"RUN", "PAUSE", "POST-INIT"}:
             self.send("<SimCtrl><Stop/></SimCtrl>")
             self.wait_for_state("READY", timeout)
             state = "READY"

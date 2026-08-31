@@ -95,6 +95,22 @@ class VtdScpTests(unittest.TestCase):
         self.assertEqual(sent[2], "<SimCtrl><Apply/></SimCtrl>")
         self.assertTrue(sent[3].startswith("<SimCtrl><LoadScenario "))
 
+    def test_stuck_init_forces_reconfigure_without_waiting_for_ready(self) -> None:
+        client = VtdScpClient.__new__(VtdScpClient)
+        sent: list[str] = []
+        waited: list[str] = []
+        client.get_state = lambda _timeout: "INIT"
+        client.send = sent.append
+        client.reconnect = lambda _timeout: None
+        client.wait_for_state = lambda state, _timeout: waited.append(state)
+        client.wait_for_scenario = lambda _scenario, _timeout: None
+        client.configure_scenario(
+            Path("/tmp/test.xml"), timeout=2.0, settle_delay=0.0
+        )
+        self.assertEqual(sent[0], "<SimCtrl><Stop/></SimCtrl>")
+        self.assertEqual(sent[1], "<SimCtrl><Config/></SimCtrl>")
+        self.assertEqual(waited, ["READY"])
+
     def test_wait_for_state_queries_until_expected_response(self) -> None:
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.bind(("127.0.0.1", 0))
