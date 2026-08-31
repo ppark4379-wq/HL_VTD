@@ -1,7 +1,7 @@
 #pragma once
 
 #include "data/gt/gt_structs.hpp"
-#include "planning_structs.hpp"
+#include "planning/planning_structs.hpp"
 
 #include <optional>
 #include <string>
@@ -19,7 +19,7 @@ bool loadMap(PathGeneratorData& data, const std::string& xodrPath,
              double sampleInterval = 0.5);
 
 // VTD 월드 좌표 (x, y)를 가장 가까운 road/lane에 매칭한다.
-LaneMatch matchWorldToLane(
+LaneMatch worldToLane(
     const PathGeneratorData& data,
     double x,
     double y,
@@ -72,6 +72,22 @@ void parseGeometries(const XmlElement& node, Road& road);
 // 한 road의 laneSection, lane 폭 및 laneLink를 읽는다.
 void parseLanes(const XmlElement& node, Road& road);
 
+// XODR object/signal 값이 물리적으로 유효한 범위인지 검사한다.
+bool isSaneRoadFeature(double s, double t, double length, double width,
+                       double roadLength);
+
+// 한 road의 <objects>(정지선·횡단보도·노면표시)를 읽는다.
+void parseRoadObjects(PathGeneratorData& data, const XmlElement& node,
+                      const Road& road);
+
+// 한 road의 <signals>(신호등)를 읽는다.
+void parseRoadSignals(PathGeneratorData& data, const XmlElement& node,
+                      const Road& road);
+
+// OpenDRIVE controller와 그 아래 개별 signal id 관계를 읽는다.
+void parseTrafficControllers(PathGeneratorData& data,
+                             const XmlElement& root);
+
 // junction의 incomingRoad, connectingRoad 및 laneLink를 읽는다.
 void parseJunctions(PathGeneratorData& data, const XmlElement& root);
 
@@ -79,16 +95,24 @@ void parseJunctions(PathGeneratorData& data, const XmlElement& root);
 Polynomial parsePolynomial(const XmlElement& node,
                            const std::string& sName);
 
-// road의 특정 s에서 기준선의 월드 x/y/yaw를 계산한다.
-RoadPose roadPose(const Road& road, double s);
+// 좌표 변환 이름 규칙: <출발좌표계>To<도착좌표계>
+//   roadToWorld  (road, s)        -> 월드 x/y/yaw
+//   worldToRoad  (월드 x/y)        -> road s/t
+//   worldToLane  (월드 x/y)        -> road/lane/sectionIndex/roadS
+//   worldToRoute (월드 x/y)        -> 전역경로 누적거리 S와 횡거리 d
+//   routeToWorld (전역경로 S)       -> 월드 x/y/yaw
+
+// road 기준선의 특정 s에서 월드 x/y/yaw를 계산한다 (t = 0).
+RoadPose roadToWorld(const Road& road, double s);
 
 // road 기준선에서 지정한 lane 중심까지의 횡방향 거리를 계산한다.
 double laneOffset(const Road& road, const LaneSection& section,
                   int laneId, double roadS);
 
-// 월드 좌표를 road 기준선에 투영해 정확한 roadS와 부호 있는 횡방향 거리 t를 구한다.
+// 월드 좌표를 road 기준선에 투영해 roadS와 부호 있는 횡방향 거리 t를 구한다.
+// roadToWorld의 역변환이다. 탐색이 필요하므로 정변환보다 비싸다.
 struct RoadProjection { double s{}; double t{}; double distance{}; };
-RoadProjection projectPointToRoad(const Road& road, double x, double y,
+RoadProjection worldToRoad(const Road& road, double x, double y,
                                   double sGuess, double window);
 
 // s 위치에서 lane의 roadMark laneChange 값을 찾는다 (없으면 "none").

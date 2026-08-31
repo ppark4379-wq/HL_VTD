@@ -1,8 +1,23 @@
+# VTD Host와 제어기의 접속 정보.
+#
+# 제어기는 서버가 아니라 클라이언트다. tcp_port로 VTD에 접속해서
+# GT 1109 Byte를 받고, 같은 소켓으로 제어 9 Byte를 돌려보낸다.
+# 따라서 제어기 쪽 방화벽에서 인바운드 포트를 열 필요가 없다.
+#
+# VTD와 제어기가 같은 PC면 127.0.0.1을 쓴다.
+# tools/verification/fake_vtd_server.py 루프백 테스트도 이 설정을 그대로 쓴다.
+#
+# 대회장 등 다른 PC일 때의 예시:
+#   vtd.host_ip: "165.246.170.76"
+#   controller.ip: "165.246.170.86"
 vtd:
-  host_ip: "165.246.170.76"
+  host_ip: "127.0.0.1"
   tcp_port: 9910
   rtsp_port: 8554
 
+# controller.udp_port는 현재 제어 명령 송신에 쓰지 않는다.
+# 제어 명령은 vtd.tcp_port 소켓으로 나간다.
+# VTD가 UDP로 별도 데이터를 보내는지 확인되면 그때 사용한다.
 controller:
-  ip: "165.246.170.86"
+  ip: "127.0.0.1"
   udp_port: 9912

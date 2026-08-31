@@ -30,6 +30,7 @@ struct VtdClientData {
     std::string host;
     std::uint16_t port{};
     std::intptr_t socket{-1};
+    bool receiveTimedOut{};
 #ifdef _WIN32
     bool winsockInitialized{};
 #endif
@@ -40,4 +41,5 @@ struct GtReceiverData {
     std::array<std::uint8_t, 64 * 1024> receiveBuffer{};
     std::vector<std::uint8_t> streamBuffer;
     GtFrame latestGt;
+    double latestReceiveTime{};
 };

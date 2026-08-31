@@ -2,16 +2,70 @@
 pure_pursuit:
   wheelbase: 2.944                 # [m] Hyundai IONIQ 6
   straight_lookahead: 8.0         # [m] 직선 구간 Ld
-  curve_lookahead: 5.0            # [m] 곡선 구간 Ld
+  curve_lookahead: 5.0            # [m] 곡선 구간 Ld (고속 상한)
+  # Ld는 속도에 비례시킨다: Ld = clamp(gain * v, min_lookahead, 위 상한)
+  # 고정 3.0으로 두면 8 m/s에서 과조향으로 경로를 2 m나 벗어난다.
+  # 반대로 5.0 고정이면 정지 상태 회피에서 조향을 다 못 써 장애물에 닿는다.
+  min_lookahead: 3.0              # [m] 저속 하한 (정지 상태 회피용)
+  lookahead_speed_gain: 0.8       # [s] Ld = 0.8 x 속도
   curve_threshold: 0.02           # [1/m] 곡선 판정 곡률
   curvature_check_distance: 25.0  # [m] 앞쪽 곡률 탐색 거리
   goal_tolerance: 1.5             # [m] 도착 판정 거리
 
-# 속도 계획 설정. 대회 공지 후 제한속도에 맞게 수정한다.
+# 속도는 전부 km/h로 적는다. 채점 기준이 km/h라 그대로 비교할 수 있다.
+# 로더가 읽을 때 m/s로 변환한다. 거리(m)·시간(s)·가속도(m/s^2)는 그대로다.
+#
+# 기본 제한속도: 운영측 공지가 없고 XODR에도 표준 <speed>가 없다.
+# 노면표시 RM_517_50(50 km/h)이 지도에 있어 50 km/h를 기본으로 둔다.
+# 초과 1 km/h까지만 허용되므로 목표는 상한보다 3~4 km/h 낮게 잡는다.
+# 보호구역 등 구간 제한은 config/maps/living_lab.yaml의 speed_zones가 덮어쓴다.
 speed:
-  straight_target: 8.33            # [m/s] 28.8 km/h
-  curve_target: 8.33               # [m/s] 14.4 km/h
-  school_zone_target: 8.0         # [m/s] 임시값, 공식 채점 기준 후 수정
+  straight_target_kph: 50.0        # 50 km/h 제한 대비 4 km/h 여유
+  curve_target_kph: 30.0
+  school_zone_target_kph: 27.0     # 30 km/h 제한 대비 3 km/h 여유
+
+planning:
+  comfortable_deceleration: 1.5   # [m/s^2] 정지 계획용 감속도
+                                  # 2.5로 두면 목표 지점에 4.5 m/s로 도달해
+                                  # 정지선/횡단보도를 4 m 가까이 지나쳐 선다.
+  stop_safety_margin: 2.5          # [m] 정지선/장애물 앞 여유거리
+  stop_hold_time: 1.0              # [s] 적색점멸 최소 정지시간
+  stopped_speed_threshold_kph: 0.55 # [km/h] 정지로 인정할 속도
+  follow_time_gap: 1.8             # [s] 선행 객체 추종 시간 간격
+  minimum_follow_distance: 5.0     # [m] 최소 추종거리
+  emergency_ttc: 1.5               # [s] 긴급제동 TTC
+  collision_prediction_horizon: 3.0 # [s] OBB 예측 범위
+  collision_prediction_step: 0.2   # [s] OBB 예측 간격
+  # [m] 지역경로 길이. 미래 OBB 검사에서 Ego 예측 위치를 이 경로 위에서 찾으므로
+  # (최대속도 x collision_prediction_horizon)보다 길어야 예측이 잘리지 않는다.
+  #   50 km/h = 13.9 m/s, x 3.0 s = 41.7 m  ->  여유 포함 80 m
+  local_path_horizon: 80.0
+  # 패킷 신호 ID와 XODR ID가 다르면 같은 road/lane의 가장 가까운 정지선을 사용한다.
+  signal_stop_search_distance: 80.0 # [m] 보조 매칭 전방 한계
+  # 보행자는 인도에서 걸어와 마지막 순간에 횡단보도에 들어선다. 전속력으로
+  # 접근하면 그 시점엔 정지거리가 이미 모자란다. 미리 감속해 둔다.
+  crosswalk_approach_kph: 10.0      # [km/h] 횡단보도 접근 제한속도
+  crosswalk_approach_distance: 40.0 # [m] 이 거리부터 감속
+  crosswalk_nearby_object_distance: 3.0 # [m] 횡단보도 주변 객체 조기감속 범위
+  # 위험 객체가 횡단보도를 완전히 비운 뒤, Ego가 횡단보도를 빠져나갈 때까지
+  # 적용한다. 처음부터 빈 횡단보도에는 속도 제한을 적용하지 않는다.
+  crosswalk_clearance_kph: 25.0     # [km/h] 보행자 통과 후 횡단보도 통과속도
+  crosswalk_pedestrian_prediction: 2.0 # [s] 이 시간 뒤 예상 위치도 점유로 판정
+  # 횡단보도 위 정지는 감점이다. 입구가 아니라 그 앞 정지선에 선다.
+  crosswalk_stop_line_search: 15.0  # [m] 횡단보도 앞 정지선 탐색 거리
+
+lane_change:
+  obstacle_trigger_minimum_distance: 12.0 # [m] 너무 가까우면 차선변경 대신 제동
+  obstacle_trigger_maximum_distance: 45.0 # [m] 정적 장애물 탐색거리
+  transition_length: 12.0                 # [m] 한 번의 횡이동 길이
+  obstacle_clearance: 10.0                # [m] 장애물 통과 뒤 복귀 여유
+  prepare_time: 0.5                       # [s] 이동 전 방향지시등 선행시간
+  settle_time: 0.5                        # [s] 원래 경로 복귀 후 안정시간
+  minimum_target_ahead_gap: 15.0          # [m] 목표 차선 전방 최소 간격
+  minimum_target_behind_gap: 12.0         # [m] 목표 차선 후방 최소 간격
+  minimum_target_ttc: 3.0                 # [s] 목표 차선 최소 TTC
+  maximum_lane_change_speed_kph: 21.6     # 차선변경 중 목표속도 상한
+  return_waiting_speed_kph: 7.2           # 복귀 경로가 막혔을 때 감속 목표
 
 # 종방향 PD 속도 제어 설정
 speed_pd:
@@ -27,8 +81,13 @@ limits:
   max_acceleration: 2.0           # [m/s^2] 임시 PD 출력 상한
   max_acceleration_rate: 6.0      # [m/s^3] 프레임 간 가속도 명령 변화 제한
   max_steering: 0.48              # [rad] 차량 제원에 명시된 최대 조향각
+  # 조향 변화율 제한. 없으면 저속에서 Ld가 하한(3 m)에 걸릴 때 앞바퀴가
+  # 프레임마다 크게 튀어 차선을 바꾸려는 것처럼 보인다.
+  max_steering_rate: 0.6          # [rad/s]
 
 # GT 패킷 기준 제어 주기와 위치 차분 속도 필터.
 runtime:
   nominal_dt: 0.05                # [s] 20 Hz
   speed_filter_alpha: 0.25        # (0, 1], 작을수록 부드럽게 반영
+  max_valid_position_speed_kph: 288.0 # 초기화·리스폰 위치 점프 검출 기준
+  input_timeout: 0.25             # [s] GT 미수신 시 비상제동 후 연결 종료

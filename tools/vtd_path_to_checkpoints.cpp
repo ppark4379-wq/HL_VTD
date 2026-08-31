@@ -1,5 +1,5 @@
-#include "planning/reference_path_generator.hpp"
-#include "planning/vtd_path_generator.hpp"
+#include "planning/global/reference_path_generator.hpp"
+#include "path_generation/vtd_path_generator.hpp"
 #include "utils/csv_utils.hpp"
 
 #include <fstream>

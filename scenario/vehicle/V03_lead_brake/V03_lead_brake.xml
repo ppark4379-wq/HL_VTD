@@ -27,7 +27,7 @@
             <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player01"/>
             <Init>
                 <Speed Value="5.5555555555555554e+00"/>
-                <PosAbsolute X="3.7333444213867188e+02" Y="-1.5411180114746094e+02" Z="4.2774352385320945e+01" Direction="5.3837625928542376e+00" AlignToRoad="true"/>
+                <PosAbsolute X="3.7903732299804688e+02" Y="-1.6147802734375000e+02" Z="4.3121970628985359e+01" Direction="5.3837625928542376e+00" AlignToRoad="true"/>
             </Init>
         </Player>
         <PlayerActions Player="Ego"/>

@@ -1,64 +1,62 @@
 #include "data/gt/gt_processor.hpp"
 
+#include "utils/geometry.hpp"
+#include "utils/math_utils.hpp"
+
 #include <array>
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <optional>
 
-Obb2D makeObjectObb(const ObjectState& object) {
-    const double halfLength = object.length * 0.5;
-    const double halfWidth = object.width * 0.5;
+namespace {
 
-    // Object 중심 기준 로컬 좌표
-    const std::array<Point2D, 4> localCorners{{
-        { halfLength,  halfWidth},
-        { halfLength, -halfWidth},
-        {-halfLength, -halfWidth},
-        {-halfLength,  halfWidth}
-    }};
-
-    const double cosHeading = std::cos(object.heading);
-    const double sinHeading = std::sin(object.heading);
-
-    Obb2D obb;
-
-    for (std::size_t i = 0; i < localCorners.size(); ++i) {
-        const double localX = localCorners[i].x;
-        const double localY = localCorners[i].y;
-
-        obb.corners[i].x =
-            object.x
-            + localX * cosHeading
-            - localY * sinHeading;
-
-        obb.corners[i].y =
-            object.y
-            + localX * sinHeading
-            + localY * cosHeading;
-    }
-
-    return obb;
+bool validObject(const ObjectState& object) {
+    constexpr double kMinimumDimension = 0.05;
+    constexpr double kMaximumDimension = 50.0;
+    return std::isfinite(object.x) && std::isfinite(object.y) &&
+           std::isfinite(object.heading) && std::isfinite(object.speed) &&
+           std::isfinite(object.length) && std::isfinite(object.width) &&
+           std::isfinite(object.height) &&
+           object.length >= kMinimumDimension &&
+           object.width >= kMinimumDimension &&
+           object.height >= kMinimumDimension &&
+           object.length <= kMaximumDimension &&
+           object.width <= kMaximumDimension &&
+           object.height <= kMaximumDimension;
 }
 
-void projectObjectToPath(
-    WorldObjectState& state,
-    const std::vector<Waypoint>& path) {
+}  // namespace
+
+Obb2D makeObjectObb(const ObjectState& object) {
+    return makeObb2D(object.x, object.y, object.heading,
+                     object.length, object.width);
+}
+
+void worldToRoute(
+    double pointX,
+    double pointY,
+    bool& pathValid,
+    double& pathS,
+    double& pathD,
+    const std::vector<Waypoint>& path,
+    std::optional<double> expectedS = std::nullopt,
+    std::optional<double> heading = std::nullopt) {
 
     if (path.size() < 2) {
-        state.pathValid = false;
+        pathValid = false;
         return;
     }
 
     double bestDistance = std::numeric_limits<double>::max();
+    double bestScore = std::numeric_limits<double>::max();
     double bestS = 0.0;
     double bestD = 0.0;
-
-    const double objectX = state.raw.x;
-    const double objectY = state.raw.y;
 
     for (std::size_t i = 0; i + 1 < path.size(); ++i) {
         const Waypoint& p0 = path[i];
         const Waypoint& p1 = path[i + 1];
+        if (expectedS && std::abs(p0.s - *expectedS) > 60.0) continue;
 
         const double dx = p1.x - p0.x;
         const double dy = p1.y - p0.y;
@@ -71,8 +69,8 @@ void projectObjectToPath(
 
         // Object를 현재 path segment에 정사영
         double t =
-            ((objectX - p0.x) * dx +
-             (objectY - p0.y) * dy)
+            ((pointX - p0.x) * dx +
+             (pointY - p0.y) * dy)
             / lengthSquared;
 
         // Segment 범위를 벗어나지 않도록 제한
@@ -81,13 +79,20 @@ void projectObjectToPath(
         const double projectedX = p0.x + t * dx;
         const double projectedY = p0.y + t * dy;
 
-        const double offsetX = objectX - projectedX;
-        const double offsetY = objectY - projectedY;
+        const double offsetX = pointX - projectedX;
+        const double offsetY = pointY - projectedY;
 
         const double distance =
             std::hypot(offsetX, offsetY);
 
-        if (distance < bestDistance) {
+        double score = distance;
+        if (heading) {
+            const double segmentHeading = std::atan2(dy, dx);
+            score += 2.0 * std::abs(
+                normalizeAngle(*heading - segmentHeading));
+        }
+        if (score < bestScore) {
+            bestScore = score;
             bestDistance = distance;
 
             const double segmentLength =
@@ -107,11 +112,23 @@ void projectObjectToPath(
         }
     }
 
-    if (bestDistance < std::numeric_limits<double>::max()) {
-        state.pathValid = true;
-        state.pathS = bestS;
-        state.pathD = bestD;
+    if (bestDistance <= 10.0) {
+        pathValid = true;
+        pathS = bestS;
+        pathD = bestD;
     }
+}
+
+void objectToRoute(
+    WorldObjectState& state,
+    const std::vector<Waypoint>& path) {
+    worldToRoute(
+        state.raw.x,
+        state.raw.y,
+        state.pathValid,
+        state.pathS,
+        state.pathD,
+        path, std::nullopt, state.raw.heading);
 }
 
 WorldObjectState makeWorldObjectState(
@@ -128,7 +145,7 @@ WorldObjectState makeWorldObjectState(
     state.obb = makeObjectObb(object);
 
     // Road / Lane Matching
-    const LaneMatch match = matchWorldToLane(
+    const LaneMatch match = worldToLane(
         mapData,
         object.x,
         object.y,
@@ -139,10 +156,12 @@ WorldObjectState makeWorldObjectState(
     if (match.valid) {
         state.roadId = match.roadId;
         state.laneId = match.laneId;
+        state.sectionIndex = match.sectionIndex;
+        state.roadS = match.roadS;
     }
 
     // Global Path 기준 Frenet 좌표
-    projectObjectToPath(state, globalPath);
+    objectToRoute(state, globalPath);
 
     return state;
 }
@@ -150,14 +169,77 @@ WorldObjectState makeWorldObjectState(
 WorldState makeWorldState(
     const GtFrame& gt,
     const PathGeneratorData& mapData,
-    const std::vector<Waypoint>& globalPath) {
+    const std::vector<Waypoint>& globalPath,
+    std::optional<double> expectedEgoRouteS) {
 
     WorldState world;
     world.ego = gt.ego;
     world.trafficLight = gt.trafficLight;
 
+    const LaneMatch egoMatch = worldToLane(
+        mapData,
+        gt.ego.x,
+        gt.ego.y,
+        static_cast<double>(gt.ego.heading));
+    world.egoLaneValid = egoMatch.valid;
+    if (egoMatch.valid) {
+        world.egoRoadId = egoMatch.roadId;
+        world.egoLaneId = egoMatch.laneId;
+        world.egoSectionIndex = egoMatch.sectionIndex;
+        world.egoRoadS = egoMatch.roadS;
+        world.egoLaneWidth = egoMatch.laneWidth;
+        world.egoLaneCenterDistance = egoMatch.distance;
+    }
+    worldToRoute(
+        gt.ego.x,
+        gt.ego.y,
+        world.egoPathValid,
+        world.egoPathS,
+        world.egoPathD,
+        globalPath, expectedEgoRouteS, gt.ego.heading);
+
+    // 교차로 안에서는 여러 connector road의 lane이 거의 겹쳐 있고 진행방향도
+    // 비슷해서, 순수 최근접 탐색인 worldToLane이 기준 경로와 다른 connector를
+    // 고르는 일이 생긴다. 그러면 Ego의 road/lane과 경로 웨이포인트의 road/lane이
+    // 어긋나 차선변경·회피 계획이 전부 실패한다.
+    // 기준 경로는 어느 road/lane을 지나는지 이미 알고 있으므로, Ego가 실제로
+    // 그 lane 안에 들어 있을 때는 경로 쪽 판정을 우선한다.
+    if (world.egoPathValid && !globalPath.empty()) {
+        const auto hint = std::lower_bound(
+            globalPath.begin(), globalPath.end(), world.egoPathS,
+            [](const Waypoint& point, double value) { return point.s < value; });
+        const Waypoint* routePoint =
+            hint == globalPath.end() ? &globalPath.back() : &(*hint);
+        if (hint != globalPath.begin() && hint != globalPath.end()) {
+            const Waypoint& previous = *(hint - 1);
+            if (std::abs(previous.s - world.egoPathS) <
+                std::abs(routePoint->s - world.egoPathS)) {
+                routePoint = &previous;
+            }
+        }
+        if (!world.egoLaneValid || routePoint->roadId != world.egoRoadId ||
+            routePoint->laneId != world.egoLaneId) {
+            for (const LaneMatch& candidate :
+                 findContainingLanes(mapData, gt.ego.x, gt.ego.y)) {
+                if (!candidate.valid ||
+                    candidate.roadId != routePoint->roadId ||
+                    candidate.laneId != routePoint->laneId) {
+                    continue;
+                }
+                world.egoLaneValid = true;
+                world.egoRoadId = candidate.roadId;
+                world.egoLaneId = candidate.laneId;
+                world.egoSectionIndex = candidate.sectionIndex;
+                world.egoRoadS = candidate.roadS;
+                world.egoLaneWidth = candidate.laneWidth;
+                world.egoLaneCenterDistance = candidate.distance;
+                break;
+            }
+        }
+    }
+
     for (const auto& object : gt.objects) {
-        if (object.id == 0) {
+        if (object.id == 0 || !validObject(object)) {
             continue;
         }
 

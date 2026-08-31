@@ -1,6 +1,6 @@
 #pragma once
 
-#include "planning_structs.hpp"
+#include "planning/planning_structs.hpp"
 
 #include <vector>
 

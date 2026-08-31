@@ -3,6 +3,8 @@
 #include "network/receive/packet_parser.hpp"
 #include "network/vtd_client.hpp"
 
+#include <chrono>
+
 GtReceiverData makeGtReceiver(const VtdNetworkConfig& config) {
     GtReceiverData receiver;
     receiver.client = makeVtdClient(config);
@@ -48,6 +50,8 @@ bool extractGtFrame(GtReceiverData& receiver) {
     receiver.streamBuffer.erase(
         receiver.streamBuffer.begin(),
         receiver.streamBuffer.begin() + GT_FRAME_SIZE);
+    receiver.latestReceiveTime = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
     return true;
 }
 
@@ -62,4 +66,8 @@ bool receiveGtFrame(GtReceiverData& receiver) {
 
 const GtFrame& getLatestGtFrame(const GtReceiverData& receiver) {
     return receiver.latestGt;
+}
+
+double getLatestGtReceiveTime(const GtReceiverData& receiver) {
+    return receiver.latestReceiveTime;
 }

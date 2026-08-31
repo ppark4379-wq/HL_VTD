@@ -1,0 +1,114 @@
+# extract_static_zones가 XODR에서 자동 생성한 파일이다.
+# 직접 수정하지 말고 도구를 다시 실행할 것.
+# source xodr : src/data/map/HL_FMA_VTD_LivingLab.xodr
+# source route: scenario\traffic\T02_red_light\route.csv
+
+map:
+  xodr: src/data/map/HL_FMA_VTD_LivingLab.xodr
+
+finish:
+  x: 0.0
+  y: 0.0
+  route_s: 0.0
+  configured: false  # 운영측 종료 좌표를 받으면 채운다
+
+stop_lines:
+  - id: 770
+    controller_id: 19
+    road_id: 418
+    lane_ids: [4]
+    begin: [409.446, -197.628]
+    end: [409.446, -197.628]
+    route_s: 109.199
+    # route lateral 1.250 m
+  - id: 771
+    controller_id: 19
+    road_id: 418
+    lane_ids: [4]
+    begin: [407.597, -199.069]
+    end: [407.597, -199.069]
+    route_s: 109.199
+    # route lateral 1.094 m
+  - id: 772
+    controller_id: 19
+    road_id: 418
+    lane_ids: [5]
+    begin: [406.528, -199.903]
+    end: [406.528, -199.903]
+    route_s: 109.199
+    # route lateral 2.450 m
+
+crosswalks:
+  - id: 1055
+    polygon: "333.769,-100.392; 353.804,-87.178; 358.208,-93.857; 338.173,-107.070"
+    entry_route_s: 0.000
+    exit_route_s: 0.000
+    # source: RM_532_8_24.flt
+  - id: 1058
+    polygon: "457.082,-221.727; 436.596,-237.738; 432.901,-233.010; 453.387,-217.000"
+    entry_route_s: 151.525
+    exit_route_s: 157.525
+    # source: RM_532_6_26.flt
+  - id: 6293
+    polygon: "415.401,-235.485; 409.453,-228.731; 413.956,-224.765; 419.904,-231.520"
+    entry_route_s: 133.175
+    exit_route_s: 142.510
+    # source: RM_532_6_9.flt
+  - id: 6304
+    polygon: "407.940,-202.511; 429.235,-185.912; 434.153,-192.222; 412.858,-208.821"
+    entry_route_s: 112.125
+    exit_route_s: 120.305
+    # source: RM_532_8_27.flt
+
+speed_zones: []
+
+# 아래는 XODR에서 찾은 노면 제한속도 표시다.
+# 표시는 지점이고 speed_zones는 구간이므로 자동 변환하지 않는다.
+# VTD 화면에서 적용 구간을 확인한 뒤 speed_zones에 직접 옮길 것.
+#   route_s 3.299  50.000 km/h  road 418  (RM_517_50.flt)
+#   route_s 3.299  50.000 km/h  road 418  (RM_517_50.flt)
+
+traffic_lights: []
+
+# GT trafficLight.id는 XODR controller id다. 아래는 controller와
+# 그 controller가 묶는 개별 signal id 목록이다.
+#   id 90  road 128  type 1000020  route_s 158.100  lateral 8.250
+#   id 91  road 128  type 1000008  route_s 158.100  lateral 8.650
+#   id 94  road 128  type 1000012  route_s 158.100  lateral 17.050
+#   id 92  road 128  type 1000020  route_s 158.100  lateral 16.250
+#   id 93  road 128  type 1000008  route_s 158.100  lateral 16.650
+#   id 95  road 128  type 1000012  route_s 158.100  lateral 17.450
+#   id 84  road 208  type 1000020  route_s 136.514  lateral 18.929
+#   id 85  road 208  type 1000008  route_s 136.914  lateral 18.911
+#   id 88  road 208  type 1000012  route_s 139.314  lateral 18.808
+#   id 86  road 208  type 1000020  route_s 138.512  lateral 18.842
+#   id 87  road 208  type 1000008  route_s 138.912  lateral 18.825
+#   id 89  road 208  type 1000012  route_s 139.714  lateral 18.791
+#   id 78  road 418  type 1000020  route_s 109.347  lateral 9.550
+#   id 79  road 418  type 1000008  route_s 109.347  lateral 9.150
+#   id 82  road 418  type 1000012  route_s 109.347  lateral 3.750
+#   id 80  road 418  type 1000020  route_s 109.347  lateral 4.550
+#   id 81  road 418  type 1000008  route_s 109.347  lateral 4.150
+#   id 83  road 418  type 1000012  route_s 109.347  lateral 3.350
+#   id 66  road 418  type 1000020  route_s 0.000  lateral 12.043
+#   id 67  road 418  type 1000008  route_s 0.000  lateral 12.427
+#   id 70  road 418  type 1000012  route_s 0.000  lateral 14.751
+#   id 68  road 418  type 1000020  route_s 0.000  lateral 13.974
+#   id 69  road 418  type 1000008  route_s 0.000  lateral 14.362
+#   id 71  road 418  type 1000012  route_s 0.000  lateral 15.141
+#   id 96  road 465  type 1000020  route_s 137.381  lateral 37.319
+#   id 97  road 465  type 1000008  route_s 136.984  lateral 37.369
+#   id 15  road 465  type 1000012  route_s 138.572  lateral 37.169
+#   id 98  road 465  type 1000020  route_s 139.360  lateral 37.070
+#   id 99  road 465  type 1000008  route_s 138.968  lateral 37.120
+#   id 100  road 465  type 1000012  route_s 138.175  lateral 37.219
+#   controller 15 signals [66, 67, 70]
+#   controller 16 signals [68, 69, 71]
+#   controller 19 signals [78, 79, 82]
+#   controller 20 signals [80, 81, 83]
+#   controller 21 signals [84, 85, 88]
+#   controller 22 signals [86, 87, 89]
+#   controller 23 signals [90, 91, 94]
+#   controller 24 signals [92, 93, 95]
+#   controller 25 signals [96, 97, 15]
+#   controller 26 signals [98, 99, 100]

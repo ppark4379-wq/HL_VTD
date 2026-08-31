@@ -1,0 +1,8 @@
+geometry:
+  wheelbase: 2.944
+  length: 4.855
+  width: 1.880
+
+  # 임시 IONIQ 6 근사값. 대회 제공 제원으로 반드시 교체한다.
+  rear_axle_to_front_bumper: 3.800
+  rear_axle_to_rear_bumper: 1.055

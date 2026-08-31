@@ -43,6 +43,7 @@
 build/
 Build/
 build-*/
+build_check/
 
 # CMake generated files
 CMakeFiles/
@@ -68,6 +69,10 @@ vcpkg_installed/
 Testing/
 .cache/
 
+# Local VTD verification runs (CSV logs, summaries, plots)
+/output/verification/**
+!/output/verification/.gitkeep
+
 # Python bytecode cache
 __pycache__/
 *.pyc
@@ -75,3 +80,7 @@ __pycache__/
 # Local scenario design/reference files
 /scenario/SCENARIO_DESIGN_V2.md
 /scenario/SCENARIO_DESIGN_V2.md:Zone.Identifier
+
+# 루프백 테스트 임시 출력
+/server_out.txt
+/server_err.txt

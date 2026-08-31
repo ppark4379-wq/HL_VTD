@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../planning/planning_structs.hpp"
+#include "data/map/map_structs.hpp"
 
 #include <sstream>
 #include <string>

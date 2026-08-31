@@ -10,8 +10,13 @@ struct ControllerConfig {
     double kd{0.15};
     double minAcceleration{-4.0};
     double maxAcceleration{2.0};
+    // 이 속도 이하에서 목표속도도 0이면 PD 대신 확정 감속으로 붙잡는다.
+    double stopHoldSpeedThreshold{0.8};
     double maxErrorDerivative{10.0};
     double maxAccelerationRate{6.0};
+    // 조향에도 변화율 제한을 둔다. 가속도에만 있고 조향에는 없어서
+    // 저속·짧은 Ld 구간에서 앞바퀴가 프레임마다 크게 튄다.
+    double maxSteeringRate{0.9};   // [rad/s]
     double maxSteering{0.48};
 };
 
@@ -20,6 +25,8 @@ struct ControllerData {
     ControllerConfig config;
     double previousSpeedError{};
     double previousAcceleration{};
+    double previousSteering{};
+    bool hasPreviousSteering{};
     bool hasPreviousError{};
     bool hasPreviousAcceleration{};
 };
@@ -31,27 +38,37 @@ struct ControlCommand {
     std::uint8_t turnSignal{};
 };
 
-// GT에 Ego speed가 없어 위치 차분으로 속도를 계산하기 위한 상태.
+struct SafetyReport {
+    bool commandOverridden{};
+    bool emergencyBrakeApplied{};
+    bool invalidInput{};
+    bool invalidCommand{};
+};
+
+// 제어 프로세스의 설정, 프레임 간 유지 상태, 이번 프레임 결과.
+// Ego 속도 추정은 World process가 담당하므로 여기서는 읽기만 한다.
 struct ControlProcessData {
-    ControllerData controller;
-    double previousX{};
-    double previousY{};
-    double rawEgoSpeed{};
-    double egoSpeed{};
-    bool hasPreviousPosition{};
-    bool hasSpeedEstimate{};
-    ControlCommand latestCommand;
+    ControllerData controller;   // 유지 상태 (PD 이전값)
+    double egoSpeed{};           // World에서 받은 값 (읽기 전용 사본)
+    ControlCommand nominalCommand;  // Safety 적용 전
+    ControlCommand safeCommand;     // VTD로 실제 전송하는 명령
+    ControlCommand latestCommand;   // 로깅용 = safeCommand
+    SafetyReport safety;
 };
 
 // GT 프레임 기반 제어 주기와 속도 필터 설정.
 struct ControlRuntimeConfig {
     double nominalDt{0.05};
     double speedFilterAlpha{0.25};
+    double maxValidPositionSpeed{80.0};
+    double inputTimeout{0.25};
 };
 
 // control.yaml에서 읽은 전체 주행 설정.
 struct DrivingConfig {
     PathPlannerConfig planner;
+    PlanningBehaviorConfig behavior;
+    LaneChangeConfig laneChange;
     ControllerConfig controller;
     ControlRuntimeConfig runtime;
 };

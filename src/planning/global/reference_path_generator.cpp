@@ -1,7 +1,8 @@
-#include "reference_path_generator.hpp"
-#include "../data/map/map_loader.hpp"
-#include "../utils/csv_utils.hpp"
-#include "../utils/math_utils.hpp"
+#include "planning/global/reference_path_generator.hpp"
+
+#include "data/map/map_loader.hpp"
+#include "utils/csv_utils.hpp"
+#include "utils/math_utils.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -22,7 +23,6 @@
 #include <utility>
 #include <vector>
 
-using namespace std;
 
 // 두 lane 식별자가 완전히 같은지 비교한다.
 bool operator==(const LaneKey& left, const LaneKey& right) {
@@ -58,7 +58,7 @@ constexpr double kPi = 3.14159265358979323846;
 // =============================================================================
 
 // road s에 적용되는 여러 구간별 다항식 중 현재 구간 값을 계산한다.
-double evaluatePiecewise(const vector<Polynomial>& polynomials, double s,
+double evaluatePiecewise(const std::vector<Polynomial>& polynomials, double s,
                          double fallback) {
     if (polynomials.empty()) return fallback;
     if (s + kEpsilon < polynomials.front().s) return fallback;
@@ -67,7 +67,7 @@ double evaluatePiecewise(const vector<Polynomial>& polynomials, double s,
         if (polynomial.s <= s + kEpsilon) selected = &polynomial;
         else break;
     }
-    const double ds = max(0.0, s - selected->s);
+    const double ds = std::max(0.0, s - selected->s);
     return ((selected->d * ds + selected->c) * ds + selected->b) * ds +
            selected->a;
 }
@@ -75,28 +75,28 @@ double evaluatePiecewise(const vector<Polynomial>& polynomials, double s,
 // geometry 시작점에서 ds만큼 진행한 road 기준선의 월드 x/y/yaw를 계산한다.
 // geometry.x/y 자체가 VTD 월드 좌표이므로 반환값도 VTD 월드 좌표다.
 RoadPose evaluateGeometry(const Geometry& geometry, double ds) {
-    ds = clamp(ds, 0.0, geometry.length);
+    ds = std::clamp(ds, 0.0, geometry.length);
     if (geometry.type == GeometryType::Line) {
         RoadPose pose;
-        pose.x = geometry.x + ds * cos(geometry.heading);
-        pose.y = geometry.y + ds * sin(geometry.heading);
+        pose.x = geometry.x + ds * std::cos(geometry.heading);
+        pose.y = geometry.y + ds * std::sin(geometry.heading);
         pose.yaw = geometry.heading;
         return pose;
     }
     if (geometry.type == GeometryType::Arc) {
-        if (abs(geometry.curvature) < kEpsilon) {
+        if (std::abs(geometry.curvature) < kEpsilon) {
             RoadPose pose;
-            pose.x = geometry.x + ds * cos(geometry.heading);
-            pose.y = geometry.y + ds * sin(geometry.heading);
+            pose.x = geometry.x + ds * std::cos(geometry.heading);
+            pose.y = geometry.y + ds * std::sin(geometry.heading);
             pose.yaw = geometry.heading;
             return pose;
         }
         const double yaw = geometry.heading + geometry.curvature * ds;
         RoadPose pose;
         pose.x = geometry.x +
-                 (sin(yaw) - sin(geometry.heading)) / geometry.curvature;
+                 (std::sin(yaw) - std::sin(geometry.heading)) / geometry.curvature;
         pose.y = geometry.y -
-                 (cos(yaw) - cos(geometry.heading)) / geometry.curvature;
+                 (std::cos(yaw) - std::cos(geometry.heading)) / geometry.curvature;
         pose.yaw = yaw;
         return pose;
     }
@@ -106,17 +106,17 @@ RoadPose evaluateGeometry(const Geometry& geometry, double ds) {
                          geometry.a;
         const double dv = geometry.b + 2.0 * geometry.c * u +
                           3.0 * geometry.d * u * u;
-        const double cosH = cos(geometry.heading);
-        const double sinH = sin(geometry.heading);
+        const double cosH = std::cos(geometry.heading);
+        const double sinH = std::sin(geometry.heading);
         RoadPose pose;
         pose.x = geometry.x + u * cosH - v * sinH;
         pose.y = geometry.y + u * sinH + v * cosH;
-        pose.yaw = geometry.heading + atan(dv);
+        pose.yaw = geometry.heading + std::atan(dv);
         return pose;
     }
 
     // Spiral(clothoid)은 곡률을 선형 보간하고 midpoint 적분한다.
-    const int steps = max(1, static_cast<int>(ceil(ds / 0.05)));
+    const int steps = std::max(1, static_cast<int>(std::ceil(ds / 0.05)));
     const double step = ds / steps;
     double x = geometry.x;
     double y = geometry.y;
@@ -131,8 +131,8 @@ RoadPose evaluateGeometry(const Geometry& geometry, double ds) {
         const double curvature = geometry.curvatureStart +
                                  curvatureRate * localMid;
         const double yawMid = yaw + 0.5 * curvature * step;
-        x += step * cos(yawMid);
-        y += step * sin(yawMid);
+        x += step * std::cos(yawMid);
+        y += step * std::sin(yawMid);
         yaw += curvature * step;
     }
     RoadPose pose;
@@ -173,17 +173,17 @@ bool compareLaneMatchDistance(const LaneMatch& lhs, const LaneMatch& rhs) {
 }
 
 // CSV의 x,y 또는 seq,x,y 형식을 읽고 seq 순서로 정렬한다.
-bool loadCheckpointsCsv(PathGeneratorData& data, const string& csvPath) {
+bool loadCheckpointsCsv(PathGeneratorData& data, const std::string& csvPath) {
         data.checkpoints.clear();
-        ifstream input(csvPath);
+        std::ifstream input(csvPath);
         if (!input) {
-            cerr << "[path] CSV open failed: " << csvPath << '\n';
+            std::cerr << "[path] CSV open failed: " << csvPath << '\n';
             return false;
         }
 
-        string line;
+        std::string line;
         int automaticSequence = 1;
-        while (getline(input, line)) {
+        while (std::getline(input, line)) {
             line = trim(line);
             if (line.empty() || line.front() == '#') continue;
             const auto fields = splitCsvLine(line);
@@ -210,50 +210,55 @@ bool loadCheckpointsCsv(PathGeneratorData& data, const string& csvPath) {
             data.checkpoints.push_back(point);
         }
 
-        sort(data.checkpoints.begin(), data.checkpoints.end(),
+        std::sort(data.checkpoints.begin(), data.checkpoints.end(),
              compareCheckpointSequence);
-        cout << "[path] loaded " << data.checkpoints.size() << " checkpoints\n";
+        std::cout << "[path] loaded " << data.checkpoints.size() << " checkpoints\n";
         return data.checkpoints.size() >= 2;
 }
 
     // XODR을 읽고 road/lane 중심선 및 legal lane 연결을 준비한다.
-bool loadMap(PathGeneratorData& data, const string& xodrPath,
+bool loadMap(PathGeneratorData& data, const std::string& xodrPath,
              double sampleInterval) {
         data.roads.clear();
+        data.roadObjects.clear();
+        data.roadSignals.clear();
+        data.trafficControllers.clear();
+        data.signalToController.clear();
         data.junctionLinks.clear();
         data.laneSegments.clear();
         data.laneGraph.clear();
-        data.sampleInterval = clamp(sampleInterval, 0.1, 2.0);
+        data.sampleInterval = std::clamp(sampleInterval, 0.1, 2.0);
 
         try {
             const auto root = loadOpenDrive(xodrPath);
             parseRoads(data, root);
+            parseTrafficControllers(data, root);
             parseJunctions(data, root);
             sampleLaneCenters(data);
             buildLaneGraph(data);
-        } catch (const exception& error) {
-            cerr << "[path] XODR load failed: " << error.what() << '\n';
+        } catch (const std::exception& error) {
+            std::cerr << "[path] XODR load failed: " << error.what() << '\n';
             return false;
         }
 
-        cout << "[path] loaded " << data.roads.size() << " roads, "
+        std::cout << "[path] loaded " << data.roads.size() << " roads, "
                   << data.laneSegments.size() << " driving lane segments\n";
         return !data.laneSegments.empty();
 }
 
     // 임의의 월드 좌표를 가장 가까운 driving lane 중심선에 매칭한다.
-LaneMatch matchWorldToLane(const PathGeneratorData& data,
+LaneMatch worldToLane(const PathGeneratorData& data,
                            double x, double y,
-                           optional<double> heading) {
+                           std::optional<double> heading) {
         LaneMatch best;
-        double bestScore = numeric_limits<double>::infinity();
+        double bestScore = std::numeric_limits<double>::infinity();
         for (const auto& [key, segment] : data.laneSegments) {
-            for (size_t index = 0; index < segment.points.size(); ++index) {
+            for (std::size_t index = 0; index < segment.points.size(); ++index) {
                 const auto& point = segment.points[index];
                 const double squaredDistance = distanceSquared(x, y, point.x, point.y);
                 double score = squaredDistance;
                 if (heading) {
-                    const double error = abs(normalizeAngle(*heading - point.yaw));
+                    const double error = std::abs(normalizeAngle(*heading - point.yaw));
                     // 반대 방향 lane 오매칭 억제. 약 90도부터 큰 penalty.
                     score += 4.0 * error * error;
                 }
@@ -265,9 +270,13 @@ LaneMatch matchWorldToLane(const PathGeneratorData& data,
                         evaluatePiecewise(lane.widths, point.roadS, 0.0);
                     bestScore = score;
                     best = {true, key.roadId, key.laneId, key.sectionIndex,
-                            point.roadS, sqrt(squaredDistance), width, index};
+                            point.roadS, std::sqrt(squaredDistance), width, index};
                 }
             }
+        }
+        if (best.valid &&
+            best.distance > 0.5 * best.laneWidth + 0.5) {
+            best.valid = false;
         }
         return best;
 }
@@ -276,15 +285,15 @@ LaneMatch matchWorldToLane(const PathGeneratorData& data,
 // 투영한 뒤(roadS, 부호있는 t), lane 중심 offset과 실제 폭을 그 roadS에서
 // 계산해 t가 lane 폭 내부에 있는지 판정한다. 0.5m 샘플 간격의 오차를
 // 흡수하기 위한 임의 여유값(예전의 0.35m) 없이 해석적으로 포함 여부를 정한다.
-vector<LaneMatch> findContainingLanes(const PathGeneratorData& data,
+std::vector<LaneMatch> findContainingLanes(const PathGeneratorData& data,
                                       double x, double y) {
-    vector<LaneMatch> candidates;
+    std::vector<LaneMatch> candidates;
     constexpr double kContainmentEpsilon = 0.05;
 
     for (const auto& [key, segment] : data.laneSegments) {
-        size_t nearestIndex = 0;
-        double nearestDistanceSquared = numeric_limits<double>::infinity();
-        for (size_t index = 0; index < segment.points.size(); ++index) {
+        std::size_t nearestIndex = 0;
+        double nearestDistanceSquared = std::numeric_limits<double>::infinity();
+        for (std::size_t index = 0; index < segment.points.size(); ++index) {
             const Waypoint& point = segment.points[index];
             const double candidateDistanceSquared =
                 distanceSquared(x, y, point.x, point.y);
@@ -299,7 +308,7 @@ vector<LaneMatch> findContainingLanes(const PathGeneratorData& data,
         const LaneSection& section = road.sections[key.sectionIndex];
         const double sGuess = segment.points[nearestIndex].roadS;
         const RoadProjection projection =
-            projectPointToRoad(road, x, y, sGuess, data.sampleInterval * 2.0);
+            worldToRoad(road, x, y, sGuess, data.sampleInterval * 2.0);
 
         // t와 lane 중심 offset을 그대로 빼면, 투영이 checkpoint에서 먼
         // 엉뚱한 s로 잘못 수렴했을 때도 두 값이 우연히 비슷해 통과할 수
@@ -308,11 +317,11 @@ vector<LaneMatch> findContainingLanes(const PathGeneratorData& data,
         const double center = laneOffset(road, section, key.laneId, projection.s);
         const double width =
             evaluatePiecewise(section.lanes.at(key.laneId).widths, projection.s, 0.0);
-        const RoadPose reference = roadPose(road, projection.s);
-        const double laneCenterX = reference.x - center * sin(reference.yaw);
-        const double laneCenterY = reference.y + center * cos(reference.yaw);
+        const RoadPose reference = roadToWorld(road, projection.s);
+        const double laneCenterX = reference.x - center * std::sin(reference.yaw);
+        const double laneCenterY = reference.y + center * std::cos(reference.yaw);
         const double lateralDistance =
-            sqrt(distanceSquared(x, y, laneCenterX, laneCenterY));
+            std::sqrt(distanceSquared(x, y, laneCenterX, laneCenterY));
 
         if (lateralDistance <= width * 0.5 + kContainmentEpsilon) {
             candidates.push_back({true, key.roadId, key.laneId, key.sectionIndex,
@@ -321,27 +330,27 @@ vector<LaneMatch> findContainingLanes(const PathGeneratorData& data,
         }
     }
 
-    sort(candidates.begin(), candidates.end(), compareLaneMatchDistance);
+    std::sort(candidates.begin(), candidates.end(), compareLaneMatchDistance);
     return candidates;
 }
 
 // Ego GT의 heading까지 사용하여 반대 방향 차선 오매칭을 줄인다.
 LaneMatch matchEgoToLane(const PathGeneratorData& data, const GtFrame& gt) {
-    return matchWorldToLane(data, gt.ego.x, gt.ego.y, gt.ego.heading);
+    return worldToLane(data, gt.ego.x, gt.ego.y, gt.ego.heading);
 }
 
     // 모든 checkpoint의 주변 lane 후보를 먼저 만든다.
     // 시작부터 끝까지 연결되는 후보 조합 중 총 주행거리가 가장 짧은 조합을
     // 동적 계획법으로 선택해, 가까워도 큰 우회가 필요한 lane은 제외한다.
-vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
-        vector<vector<LaneMatch>> candidateSets;
+std::vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
+        std::vector<std::vector<LaneMatch>> candidateSets;
         for (const Checkpoint& checkpoint : data.checkpoints) {
             candidateSets.push_back(
                 findContainingLanes(data, checkpoint.x, checkpoint.y));
             if (candidateSets.back().empty()) {
                 const LaneMatch nearest =
-                    matchWorldToLane(data, checkpoint.x, checkpoint.y);
-                cerr << "[match] checkpoint seq=" << checkpoint.sequence
+                    worldToLane(data, checkpoint.x, checkpoint.y);
+                std::cerr << "[match] checkpoint seq=" << checkpoint.sequence
                      << " is outside every driving lane, nearest road="
                      << nearest.roadId << " lane=" << nearest.laneId
                      << " distance=" << nearest.distance << "m\n";
@@ -349,25 +358,25 @@ vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
             }
         }
 
-        const double infinity = numeric_limits<double>::infinity();
-        vector<vector<double>> costs(candidateSets.size());
-        vector<vector<int>> previous(candidateSets.size());
+        const double infinity = std::numeric_limits<double>::infinity();
+        std::vector<std::vector<double>> costs(candidateSets.size());
+        std::vector<std::vector<int>> previous(candidateSets.size());
         costs[0].resize(candidateSets[0].size(), infinity);
         previous[0].resize(candidateSets[0].size(), -1);
-        for (size_t candidateIndex = 0;
+        for (std::size_t candidateIndex = 0;
              candidateIndex < candidateSets[0].size(); ++candidateIndex) {
             costs[0][candidateIndex] =
                 candidateSets[0][candidateIndex].distance * 10.0;
         }
 
-        for (size_t checkpointIndex = 1;
+        for (std::size_t checkpointIndex = 1;
              checkpointIndex < candidateSets.size(); ++checkpointIndex) {
             costs[checkpointIndex].resize(candidateSets[checkpointIndex].size(),
                                           infinity);
             previous[checkpointIndex].resize(
                 candidateSets[checkpointIndex].size(), -1);
 
-            for (size_t currentIndex = 0;
+            for (std::size_t currentIndex = 0;
                  currentIndex < candidateSets[checkpointIndex].size();
                  ++currentIndex) {
                 const LaneMatch& current =
@@ -375,10 +384,10 @@ vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
                 const LaneKey currentKey{current.roadId, current.sectionIndex,
                                          current.laneId};
 
-                for (size_t priorIndex = 0;
+                for (std::size_t priorIndex = 0;
                      priorIndex < candidateSets[checkpointIndex - 1].size();
                      ++priorIndex) {
-                    if (!isfinite(costs[checkpointIndex - 1][priorIndex]))
+                    if (!std::isfinite(costs[checkpointIndex - 1][priorIndex]))
                         continue;
                     const LaneMatch& prior =
                         candidateSets[checkpointIndex - 1][priorIndex];
@@ -389,7 +398,7 @@ vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
                         continue;
                     }
 
-                    const vector<LaneKey> route =
+                    const std::vector<LaneKey> route =
                         connectLanes(data, priorKey, currentKey);
                     if (route.empty()) continue;
                     const double routeDistance =
@@ -407,7 +416,7 @@ vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
 
             bool hasConnectedCandidate = false;
             for (double cost : costs[checkpointIndex]) {
-                if (isfinite(cost)) {
+                if (std::isfinite(cost)) {
                     hasConnectedCandidate = true;
                     break;
                 }
@@ -416,7 +425,7 @@ vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
                 const Checkpoint& checkpoint =
                     data.checkpoints[checkpointIndex];
                 const LaneMatch nearest = candidateSets[checkpointIndex].front();
-                cerr << "[match] no connected lane candidate at seq="
+                std::cerr << "[match] no connected lane candidate at seq="
                      << checkpoint.sequence << " (" << checkpoint.x << ", "
                      << checkpoint.y << "), nearest road=" << nearest.roadId
                      << " lane=" << nearest.laneId
@@ -425,10 +434,10 @@ vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
             }
         }
 
-        const size_t lastCheckpoint = candidateSets.size() - 1;
+        const std::size_t lastCheckpoint = candidateSets.size() - 1;
         int selected = -1;
         double bestCost = infinity;
-        for (size_t index = 0; index < costs[lastCheckpoint].size(); ++index) {
+        for (std::size_t index = 0; index < costs[lastCheckpoint].size(); ++index) {
             if (costs[lastCheckpoint][index] < bestCost) {
                 bestCost = costs[lastCheckpoint][index];
                 selected = static_cast<int>(index);
@@ -436,19 +445,19 @@ vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
         }
         if (selected < 0) return {};
 
-        vector<LaneMatch> matches(candidateSets.size());
-        for (size_t reverseIndex = candidateSets.size(); reverseIndex > 0;
+        std::vector<LaneMatch> matches(candidateSets.size());
+        for (std::size_t reverseIndex = candidateSets.size(); reverseIndex > 0;
              --reverseIndex) {
-            const size_t checkpointIndex = reverseIndex - 1;
+            const std::size_t checkpointIndex = reverseIndex - 1;
             matches[checkpointIndex] =
                 candidateSets[checkpointIndex][selected];
             selected = previous[checkpointIndex][selected];
         }
 
-        for (size_t index = 0; index < matches.size(); ++index) {
+        for (std::size_t index = 0; index < matches.size(); ++index) {
             const Checkpoint& checkpoint = data.checkpoints[index];
             const LaneMatch& match = matches[index];
-            cout << "[match] seq=" << checkpoint.sequence << " ("
+            std::cout << "[match] seq=" << checkpoint.sequence << " ("
                       << checkpoint.x << ", " << checkpoint.y << ") -> road="
                       << match.roadId << " lane=" << match.laneId
                       << " section=" << match.sectionIndex
@@ -459,22 +468,22 @@ vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
 }
 
     // seq 순서 그대로 인접 checkpoint를 연결해 최종 기준경로를 만든다.
-vector<Waypoint> makePath(const PathGeneratorData& data) {
+std::vector<Waypoint> makePath(const PathGeneratorData& data) {
         const auto matches = matchCheckpointsToLanes(data);
         if (matches.size() < 2 ||
-            any_of(matches.begin(), matches.end(), isInvalidMatch)) {
+            std::any_of(matches.begin(), matches.end(), isInvalidMatch)) {
             return {};
         }
 
-        vector<Waypoint> result;
-        for (size_t i = 0; i + 1 < matches.size(); ++i) {
+        std::vector<Waypoint> result;
+        for (std::size_t i = 0; i + 1 < matches.size(); ++i) {
             const LaneKey start{matches[i].roadId, matches[i].sectionIndex,
                                 matches[i].laneId};
             const LaneKey goal{matches[i + 1].roadId, matches[i + 1].sectionIndex,
                                matches[i + 1].laneId};
             const auto route = connectLanes(data, start, goal);
             if (route.empty()) {
-                cerr << "[path] no legal lane route between waypoint "
+                std::cerr << "[path] no legal lane route between waypoint "
                           << data.checkpoints[i].sequence << " and "
                           << data.checkpoints[i + 1].sequence << '\n';
                 return {};
@@ -487,13 +496,13 @@ vector<Waypoint> makePath(const PathGeneratorData& data) {
 }
 
     // 시각화용으로 모든 driving lane centerline을 CSV로 저장한다.
-bool saveLaneMap(const PathGeneratorData& data, const string& outputPath) {
-        ofstream output(outputPath);
+bool saveLaneMap(const PathGeneratorData& data, const std::string& outputPath) {
+        std::ofstream output(outputPath);
         if (!output) return false;
         output << "road_id,lane_id,section_index,point_index,x,y\n";
-        output << fixed << setprecision(8);
+        output << std::fixed << std::setprecision(8);
         for (const auto& [key, segment] : data.laneSegments) {
-            for (size_t index = 0; index < segment.points.size(); ++index) {
+            for (std::size_t index = 0; index < segment.points.size(); ++index) {
                 const auto& point = segment.points[index];
                 output << key.roadId << ',' << key.laneId << ','
                        << key.sectionIndex << ',' << index << ','
@@ -518,9 +527,102 @@ void parseRoads(PathGeneratorData& data, const XmlElement& root) {
             parseRoadLinks(node, road);
             parseGeometries(node, road);
             parseLanes(node, road);
-            data.roads.emplace(road.id, move(road));
+            parseRoadObjects(data, node, road);
+            parseRoadSignals(data, node, road);
+            data.roads.emplace(road.id, std::move(road));
         }
     }
+
+    // XODR object/signal 값이 물리적으로 말이 되는 범위인지 검사한다.
+    // 이 지도에는 length=2.8e-76, width=9.8e+252 같은 깨진 항목이 실제로 있고,
+    // 걸러내지 않으면 폭 10^252 m짜리 영역이 만들어져 지도 전체를 덮는다.
+bool isSaneRoadFeature(double s, double t, double length, double width,
+                       double roadLength) {
+        if (!std::isfinite(s) || !std::isfinite(t)) return false;
+        if (!std::isfinite(length) || !std::isfinite(width)) return false;
+        if (s < -1.0 || s > roadLength + 1.0) return false;
+        if (std::fabs(t) > 50.0) return false;
+        if (length < 0.05 || length > 60.0) return false;
+        if (width < 0.05 || width > 60.0) return false;
+        return true;
+    }
+
+    // road의 <objects>를 읽는다. 정지선/횡단보도/노면 제한속도 표시가 여기 있다.
+void parseRoadObjects(PathGeneratorData& data, const XmlElement& node,
+                      const Road& road) {
+        const auto* objects = findFirstChild(node, "objects");
+        if (!objects) return;
+        for (const auto& entry : objects->children) {
+            if (entry.first != "object") continue;
+            const auto& element = entry.second;
+            RoadObject object;
+            object.roadId = road.id;
+            object.id = readAttribute<int>(element, "id", -1);
+            object.name = readAttribute<std::string>(element, "name", "");
+            object.type = readAttribute<std::string>(element, "type", "");
+            object.subtype = readAttribute<std::string>(element, "subtype", "");
+            object.s = readAttribute<double>(element, "s", 0.0);
+            object.t = readAttribute<double>(element, "t", 0.0);
+            object.hdg = readAttribute<double>(element, "hdg", 0.0);
+            object.length = readAttribute<double>(element, "length", 0.0);
+            object.width = readAttribute<double>(element, "width", 0.0);
+            if (!isSaneRoadFeature(object.s, object.t, object.length,
+                                   object.width, road.length)) {
+                continue;
+            }
+            data.roadObjects.push_back(std::move(object));
+        }
+    }
+
+    // road의 <signals>를 읽는다. 신호등 id와 적용 위치가 여기 있다.
+void parseRoadSignals(PathGeneratorData& data, const XmlElement& node,
+                      const Road& road) {
+        const auto* signals = findFirstChild(node, "signals");
+        if (!signals) return;
+        for (const auto& entry : signals->children) {
+            if (entry.first != "signal") continue;
+            const auto& element = entry.second;
+            RoadSignal signal;
+            signal.roadId = road.id;
+            signal.id = readAttribute<int>(element, "id", -1);
+            signal.name = readAttribute<std::string>(element, "name", "");
+            signal.type = readAttribute<std::string>(element, "type", "");
+            signal.subtype = readAttribute<std::string>(element, "subtype", "");
+            signal.s = readAttribute<double>(element, "s", 0.0);
+            signal.t = readAttribute<double>(element, "t", 0.0);
+            signal.dynamic =
+                readAttribute<std::string>(element, "dynamic", "no") == "yes";
+            signal.orientation =
+                readAttribute<std::string>(element, "orientation", "");
+            if (signal.id < 0 || !std::isfinite(signal.s) || !std::isfinite(signal.t)) {
+                continue;
+            }
+            if (signal.s < -1.0 || signal.s > road.length + 1.0) continue;
+            data.roadSignals.push_back(std::move(signal));
+        }
+    }
+
+void parseTrafficControllers(PathGeneratorData& data,
+                             const XmlElement& root) {
+    for (const auto& entry : root.children) {
+        if (entry.first != "controller") continue;
+        TrafficController controller;
+        controller.id = readAttribute<int>(entry.second, "id", -1);
+        controller.name =
+            readAttribute<std::string>(entry.second, "name", "");
+        if (controller.id < 0) continue;
+        for (const auto& child : entry.second.children) {
+            if (child.first != "control") continue;
+            const int signalId =
+                readAttribute<int>(child.second, "signalId", -1);
+            if (signalId < 0) continue;
+            controller.signalIds.push_back(signalId);
+            data.signalToController[signalId] = controller.id;
+        }
+        data.trafficControllers.emplace(controller.id,
+                                        std::move(controller));
+    }
+}
 
     // road 단위 predecessor/successor 연결정보를 읽는다.
 void parseRoadLinks(const XmlElement& node, Road& road) {
@@ -532,10 +634,10 @@ void parseRoadLinks(const XmlElement& node, Road& road) {
             if (entry.first == "successor") target = &road.successor;
             if (!target) continue;
             target->valid = true;
-            target->elementType = readAttribute<string>(entry.second, "elementType", "");
+            target->elementType = readAttribute<std::string>(entry.second, "elementType", "");
             target->elementId = readAttribute<int>(entry.second, "elementId", -1);
             target->contactPoint =
-                readAttribute<string>(entry.second, "contactPoint", "");
+                readAttribute<std::string>(entry.second, "contactPoint", "");
         }
     }
 
@@ -573,11 +675,11 @@ void parseGeometries(const XmlElement& node, Road& road) {
             }
             road.geometries.push_back(geometry);
         }
-        sort(road.geometries.begin(), road.geometries.end(), compareGeometryS);
+        std::sort(road.geometries.begin(), road.geometries.end(), compareGeometryS);
     }
 
     // OpenDRIVE의 a+b*ds+c*ds^2+d*ds^3 다항식 속성을 읽는다.
-Polynomial parsePolynomial(const XmlElement& node, const string& sName) {
+Polynomial parsePolynomial(const XmlElement& node, const std::string& sName) {
         return {readAttribute<double>(node, sName, 0.0), readAttribute<double>(node, "a", 0.0),
                 readAttribute<double>(node, "b", 0.0), readAttribute<double>(node, "c", 0.0),
                 readAttribute<double>(node, "d", 0.0)};
@@ -600,7 +702,7 @@ void parseLanes(const XmlElement& node, Road& road) {
                         if (laneNode.first != "lane") continue;
                         LaneDefinition lane;
                         lane.id = readAttribute<int>(laneNode.second, "id", 0);
-                        lane.type = readAttribute<string>(laneNode.second, "type", "none");
+                        lane.type = readAttribute<std::string>(laneNode.second, "type", "none");
                         for (const auto& item : laneNode.second.children) {
                             if (item.first == "width") {
                                 auto width = parsePolynomial(item.second, "sOffset");
@@ -611,7 +713,9 @@ void parseLanes(const XmlElement& node, Road& road) {
                                 mark.s = section.s +
                                     readAttribute<double>(item.second, "sOffset", 0.0);
                                 mark.laneChange =
-                                    readAttribute<string>(item.second, "laneChange", "none");
+                                    readAttribute<std::string>(item.second, "laneChange", "none");
+                                mark.color =
+                                    readAttribute<std::string>(item.second, "color", "standard");
                                 lane.roadMarks.push_back(mark);
                             } else if (item.first == "link") {
                                 for (const auto& link : item.second.children) {
@@ -624,15 +728,15 @@ void parseLanes(const XmlElement& node, Road& road) {
                                 }
                             }
                         }
-                        section.lanes.emplace(lane.id, move(lane));
+                        section.lanes.emplace(lane.id, std::move(lane));
                     }
                 }
-                road.sections.push_back(move(section));
+                road.sections.push_back(std::move(section));
             }
         }
-        sort(road.laneOffsets.begin(), road.laneOffsets.end(),
+        std::sort(road.laneOffsets.begin(), road.laneOffsets.end(),
              comparePolynomialS);
-        sort(road.sections.begin(), road.sections.end(), compareLaneSectionS);
+        std::sort(road.sections.begin(), road.sections.end(), compareLaneSectionS);
     }
 
     // junction의 incomingRoad -> connectingRoad 및 laneLink를 읽는다.
@@ -643,8 +747,8 @@ void parseJunctions(PathGeneratorData& data, const XmlElement& root) {
                 if (connection.first != "connection") continue;
                 const int incoming = readAttribute<int>(connection.second, "incomingRoad", -1);
                 const int connecting = readAttribute<int>(connection.second, "connectingRoad", -1);
-                const string contact =
-                    readAttribute<string>(connection.second, "contactPoint", "start");
+                const std::string contact =
+                    readAttribute<std::string>(connection.second, "contactPoint", "start");
                 for (const auto& laneLink : connection.second.children) {
                     if (laneLink.first != "laneLink") continue;
                     data.junctionLinks.push_back(
@@ -661,7 +765,7 @@ void parseJunctions(PathGeneratorData& data, const XmlElement& root) {
     // 6. Lane centerline 생성 함수
     // =========================================================================
 
-RoadPose roadPose(const Road& road, double s) {
+RoadPose roadToWorld(const Road& road, double s) {
         if (road.geometries.empty()) return {};
         const Geometry* selected = &road.geometries.front();
         for (const auto& geometry : road.geometries) {
@@ -698,7 +802,7 @@ double laneOffset(const Road& road, const LaneSection& section,
     }
 
     // s 위치에서 적용되는 roadMark의 laneChange 값을 찾는다.
-string laneChangeMarkAt(const LaneDefinition& lane, double s) {
+std::string laneChangeMarkAt(const LaneDefinition& lane, double s) {
     if (lane.roadMarks.empty()) return "none";
     const RoadMarkEntry* selected = &lane.roadMarks.front();
     for (const auto& mark : lane.roadMarks) {
@@ -711,12 +815,30 @@ string laneChangeMarkAt(const LaneDefinition& lane, double s) {
     // lane의 roadMark는 해당 lane의 외측 경계선을 정의한다.
     // 따라서 인접한 lane 사이 경계는 |id|가 더 작은(중심에 가까운)
     // lane의 외측 roadMark에서 읽어야 한다.
-bool laneChangeAllowed(const LaneSection& section, int fromLaneId,
-                       int toLaneId, double s) {
-    const int ownerId = abs(fromLaneId) < abs(toLaneId) ? fromLaneId : toLaneId;
+// 한 lane section 안에서도 roadMark는 중간에 바뀐다(앞 25 m 실선, 이후 점선 등).
+// laneGraph는 "이 구간에서 차선변경이 가능한 조합인가"만 표현하면 되므로
+// 구간 내 어느 지점에서든 허용되면 연결로 본다. 실제 지점에서의 허용 여부는
+// 기동을 세울 때 laneChangeAllowed가 정확한 s로 다시 판정한다.
+bool laneChangeEverAllowed(const LaneSection& section, int fromLaneId,
+                           int toLaneId) {
+    const int ownerId =
+        std::abs(fromLaneId) < std::abs(toLaneId) ? fromLaneId : toLaneId;
     const auto owner = section.lanes.find(ownerId);
     if (owner == section.lanes.end()) return false;
-    const string mark = laneChangeMarkAt(owner->second, s);
+    for (const auto& mark : owner->second.roadMarks) {
+        if (mark.laneChange == "both") return true;
+        if (mark.laneChange == "increase" && toLaneId > fromLaneId) return true;
+        if (mark.laneChange == "decrease" && toLaneId < fromLaneId) return true;
+    }
+    return false;
+}
+
+bool laneChangeAllowed(const LaneSection& section, int fromLaneId,
+                       int toLaneId, double s) {
+    const int ownerId = std::abs(fromLaneId) < std::abs(toLaneId) ? fromLaneId : toLaneId;
+    const auto owner = section.lanes.find(ownerId);
+    if (owner == section.lanes.end()) return false;
+    const std::string mark = laneChangeMarkAt(owner->second, s);
     if (mark == "both") return true;
     if (mark == "increase") return toLaneId > fromLaneId;
     if (mark == "decrease") return toLaneId < fromLaneId;
@@ -728,18 +850,18 @@ bool laneChangeAllowed(const LaneSection& section, int fromLaneId,
     // golden-section search로 기준선까지 거리를 최소화하는 s를 찾는다.
     // line/arc는 닫힌 형태로 역산 가능하지만, poly3/spiral까지 함께
     // 다루기 위해 evaluateGeometry를 그대로 재사용하는 수치해석 방식을 쓴다.
-RoadProjection projectPointToRoad(const Road& road, double x, double y,
+RoadProjection worldToRoad(const Road& road, double x, double y,
                                   double sGuess, double window) {
-    double lo = clamp(sGuess - window, 0.0, road.length);
-    double hi = clamp(sGuess + window, 0.0, road.length);
+    double lo = std::clamp(sGuess - window, 0.0, road.length);
+    double hi = std::clamp(sGuess + window, 0.0, road.length);
     if (hi <= lo) { lo = 0.0; hi = road.length; }
 
     const auto costAt = [&](double s) {
-        const RoadPose pose = roadPose(road, s);
+        const RoadPose pose = roadToWorld(road, s);
         return distanceSquared(x, y, pose.x, pose.y);
     };
 
-    const double goldenRatio = (sqrt(5.0) - 1.0) / 2.0;
+    const double goldenRatio = (std::sqrt(5.0) - 1.0) / 2.0;
     double a = lo, b = hi;
     double c = b - goldenRatio * (b - a);
     double d = a + goldenRatio * (b - a);
@@ -749,18 +871,18 @@ RoadProjection projectPointToRoad(const Road& road, double x, double y,
         d = a + goldenRatio * (b - a);
     }
 
-    const double sBest = clamp(0.5 * (a + b), 0.0, road.length);
-    const RoadPose pose = roadPose(road, sBest);
+    const double sBest = std::clamp(0.5 * (a + b), 0.0, road.length);
+    const RoadPose pose = roadToWorld(road, sBest);
     const double dx = x - pose.x;
     const double dy = y - pose.y;
-    const double t = dx * (-sin(pose.yaw)) + dy * cos(pose.yaw);
-    return {sBest, t, hypot(dx, dy)};
+    const double t = dx * (-std::sin(pose.yaw)) + dy * std::cos(pose.yaw);
+    return {sBest, t, std::hypot(dx, dy)};
 }
 
     // 모든 driving lane을 sampleInterval 간격의 중심선 점으로 변환한다.
 void sampleLaneCenters(PathGeneratorData& data) {
         for (const auto& [roadId, road] : data.roads) {
-            for (size_t sectionIndex = 0; sectionIndex < road.sections.size();
+            for (std::size_t sectionIndex = 0; sectionIndex < road.sections.size();
                  ++sectionIndex) {
                 const auto& section = road.sections[sectionIndex];
                 const double endS = sectionIndex + 1 < road.sections.size()
@@ -773,9 +895,9 @@ void sampleLaneCenters(PathGeneratorData& data) {
                     segment.key = {roadId, static_cast<int>(sectionIndex), laneId};
                     segment.startS = section.s;
                     segment.endS = endS;
-                    segment.length = max(0.0, endS - section.s);
-                    const int count = max(
-                        1, static_cast<int>(ceil(segment.length / data.sampleInterval)));
+                    segment.length = std::max(0.0, endS - section.s);
+                    const int count = std::max(
+                        1, static_cast<int>(std::ceil(segment.length / data.sampleInterval)));
                     // laneSection 경계점은 다음 section에서만 생성한다.
                     // 같은 roadS에 서로 다른 laneOffset을 두 번 적용하는 것을 막는다.
                     const bool isLastSection =
@@ -783,11 +905,11 @@ void sampleLaneCenters(PathGeneratorData& data) {
                     const int lastSample = isLastSection ? count : count - 1;
                     for (int i = 0; i <= lastSample; ++i) {
                         const double s = section.s + segment.length * i / count;
-                        const auto reference = roadPose(road, s);
+                        const auto reference = roadToWorld(road, s);
                         const double t = laneOffset(road, section, laneId, s);
                         Waypoint point;
-                        point.x = reference.x - t * sin(reference.yaw);
-                        point.y = reference.y + t * cos(reference.yaw);
+                        point.x = reference.x - t * std::sin(reference.yaw);
+                        point.y = reference.y + t * std::cos(reference.yaw);
                         point.yaw = laneId < 0 ? reference.yaw
                                                : normalizeAngle(reference.yaw + kPi);
                         point.roadS = s;
@@ -797,8 +919,8 @@ void sampleLaneCenters(PathGeneratorData& data) {
                         segment.points.push_back(point);
                     }
                     // RHT OpenDRIVE: 양수 lane은 road s 반대 방향으로 주행한다.
-                    if (laneId > 0) reverse(segment.points.begin(), segment.points.end());
-                    data.laneSegments.emplace(segment.key, move(segment));
+                    if (laneId > 0) std::reverse(segment.points.begin(), segment.points.end());
+                    data.laneSegments.emplace(segment.key, std::move(segment));
                 }
             }
         }
@@ -819,7 +941,7 @@ void addLaneEdge(PathGeneratorData& data, const LaneKey& from,
 void buildLaneGraph(PathGeneratorData& data) {
         // 같은 road의 인접 laneSection 연결.
         for (const auto& [roadId, road] : data.roads) {
-            for (size_t i = 0; i < road.sections.size(); ++i) {
+            for (std::size_t i = 0; i < road.sections.size(); ++i) {
                 for (const auto& [laneId, lane] : road.sections[i].lanes) {
                     if (lane.type != "driving") continue;
                     const LaneKey from{roadId, static_cast<int>(i), laneId};
@@ -838,7 +960,7 @@ void buildLaneGraph(PathGeneratorData& data) {
         // 같은 방향의 인접 driving lane 연결을 추가한다. roadMark의
         // laneChange가 실선(none)이면 연결하지 않는다.
         for (const auto& [roadId, road] : data.roads) {
-            for (size_t sectionIndex = 0;
+            for (std::size_t sectionIndex = 0;
                  sectionIndex < road.sections.size(); ++sectionIndex) {
                 const LaneSection& section = road.sections[sectionIndex];
                 for (const auto& [laneId, lane] : section.lanes) {
@@ -854,8 +976,8 @@ void buildLaneGraph(PathGeneratorData& data) {
                             adjacent->second.type != "driving") {
                             continue;
                         }
-                        if (!laneChangeAllowed(section, laneId, adjacentId,
-                                               section.s)) {
+                        if (!laneChangeEverAllowed(section, laneId,
+                                                   adjacentId)) {
                             continue;
                         }
                         addLaneEdge(data,
@@ -910,14 +1032,14 @@ void buildLaneGraph(PathGeneratorData& data) {
     // 연속된 두 checkpoint 사이의 successor/junction 연결을 순서대로 추적한다.
     // 이것은 전체 경로를 새로 최적화하는 것이 아니라, CSV가 생략한 XODR 내부
     // connectingRoad와 laneSection을 펼치는 과정이다.
-vector<LaneKey> connectLanes(const PathGeneratorData& data,
+std::vector<LaneKey> connectLanes(const PathGeneratorData& data,
                              const LaneKey& start, const LaneKey& goal) {
         if (start == goal) return {start};
 
         // 거리 cost를 사용하지 않는 BFS이다. road 길이로 경로를 고르지 않는다.
-        queue<LaneKey> queue;
-        map<LaneKey, bool> visited;
-        map<LaneKey, LaneKey> previous;
+        std::queue<LaneKey> queue;
+        std::map<LaneKey, bool> visited;
+        std::map<LaneKey, LaneKey> previous;
         visited[start] = true;
         queue.push(start);
 
@@ -937,38 +1059,38 @@ vector<LaneKey> connectLanes(const PathGeneratorData& data,
         }
 
         if (!visited.count(goal)) return {};
-        vector<LaneKey> route;
+        std::vector<LaneKey> route;
         for (LaneKey current = goal;; current = previous.at(current)) {
             route.push_back(current);
             if (current == start) break;
         }
-        reverse(route.begin(), route.end());
+        std::reverse(route.begin(), route.end());
         return route;
     }
 
 // route의 첫 lane은 현재 위치 이후만, 마지막 lane은 목표 위치 이전만 계산한다.
 double calculateRouteDistance(const PathGeneratorData& data,
-                              const vector<LaneKey>& route,
+                              const std::vector<LaneKey>& route,
                               const LaneMatch& start,
                               const LaneMatch& goal) {
-    if (route.empty()) return numeric_limits<double>::infinity();
+    if (route.empty()) return std::numeric_limits<double>::infinity();
     if (route.size() == 1) {
         if (goal.pointIndex < start.pointIndex)
-            return numeric_limits<double>::infinity();
-        return max(0.0, goal.roadS - start.roadS);
+            return std::numeric_limits<double>::infinity();
+        return std::max(0.0, goal.roadS - start.roadS);
     }
 
     double distance = 0.0;
-    for (size_t index = 0; index < route.size(); ++index) {
+    for (std::size_t index = 0; index < route.size(); ++index) {
         const LaneSegment& segment = data.laneSegments.at(route[index]);
         if (index == 0) {
             distance += segment.length *
                         (1.0 - static_cast<double>(start.pointIndex) /
-                                   max<size_t>(1, segment.points.size() - 1));
+                                   std::max<std::size_t>(1, segment.points.size() - 1));
         } else if (index + 1 == route.size()) {
             distance += segment.length *
                         static_cast<double>(goal.pointIndex) /
-                        max<size_t>(1, segment.points.size() - 1);
+                        std::max<std::size_t>(1, segment.points.size() - 1);
         } else {
             distance += segment.length;
         }
@@ -981,13 +1103,13 @@ double calculateRouteDistance(const PathGeneratorData& data,
 // kMaxLegalGap을 넘는 간격은 연결 자체가 잘못됐다는 신호로 보고 숨기지
 // 않고 큰 소리로 경고한다. 그래도 경로는 계속 이어 붙여 디버깅 가능하게 한다.
 void appendInterpolatedGap(const Waypoint& start, const Waypoint& end,
-                           double interval, vector<Waypoint>& output) {
+                           double interval, std::vector<Waypoint>& output) {
     constexpr double kMaxLegalGap = 2.0;
-    const double gap = sqrt(distanceSquared(start.x, start.y, end.x, end.y));
+    const double gap = std::sqrt(distanceSquared(start.x, start.y, end.x, end.y));
     if (gap <= interval * 1.5) return;
 
     if (gap > kMaxLegalGap) {
-        cerr << "[gap-warning] " << gap
+        std::cerr << "[gap-warning] " << gap
              << "m gap between road=" << start.roadId << " lane=" << start.laneId
              << " (roadS=" << start.roadS << ") and road=" << end.roadId
              << " lane=" << end.laneId << " (roadS=" << end.roadS
@@ -995,7 +1117,7 @@ void appendInterpolatedGap(const Waypoint& start, const Waypoint& end,
              << "m -- likely a wrong lane connection, not just sampling error\n";
     }
 
-    const int count = max(1, static_cast<int>(ceil(gap / interval)));
+    const int count = std::max(1, static_cast<int>(std::ceil(gap / interval)));
     for (int index = 1; index < count; ++index) {
         const double ratio = static_cast<double>(index) / count;
         Waypoint point = end;
@@ -1008,22 +1130,22 @@ void appendInterpolatedGap(const Waypoint& start, const Waypoint& end,
 
 // 현재 차선을 따라 전진하면서 smoothstep 비율로 다음 차선 중심선에 합류한다.
 // 반환값은 다음 차선에서 이어서 복사할 point index다.
-size_t appendSmoothLaneChange(const vector<Waypoint>& currentLane,
-                              const vector<Waypoint>& nextLane,
-                              size_t begin,
-                              vector<Waypoint>& output) {
+std::size_t appendSmoothLaneChange(const std::vector<Waypoint>& currentLane,
+                              const std::vector<Waypoint>& nextLane,
+                              std::size_t begin,
+                              std::vector<Waypoint>& output) {
     if (currentLane.empty() || nextLane.empty()) return 0;
 
-    begin = min(begin, currentLane.size() - 1);
-    const size_t remaining = currentLane.size() - begin;
-    const size_t transitionStart = begin + remaining / 3;
-    const size_t desiredSamples = 40;  // 0.5m sampling 기준 약 20m
-    const size_t availableSamples =
-        max<size_t>(2, currentLane.size() - transitionStart);
-    const size_t transitionSamples =
-        min(desiredSamples, availableSamples);
-    const size_t transitionEnd =
-        min(currentLane.size() - 1,
+    begin = std::min(begin, currentLane.size() - 1);
+    const std::size_t remaining = currentLane.size() - begin;
+    const std::size_t transitionStart = begin + remaining / 3;
+    const std::size_t desiredSamples = 40;  // 0.5m sampling 기준 약 20m
+    const std::size_t availableSamples =
+        std::max<std::size_t>(2, currentLane.size() - transitionStart);
+    const std::size_t transitionSamples =
+        std::min(desiredSamples, availableSamples);
+    const std::size_t transitionEnd =
+        std::min(currentLane.size() - 1,
             transitionStart + transitionSamples - 1);
 
     if (!output.empty()) {
@@ -1032,16 +1154,16 @@ size_t appendSmoothLaneChange(const vector<Waypoint>& currentLane,
     output.insert(output.end(), currentLane.begin() + begin,
                   currentLane.begin() + transitionStart);
 
-    size_t finalNextIndex = 0;
-    const size_t denominator = max<size_t>(1, transitionEnd - transitionStart);
-    for (size_t index = transitionStart; index <= transitionEnd; ++index) {
+    std::size_t finalNextIndex = 0;
+    const std::size_t denominator = std::max<std::size_t>(1, transitionEnd - transitionStart);
+    for (std::size_t index = transitionStart; index <= transitionEnd; ++index) {
         const double roadRatio = currentLane.size() > 1
                                      ? static_cast<double>(index) /
                                            (currentLane.size() - 1)
                                      : 0.0;
-        const size_t nextIndex = min(
+        const std::size_t nextIndex = std::min(
             nextLane.size() - 1,
-            static_cast<size_t>(roadRatio * (nextLane.size() - 1)));
+            static_cast<std::size_t>(roadRatio * (nextLane.size() - 1)));
         const double progress =
             static_cast<double>(index - transitionStart) / denominator;
         const double blend = progress * progress * (3.0 - 2.0 * progress);
@@ -1060,27 +1182,27 @@ size_t appendSmoothLaneChange(const vector<Waypoint>& currentLane,
         output.push_back(point);
         finalNextIndex = nextIndex;
     }
-    return min(finalNextIndex + 1, nextLane.size() - 1);
+    return std::min(finalNextIndex + 1, nextLane.size() - 1);
 }
 
     // 첫/마지막 lane은 매칭 지점에서 자르고 중간 lane은 전체를 결과에 붙인다.
 void appendRoute(const PathGeneratorData& data,
-                 const vector<LaneKey>& route,
+                 const std::vector<LaneKey>& route,
                  const LaneMatch& start, const LaneMatch& goal,
-                 vector<Waypoint>& output) {
-        size_t nextBegin = 0;
-        for (size_t routeIndex = 0; routeIndex < route.size(); ++routeIndex) {
+                 std::vector<Waypoint>& output) {
+        std::size_t nextBegin = 0;
+        for (std::size_t routeIndex = 0; routeIndex < route.size(); ++routeIndex) {
             const auto& points = data.laneSegments.at(route[routeIndex]).points;
-            size_t begin = nextBegin;
-            size_t end = points.size();
+            std::size_t begin = nextBegin;
+            std::size_t end = points.size();
             nextBegin = 0;
-            if (routeIndex == 0) begin = min(start.pointIndex, points.size() - 1);
+            if (routeIndex == 0) begin = std::min(start.pointIndex, points.size() - 1);
             if (routeIndex + 1 == route.size())
-                end = min(goal.pointIndex + 1, points.size());
+                end = std::min(goal.pointIndex + 1, points.size());
 
             // 같은 road/section에서 여러 차선을 연속으로 옮기는 경우 중간
             // 차선마다 꺾지 않고 최초 차선에서 최종 차선까지 한 번만 이동한다.
-            size_t finalLaneIndex = routeIndex;
+            std::size_t finalLaneIndex = routeIndex;
             while (finalLaneIndex + 1 < route.size() &&
                    route[routeIndex].roadId ==
                        route[finalLaneIndex + 1].roadId &&
@@ -1110,12 +1232,12 @@ void appendRoute(const PathGeneratorData& data,
     // =========================================================================
 
     // lane 경계에서 중복 삽입된 거의 동일한 점을 제거한다.
-void removeDuplicates(vector<Waypoint>& path) {
+void removeDuplicates(std::vector<Waypoint>& path) {
         if (path.empty()) return;
-        vector<Waypoint> filtered;
+        std::vector<Waypoint> filtered;
         filtered.reserve(path.size());
         filtered.push_back(path.front());
-        for (size_t i = 1; i < path.size(); ++i) {
+        for (std::size_t i = 1; i < path.size(); ++i) {
             if (distanceSquared(filtered.back().x, filtered.back().y, path[i].x,
                           path[i].y) > 0.01) {
                 filtered.push_back(path[i]);
@@ -1125,24 +1247,24 @@ void removeDuplicates(vector<Waypoint>& path) {
     }
 
     // 최종 점 순서를 기준으로 yaw와 누적거리 s를 다시 계산한다.
-void updateYawAndS(vector<Waypoint>& path) {
+void updateYawAndS(std::vector<Waypoint>& path) {
         if (path.empty()) return;
         path.front().s = 0.0;
-        for (size_t i = 1; i < path.size(); ++i) {
+        for (std::size_t i = 1; i < path.size(); ++i) {
             const double dx = path[i].x - path[i - 1].x;
             const double dy = path[i].y - path[i - 1].y;
-            path[i].s = path[i - 1].s + hypot(dx, dy);
-            if (hypot(dx, dy) > kEpsilon) path[i - 1].yaw = atan2(dy, dx);
+            path[i].s = path[i - 1].s + std::hypot(dx, dy);
+            if (std::hypot(dx, dy) > kEpsilon) path[i - 1].yaw = std::atan2(dy, dx);
         }
         if (path.size() > 1) path.back().yaw = path[path.size() - 2].yaw;
     }
 
 // 생성된 전역경로를 디버깅/시각화용 CSV로 저장한다.
-bool savePath(const vector<Waypoint>& path, const string& outputPath) {
-    ofstream output(outputPath);
+bool savePath(const std::vector<Waypoint>& path, const std::string& outputPath) {
+    std::ofstream output(outputPath);
     if (!output) return false;
     output << "x,y,yaw,s,road_id,lane_id,road_s\n";
-    output << fixed << setprecision(8);
+    output << std::fixed << std::setprecision(8);
     for (const auto& point : path) {
         output << point.x << ',' << point.y << ',' << point.yaw << ','
                << point.s << ',' << point.roadId << ',' << point.laneId

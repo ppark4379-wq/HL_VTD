@@ -1,0 +1,235 @@
+# extract_static_zones가 XODR에서 자동 생성한 파일이다.
+# 직접 수정하지 말고 도구를 다시 실행할 것.
+# source xodr : src/data/map/HL_FMA_VTD_LivingLab.xodr
+# source route: output/reference_path.csv
+
+map:
+  xodr: src/data/map/HL_FMA_VTD_LivingLab.xodr
+
+finish:
+  x: 0.0
+  y: 0.0
+  route_s: 0.0
+  configured: false  # 운영측 종료 좌표를 받으면 채운다
+
+stop_lines:
+  - id: 1
+    controller_id: -1
+    road_id: 30
+    lane_ids: [-1]
+    begin: [1.062, 25.244]
+    end: [1.062, 25.244]
+    route_s: 43.108
+    # route lateral 1.402 m
+  - id: 2
+    controller_id: -1
+    road_id: 30
+    lane_ids: [-1]
+    begin: [-1.814, 24.869]
+    end: [-1.814, 24.869]
+    route_s: 43.067
+    # route lateral 1.498 m
+  - id: 97
+    controller_id: 5
+    road_id: 72
+    lane_ids: [-4]
+    begin: [211.448, 159.430]
+    end: [211.448, 159.430]
+    route_s: 298.965
+    # route lateral 0.000 m
+  - id: 98
+    controller_id: 5
+    road_id: 72
+    lane_ids: [-4]
+    begin: [210.806, 160.145]
+    end: [210.806, 160.145]
+    route_s: 298.965
+    # route lateral 0.961 m
+  - id: 99
+    controller_id: 5
+    road_id: 72
+    lane_ids: [-2]
+    begin: [209.109, 162.033]
+    end: [209.109, 162.033]
+    route_s: 298.965
+    # route lateral 3.500 m
+  - id: 688
+    controller_id: -1
+    road_id: 310
+    lane_ids: [-1]
+    begin: [326.605, -272.990]
+    end: [326.605, -272.990]
+    route_s: 815.399
+    # route lateral 0.250 m
+  - id: 689
+    controller_id: -1
+    road_id: 310
+    lane_ids: [-1]
+    begin: [326.213, -273.300]
+    end: [326.213, -273.300]
+    route_s: 815.399
+    # route lateral 0.250 m
+  - id: 737
+    controller_id: -1
+    road_id: 310
+    lane_ids: [-1]
+    begin: [285.519, -114.910]
+    end: [285.519, -114.910]
+    route_s: 628.734
+    # route lateral 3.001 m
+  - id: 759
+    controller_id: -1
+    road_id: 396
+    lane_ids: [-1]
+    begin: [306.362, -96.716]
+    end: [306.362, -96.716]
+    route_s: 600.375
+    # route lateral 0.208 m
+  - id: 760
+    controller_id: -1
+    road_id: 396
+    lane_ids: [-1]
+    begin: [306.134, -96.340]
+    end: [306.134, -96.340]
+    route_s: 600.375
+    # route lateral 0.233 m
+  - id: 766
+    controller_id: -1
+    road_id: 396
+    lane_ids: [-1]
+    begin: [315.131, -94.888]
+    end: [315.131, -94.888]
+    route_s: 591.933
+    # route lateral 3.207 m
+  - id: 905
+    controller_id: 11
+    road_id: 429
+    lane_ids: [-1]
+    begin: [314.808, -63.360]
+    end: [314.808, -63.360]
+    route_s: 559.121
+    # route lateral 1.354 m
+  - id: 906
+    controller_id: 11
+    road_id: 429
+    lane_ids: [-1]
+    begin: [313.514, -63.990]
+    end: [313.514, -63.990]
+    route_s: 559.170
+    # route lateral 0.084 m
+
+crosswalks:
+  - id: 1046
+    polygon: "-6.285,29.667; 0.850,30.635; 1.576,25.284; -5.559,24.316"
+    entry_route_s: 42.949
+    exit_route_s: 48.840
+    # source: RM_532_6_8.flt
+  - id: 1052
+    polygon: "13.109,51.241; 16.959,33.658; 11.098,32.375; 7.248,49.958"
+    entry_route_s: 59.036
+    exit_route_s: 65.266
+    # source: RM_532_6_18.flt
+  - id: 1053
+    polygon: "223.153,168.515; 223.007,162.017; 219.508,162.095; 219.653,168.594"
+    entry_route_s: 307.958
+    exit_route_s: 311.872
+    # source: SgRMPelicanCross-2Lanes-4m.flt
+  - id: 1054
+    polygon: "318.676,-87.354; 323.100,-94.020; 318.101,-97.338; 313.677,-90.672"
+    entry_route_s: 584.690
+    exit_route_s: 590.985
+    # source: RM_532_6_8.flt
+  - id: 1056
+    polygon: "313.453,-65.514; 335.040,-55.027; 338.536,-62.223; 316.948,-72.710"
+    entry_route_s: 551.994
+    exit_route_s: 568.514
+    # source: RM_532_8_24.flt
+  - id: 1088
+    polygon: "286.467,-107.380; 293.249,-113.296; 289.304,-117.817; 282.522,-111.901"
+    entry_route_s: 620.682
+    exit_route_s: 628.491
+    # source: RM_532_6_9.flt
+  - id: 1089
+    polygon: "306.476,-111.784; 300.421,-115.297; 297.410,-110.107; 303.465,-106.594"
+    entry_route_s: 608.053
+    exit_route_s: 615.261
+    # source: RM_532_6_7.flt
+  - id: 1267
+    polygon: "211.808,181.804; 221.474,171.676; 215.687,166.153; 206.021,176.280"
+    entry_route_s: 302.784
+    exit_route_s: 309.927
+    # source: RM_532_8_14.flt
+  - id: 1269
+    polygon: "255.516,153.906; 234.688,146.822; 232.112,154.396; 252.940,161.480"
+    entry_route_s: 325.655
+    exit_route_s: 333.668
+    # source: RM_532_8_22.flt
+
+speed_zones: []
+
+# 아래는 XODR에서 찾은 노면 제한속도 표시다.
+# 표시는 지점이고 speed_zones는 구간이므로 자동 변환하지 않는다.
+# VTD 화면에서 적용 구간을 확인한 뒤 speed_zones에 직접 옮길 것.
+#   route_s 635.764  30.000 km/h  road 310  (roadmark_speed_30.flt)
+#   route_s 593.853  30.000 km/h  road 396  (roadmark_speed_30.flt)
+
+traffic_lights: []
+
+# GT trafficLight.id는 XODR controller id다. 아래는 controller와
+# 그 controller가 묶는 개별 signal id 목록이다.
+#   id 1  road 72  type 1000020  route_s 65.341  lateral 9.505
+#   id 2  road 72  type 1000008  route_s 65.345  lateral 9.904
+#   id 5  road 72  type 1000012  route_s 65.348  lateral 10.304
+#   id 3  road 72  type 1000020  route_s 65.341  lateral 9.505
+#   id 4  road 72  type 1000008  route_s 65.345  lateral 9.904
+#   id 6  road 72  type 1000012  route_s 65.352  lateral 10.704
+#   id 36  road 72  type 1000020  route_s 298.433  lateral 7.500
+#   id 37  road 72  type 1000008  route_s 298.433  lateral 7.100
+#   id 40  road 72  type 1000012  route_s 298.433  lateral 5.700
+#   id 38  road 72  type 1000020  route_s 298.433  lateral 6.500
+#   id 39  road 72  type 1000008  route_s 298.433  lateral 6.100
+#   id 41  road 72  type 1000012  route_s 298.433  lateral 5.300
+#   id 32  road 76  type 1000020  route_s 46.762  lateral 23.494
+#   id 33  road 76  type 1000008  route_s 46.480  lateral 23.320
+#   id 35  road 76  type 1000012  route_s 46.470  lateral 23.150
+#   id 66  road 418  type 1000020  route_s 583.105  lateral 35.389
+#   id 67  road 418  type 1000008  route_s 582.830  lateral 35.598
+#   id 70  road 418  type 1000012  route_s 582.398  lateral 36.909
+#   id 68  road 418  type 1000020  route_s 582.830  lateral 36.463
+#   id 69  road 418  type 1000008  route_s 582.511  lateral 36.685
+#   id 71  road 418  type 1000012  route_s 582.398  lateral 37.135
+#   id 72  road 420  type 1000020  route_s 575.905  lateral 39.332
+#   id 73  road 420  type 1000008  route_s 575.890  lateral 39.197
+#   id 76  road 420  type 1000012  route_s 575.153  lateral 38.439
+#   id 74  road 420  type 1000020  route_s 575.472  lateral 38.678
+#   id 75  road 420  type 1000008  route_s 575.472  lateral 38.557
+#   id 77  road 420  type 1000012  route_s 575.038  lateral 38.321
+#   id 54  road 429  type 1000020  route_s 554.543  lateral 12.647
+#   id 55  road 429  type 1000008  route_s 554.689  lateral 12.274
+#   id 58  road 429  type 1000012  route_s 559.114  lateral 6.097
+#   id 56  road 429  type 1000020  route_s 559.087  lateral 6.896
+#   id 57  road 429  type 1000008  route_s 559.100  lateral 6.496
+#   id 59  road 429  type 1000012  route_s 559.127  lateral 5.697
+#   id 47  road 429  type 1000012  route_s 335.898  lateral 14.495
+#   id 42  road 429  type 1000020  route_s 335.901  lateral 12.695
+#   id 43  road 429  type 1000008  route_s 335.900  lateral 13.095
+#   id 46  road 429  type 1000012  route_s 335.899  lateral 14.095
+#   id 44  road 429  type 1000020  route_s 335.900  lateral 13.295
+#   id 45  road 429  type 1000008  route_s 335.900  lateral 13.695
+#   id 34  road 556  type 1000012  route_s 50.130  lateral 21.505
+#   id 31  road 556  type 1000008  route_s 50.130  lateral 21.587
+#   id 30  road 556  type 1000020  route_s 50.130  lateral 21.676
+#   controller 1 signals [1, 2, 5]
+#   controller 2 signals [3, 4, 6]
+#   controller 3 signals [34, 31, 30]
+#   controller 4 signals [32, 33, 35]
+#   controller 5 signals [36, 37, 40]
+#   controller 6 signals [38, 39, 41]
+#   controller 7 signals [42, 43, 46]
+#   controller 8 signals [47, 44, 45]
+#   controller 11 signals [54, 55, 58]
+#   controller 12 signals [56, 57, 59]
+#   controller 15 signals [66, 67, 70]
+#   controller 16 signals [68, 69, 71]
+#   controller 17 signals [72, 73, 76]
+#   controller 18 signals [74, 75, 77]

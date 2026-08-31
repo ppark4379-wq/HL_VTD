@@ -1,0 +1,15 @@
+# T02 시나리오 전용 지도 설정 (루프백 검증용).
+map:
+  xodr: src/data/map/HL_FMA_VTD_LivingLab.xodr
+  static_features: config/maps/T02_static.yaml
+
+finish:
+  x: 0.0
+  y: 0.0
+  route_s: 0.0
+  configured: false
+
+speed_zones: []
+stop_lines: []
+crosswalks: []
+traffic_lights: []

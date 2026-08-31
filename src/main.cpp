@@ -2,12 +2,15 @@
 #include "network/receive/gt_printer.hpp"
 #include "network/network_config.hpp"
 #include "network/send/control_sender.hpp"
-#include "control/control_config.hpp"
+#include "network/vtd_client.hpp"
+#include "control/config/control_config.hpp"
 #include "control/control_process.hpp"
 #include "logger/logger.hpp"
 #include "planning/planning_process.hpp"
-#include "data/gt/gt_processor.hpp"
-#include "planning/reference_path_generator.hpp"
+#include "data/gt/world_process.hpp"
+#include "data/map/static_zones.hpp"
+#include "data/vehicle/vehicle_config.hpp"
+#include "planning/global/reference_path_generator.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -23,6 +26,8 @@ struct CliOptions {
     std::filesystem::path config_path = "config/network.yaml";
     std::filesystem::path control_config_path = "config/control.yaml";
     std::filesystem::path reference_path = "output/reference_path.csv";
+    std::filesystem::path map_config_path = "config/maps/living_lab.yaml";
+    std::filesystem::path vehicle_config_path = "config/vehicle.yaml";
     CsvLoggerConfig logger;
     bool logging = false;
     bool check_config_only = false;
@@ -49,6 +54,12 @@ CliOptions parseOptions(int argc, char* argv[]) {
                 throw std::invalid_argument("--path requires a file path");
             }
             options.reference_path = argv[i];
+        } else if (argument == "--map-config") {
+            if (++i >= argc) throw std::invalid_argument("--map-config requires a file path");
+            options.map_config_path = argv[i];
+        } else if (argument == "--vehicle-config") {
+            if (++i >= argc) throw std::invalid_argument("--vehicle-config requires a file path");
+            options.vehicle_config_path = argv[i];
         } else if (argument == "--log") {
             if (++i >= argc) {
                 throw std::invalid_argument("--log requires a file path");
@@ -74,7 +85,8 @@ CliOptions parseOptions(int argc, char* argv[]) {
         } else if (argument == "--help" || argument == "-h") {
             std::cout
                 << "Usage: hl_vtd [--config PATH] [--control-config PATH] "
-                   "[--path PATH] [--log CSV] [--scenario-id ID] "
+                   "[--path PATH] [--map-config PATH] [--vehicle-config PATH] "
+                   "[--log CSV] [--scenario-id ID] "
                    "[--run-id ID] [--receive-only] [--debug-objects] "
                    "[--check-config]\n";
             std::exit(0);
@@ -102,16 +114,55 @@ void printDrivingStatus(const GtFrame& gt,
               << '\n';
 }
 
+struct FrameClockData {
+    double previousTime{};
+    double dt{0.05};
+    bool initialized{};
+};
+
+void updateFrameClock(FrameClockData& clock, double receiveTime,
+                      double nominalDt) {
+    const double measured = clock.initialized && receiveTime > clock.previousTime
+                                ? receiveTime - clock.previousTime
+                                : nominalDt;
+    // TCP는 여러 GT 프레임을 한 recv에 합칠 수 있다. 버퍼에서 연속으로
+    // 꺼낸 프레임의 wall-clock dt가 거의 0이어도 시뮬레이션 주기는 0이 아니다.
+    clock.dt = measured >= nominalDt * 0.25 && measured <= nominalDt * 4.0
+                   ? measured
+                   : nominalDt;
+    clock.previousTime = receiveTime;
+    clock.initialized = true;
+}
+
 void printNetworkConfig(
     const CliOptions& options,
     const NetworkConfig& config) {
     std::cout << "[network] config: " << options.config_path << '\n'
               << "[network] VTD TCP: " << config.vtd.host_ip << ':'
-              << config.vtd.tcp_port << '\n'
+              << config.vtd.tcp_port
+              << " (1109-byte GT receive + 9-byte control send)\n"
               << "[network] VTD RTSP: " << config.vtd.host_ip << ':'
               << config.vtd.rtsp_port << '\n'
-              << "[network] controller UDP: " << config.controller.ip << ':'
-              << config.controller.udp_port << '\n';
+              << "[network] configured controller UDP (unused by control): "
+              << config.controller.ip << ':' << config.controller.udp_port
+              << '\n';
+}
+
+void printMapReadiness(const StaticZoneData& zones) {
+    std::cout << "[map] static features: stop_lines=" << zones.stopLines.size()
+              << " crosswalks=" << zones.crosswalks.size()
+              << " speed_zones=" << zones.speedZones.size()
+              << " flashing_red_ids="
+              << zones.flashingRedControllerIds.size() << '\n';
+    if (zones.speedZones.empty()) {
+        std::cout << "[config-warning] protection/speed zone polygons are not configured\n";
+    }
+    if (zones.flashingRedControllerIds.empty()) {
+        std::cout << "[config-warning] no packet traffic-light ID is marked as flashing red\n";
+    }
+    if (!zones.finish.valid) {
+        std::cout << "[config-warning] official finish coordinate is not configured\n";
+    }
 }
 
 }  // namespace
@@ -131,28 +182,52 @@ int main(int argc, char* argv[]) {
 
         printNetworkConfig(options, config);
 
-        if (options.check_config_only) {
-            std::cout << "[network] config is valid\n";
-            return 0;
+        VehicleGeometry vehicle;
+        if (!loadVehicleGeometry(vehicle,
+                                 options.vehicle_config_path.string())) {
+            throw std::runtime_error("cannot load vehicle config: " +
+                                     options.vehicle_config_path.string());
         }
 
-        PathPlannerData planner;
-        planner.config = drivingConfig.planner;
-        if (!initializePlanning(planner, options.reference_path.string())) {
+        MapRuntimeConfig mapConfig;
+        if (!loadMapRuntimeConfig(mapConfig,
+                                  options.map_config_path.string())) {
+            throw std::runtime_error("cannot load map config: " +
+                                     options.map_config_path.string());
+        }
+
+        PlanningProcessData planning;
+        if (!initializePlanning(planning, drivingConfig.planner,
+                                drivingConfig.behavior,
+                                drivingConfig.laneChange,
+                                options.reference_path.string())) {
             throw std::runtime_error(
                 "cannot load reference path: " + options.reference_path.string());
         }
 
         PathGeneratorData mapData;
-        const std::string xodrPath =
-            "src/data/map/HL_FMA_VTD_LivingLab.xodr";
-        if (!loadMap(mapData, xodrPath)) {
-            throw std::runtime_error("cannot load XODR map: " + xodrPath);
+        if (!loadMap(mapData, mapConfig.xodrPath)) {
+            throw std::runtime_error("cannot load XODR map: " +
+                                     mapConfig.xodrPath);
         }
+        if (!alignStaticZonesToRoute(
+                mapConfig.zones, planning.pathPlanner.waypoints)) {
+            throw std::runtime_error(
+                "cannot align static zones to reference path");
+        }
+        mapData.staticZones = mapConfig.zones;
         std::cout << "[map] XODR loaded\n";
+        printMapReadiness(mapData.staticZones);
+
+        if (options.check_config_only) {
+            std::cout << "[config] all configured files and values are valid\n";
+            return 0;
+        }
 
         ControlProcessData control;
         control.controller.config = drivingConfig.controller;
+        WorldProcessData world;
+        FrameClockData clock;
 
         CsvLoggerData logger;
         if (options.logging) {
@@ -162,6 +237,8 @@ int main(int argc, char* argv[]) {
 
         auto receiver = makeGtReceiver(config.vtd);
         connectGtReceiver(receiver);
+        setVtdReceiveTimeout(receiver.client,
+                             drivingConfig.runtime.inputTimeout);
 
         using LogClock = std::chrono::steady_clock;
         const auto logStartTime = LogClock::now();
@@ -169,37 +246,46 @@ int main(int argc, char* argv[]) {
 
         while (receiveGtFrame(receiver)) {
             const GtFrame& gt = getLatestGtFrame(receiver);
-            const WorldState world =
-                makeWorldState(gt, mapData, planner.waypoints);
-
-            const PathPlan plan = runPlanningProcess(planner, gt, world);
-            const ControlCommand command =
-                runControlProcess(control, gt, plan, drivingConfig.runtime);
+            updateFrameClock(clock, getLatestGtReceiveTime(receiver),
+                             drivingConfig.runtime.nominalDt);
+            runWorldProcess(world, gt, getLatestGtReceiveTime(receiver), clock.dt,
+                            mapData, planning.pathPlanner.waypoints, vehicle);
+            runPlanningProcess(planning, gt, world.state, mapData, clock.dt);
+            runControlProcess(control, world.state, planning.result, clock.dt);
 
             if (!options.receive_only) {
-                sendControlCommand(receiver.client, command);
+                sendControlCommand(receiver.client, control.safeCommand);
             }
 
             if (options.logging) {
                 const double elapsedWallTime = std::chrono::duration<double>(
                     LogClock::now() - logStartTime).count();
                 const LogFrameInput logInput{
-                    frameCount, elapsedWallTime, gt, plan, control};
+                    frameCount, elapsedWallTime, gt, world.state,
+                    planning.result.trackingPlan, control};
                 runLoggingProcess(logger, logInput);
             }
 
             if (frameCount % 10 == 0) {
-                printDrivingStatus(gt, plan, control);
+                printDrivingStatus(gt, planning.result.trackingPlan, control);
                 if (options.debug_objects) {
-                    printWorldObjectStates(world);
+                    printWorldObjectStates(world.state);
                 }
             }
             ++frameCount;
 
-            if (plan.goalReached) {
+            if (planning.result.goalReached) {
                 std::cout << "[drive] goal reached\n";
                 break;
             }
+        }
+
+        if (didVtdReceiveTimeOut(receiver.client)) {
+            ControlCommand timeoutCommand{};
+            timeoutCommand.targetAccel = static_cast<float>(
+                drivingConfig.controller.minAcceleration);
+            sendControlCommand(receiver.client, timeoutCommand);
+            std::cerr << "[safety] GT receive timeout; emergency brake sent\n";
         }
 
         disconnectGtReceiver(receiver);
