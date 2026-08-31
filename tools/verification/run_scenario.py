@@ -62,6 +62,20 @@ def parse_args() -> argparse.Namespace:
         help="VTD SCP port (default: 48179)",
     )
     parser.add_argument(
+        "--vtd-scenario-file",
+        type=Path,
+        default=None,
+        help=(
+            "Scenario path as seen by the VTD PC "
+            "(default: validated local XML path)"
+        ),
+    )
+    parser.add_argument(
+        "--inline-scenario",
+        action="store_true",
+        help="Embed Scenario XML in SCP instead of loading a VTD-side file",
+    )
+    parser.add_argument(
         "--vtd-timeout",
         type=float,
         default=60.0,
@@ -145,7 +159,9 @@ def run_automated(
     with VtdScpClient(scp_host, args.scp_port, args.vtd_timeout) as scp:
         print(f"[auto-vtd] connected to SCP {scp_host}:{args.scp_port}")
         print(f"[auto-vtd] loading and applying {scenario_file.name}")
-        scp.configure_scenario(scenario_file, args.vtd_timeout)
+        scp.configure_scenario(
+            scenario_file, args.vtd_timeout, inline=args.inline_scenario
+        )
         print("[auto-vtd] VTD is READY; starting HL_VTD")
         controller = subprocess.Popen(command, cwd=REPO_ROOT)
         try:
@@ -249,8 +265,14 @@ def main() -> int:
             print(f"[run_scenario] {error}", file=sys.stderr)
             return 2
         print(f"VTD SCP  : {scp_host}:{args.scp_port} (automatic Load/Apply/Play/Stop)")
+        vtd_scenario_file = (
+            args.vtd_scenario_file or report.scenario_file.resolve()
+        )
+        delivery = "inline XML" if args.inline_scenario else "VTD file path"
+        print(f"VTD file : {vtd_scenario_file} ({delivery})")
     else:
         scp_host = ""
+        vtd_scenario_file = report.scenario_file.resolve()
         print("VTD      : Load/Apply/Play manually (use --auto-vtd to automate).")
 
     if args.dry_run:
@@ -269,7 +291,7 @@ def main() -> int:
             assert ready_file is not None
             ready_file.unlink(missing_ok=True)
             return run_automated(
-                args, command, report.scenario_file.resolve(), scp_host,
+                args, command, vtd_scenario_file, scp_host,
                 ready_file,
             )
         completed = subprocess.run(command, cwd=REPO_ROOT, check=False)

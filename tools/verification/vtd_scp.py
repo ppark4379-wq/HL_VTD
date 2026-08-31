@@ -8,6 +8,7 @@ import struct
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from xml.sax.saxutils import quoteattr
 
 
 SCP_MAGIC = 40108
@@ -42,8 +43,10 @@ def pack_message(
     ) + data
 
 
-def scenario_load_command(path: Path) -> str:
-    """Embed a VTD-native Scenario tree so a remote VTD needs no shared path."""
+def scenario_load_command(path: Path, *, inline: bool = False) -> str:
+    """Build VTD LoadScenario using its normal file path or inline XML."""
+    if not inline:
+        return f"<SimCtrl><LoadScenario filename={quoteattr(str(path))}/></SimCtrl>"
     try:
         scenario = ET.parse(path).getroot()
     except (OSError, ET.ParseError) as error:
@@ -177,10 +180,18 @@ class VtdScpClient:
             f"(last state: {last_state})"
         )
 
-    def configure_scenario(self, scenario_path: Path, timeout: float) -> None:
+    def configure_scenario(
+        self,
+        scenario_path: Path,
+        timeout: float,
+        *,
+        inline: bool = False,
+        settle_delay: float = 1.0,
+    ) -> None:
         self.send("<SimCtrl><Stop/></SimCtrl>")
         self.send("<SimCtrl><Config/></SimCtrl>")
-        self.send(scenario_load_command(scenario_path))
+        time.sleep(max(0.0, settle_delay))
+        self.send(scenario_load_command(scenario_path, inline=inline))
         self.send("<SimCtrl><Apply/></SimCtrl>")
         self.wait_for_state("READY", timeout)
 

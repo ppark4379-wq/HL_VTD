@@ -84,10 +84,10 @@ Scenario 검증 및 XML 전송
 
 제어기 PC와 VTD PC가 분리되어 있으면 `config/network.yaml`의
 `vtd.host_ip`를 VTD PC 주소로 설정합니다. SCP는 같은 주소의 TCP 48179번을
-사용하므로 VTD PC 방화벽에서도 이 포트를 허용해야 합니다. Scenario XML은
-SCP 메시지에 포함해 전송하므로 두 PC가 Scenario 폴더를 공유할 필요는
-없지만, XML이 참조하는 VTD Project·Distro 자산은 VTD PC에 설치되어 있어야
-합니다.
+사용하므로 VTD PC 방화벽에서도 이 포트를 허용해야 합니다. 두 PC를 사용할
+때는 Scenario XML도 VTD PC에 배치하고 `--vtd-scenario-file`에 VTD PC에서
+보이는 경로를 지정해야 합니다. XML이 참조하는 VTD Project·Distro 자산도
+VTD PC에 설치되어 있어야 합니다.
 
 별도 네트워크 설정 파일이나 SCP 주소를 지정할 수도 있습니다.
 
@@ -96,6 +96,7 @@ python3 tools/verification/run_scenario.py \
   scenario/vehicle/V04_cut_in \
   --config config/network.lab.yaml \
   --scp-host 165.246.170.76 \
+  --vtd-scenario-file /home/vtd/HL_VTD/scenario/vehicle/V04_cut_in/V04_cut_in.xml \
   --auto-vtd \
   --run-timeout 180
 ```

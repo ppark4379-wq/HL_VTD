@@ -54,10 +54,17 @@ class VtdScpTests(unittest.TestCase):
                 "<TrafficControl/></Scenario>",
                 encoding="utf-8",
             )
-            command = scenario_load_command(path)
+            command = scenario_load_command(path, inline=True)
         self.assertTrue(command.startswith("<SimCtrl><LoadScenario><Scenario"))
         self.assertIn("<TrafficControl", command)
         self.assertTrue(command.endswith("</Scenario></LoadScenario></SimCtrl>"))
+
+    def test_scenario_file_load_matches_vtd_gui_path(self) -> None:
+        command = scenario_load_command(Path('/tmp/V04_cut_in.xml'))
+        self.assertEqual(
+            command,
+            '<SimCtrl><LoadScenario filename="/tmp/V04_cut_in.xml"/></SimCtrl>',
+        )
 
     def test_wait_for_state_queries_until_expected_response(self) -> None:
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -124,7 +131,7 @@ class VtdScpTests(unittest.TestCase):
             thread = threading.Thread(target=serve)
             thread.start()
             with VtdScpClient("127.0.0.1", port, timeout=2.0) as client:
-                client.configure_scenario(scenario, timeout=2.0)
+                client.configure_scenario(scenario, timeout=2.0, settle_delay=0.0)
                 client.start(timeout=2.0)
                 client.stop(timeout=2.0)
             thread.join(timeout=2.0)
@@ -132,7 +139,7 @@ class VtdScpTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(received[0], "<SimCtrl><Stop/></SimCtrl>")
         self.assertEqual(received[1], "<SimCtrl><Config/></SimCtrl>")
-        self.assertTrue(received[2].startswith("<SimCtrl><LoadScenario>"))
+        self.assertTrue(received[2].startswith("<SimCtrl><LoadScenario filename="))
         self.assertEqual(received[3], "<SimCtrl><Apply/></SimCtrl>")
         self.assertEqual(received[5], "<SimCtrl><Start/></SimCtrl>")
         self.assertEqual(received[7], "<SimCtrl><Stop/></SimCtrl>")
