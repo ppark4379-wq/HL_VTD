@@ -96,6 +96,9 @@ void printDrivingStatus(const GtFrame& gt,
               << " targetSpeed=" << plan.targetSpeed
               << " steering=" << control.latestCommand.steering
               << " targetAccel=" << control.latestCommand.targetAccel
+              << " trafficLightId=" << gt.trafficLight.id
+              << " trafficLightState="
+              << static_cast<unsigned int>(gt.trafficLight.state)
               << '\n';
 }
 
