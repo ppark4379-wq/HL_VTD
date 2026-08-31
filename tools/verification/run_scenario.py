@@ -157,16 +157,16 @@ def run_automated(
 ) -> int:
     controller: subprocess.Popen[bytes] | None = None
     with VtdScpClient(scp_host, args.scp_port, args.vtd_timeout) as scp:
-        print(f"[auto-vtd] connected to SCP {scp_host}:{args.scp_port}")
-        print(f"[auto-vtd] loading and applying {scenario_file.name}")
-        scp.configure_scenario(
-            scenario_file, args.vtd_timeout, inline=args.inline_scenario
-        )
-        print("[auto-vtd] VTD is READY; initializing scenario")
-        scp.initialize(args.vtd_timeout)
-        print("[auto-vtd] VTD is initialized; starting HL_VTD")
-        controller = subprocess.Popen(command, cwd=REPO_ROOT)
         try:
+            print(f"[auto-vtd] connected to SCP {scp_host}:{args.scp_port}")
+            print(f"[auto-vtd] loading and applying {scenario_file.name}")
+            scp.configure_scenario(
+                scenario_file, args.vtd_timeout, inline=args.inline_scenario
+            )
+            print("[auto-vtd] VTD is READY; initializing scenario")
+            scp.initialize(args.vtd_timeout)
+            print("[auto-vtd] VTD is initialized; starting HL_VTD")
+            controller = subprocess.Popen(command, cwd=REPO_ROOT)
             try:
                 controller.wait(timeout=0.1)
             except subprocess.TimeoutExpired:

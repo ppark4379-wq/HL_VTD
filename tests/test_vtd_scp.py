@@ -121,12 +121,16 @@ class VtdScpTests(unittest.TestCase):
             )
 
         def serve() -> None:
-            state = "READY"
+            state = "UNDEFINED"
             connection, _ = server.accept()
             with connection:
-                for _ in range(2):
-                    received.append(receive_packet(connection))
+                for _ in range(3):
+                    command = receive_packet(connection)
+                    received.append(command)
+                    if "<SimState/>" in command:
+                        respond(connection, state)
             connection, _ = server.accept()
+            state = "READY"
             with connection:
                 for _ in range(10):
                     command = receive_packet(connection)
@@ -158,13 +162,81 @@ class VtdScpTests(unittest.TestCase):
             thread.join(timeout=2.0)
 
         self.assertFalse(thread.is_alive())
-        self.assertEqual(received[0], "<SimCtrl><Stop/></SimCtrl>")
-        self.assertEqual(received[1], "<SimCtrl><Config/></SimCtrl>")
-        self.assertEqual(received[2], "<SimCtrl><Apply/></SimCtrl>")
-        self.assertTrue(received[4].startswith("<SimCtrl><LoadScenario filename="))
-        self.assertEqual(received[6], "<SimCtrl><Init/></SimCtrl>")
-        self.assertEqual(received[8], "<SimCtrl><Start/></SimCtrl>")
-        self.assertEqual(received[10], "<SimCtrl><Stop/></SimCtrl>")
+        self.assertIn("<SimState/>", received[0])
+        self.assertEqual(received[1], "<SimCtrl><Stop/></SimCtrl>")
+        self.assertEqual(received[2], "<SimCtrl><Config/></SimCtrl>")
+        self.assertEqual(received[3], "<SimCtrl><Apply/></SimCtrl>")
+        self.assertTrue(received[5].startswith("<SimCtrl><LoadScenario filename="))
+        self.assertEqual(received[7], "<SimCtrl><Init/></SimCtrl>")
+        self.assertEqual(received[9], "<SimCtrl><Start/></SimCtrl>")
+        self.assertEqual(received[11], "<SimCtrl><Stop/></SimCtrl>")
+
+    def test_ready_vtd_runs_two_scenarios_without_reconfigure(self) -> None:
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+        received: list[str] = []
+
+        def respond_state(connection: socket.socket, state: str) -> None:
+            response = (
+                f'<Info><SimState source="TaskControl" state="{state}"/></Info>'
+            )
+            connection.sendall(
+                pack_message(response, sender="TaskControl", receiver="any")
+            )
+
+        def serve() -> None:
+            state = "READY"
+            connection, _ = server.accept()
+            with connection:
+                for _ in range(18):
+                    command = receive_packet(connection)
+                    received.append(command)
+                    if command == "<SimCtrl><Init/></SimCtrl>":
+                        state = "POST-INIT"
+                    elif command == "<SimCtrl><Start/></SimCtrl>":
+                        state = "RUN"
+                    elif command == "<SimCtrl><Stop/></SimCtrl>":
+                        state = "READY"
+                    elif "<SimState/>" in command:
+                        respond_state(connection, state)
+                    elif "<Scenario/>" in command:
+                        filename = str(first if len(received) < 10 else second)
+                        response = (
+                            '<Reply entity="taskControl"><Scenario '
+                            f'filename="{filename}" contentViaSCP="false"/></Reply>'
+                        )
+                        connection.sendall(
+                            pack_message(
+                                response, sender="TaskControl", receiver="any"
+                            )
+                        )
+            server.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "first.xml"
+            second = Path(directory) / "second.xml"
+            first.write_text("<Scenario/>")
+            second.write_text("<Scenario/>")
+            thread = threading.Thread(target=serve)
+            thread.start()
+            with VtdScpClient("127.0.0.1", port, timeout=2.0) as client:
+                for scenario in (first, second):
+                    client.configure_scenario(scenario, timeout=2.0)
+                    client.initialize(timeout=2.0)
+                    client.start(timeout=2.0)
+                    client.stop(timeout=2.0)
+            thread.join(timeout=2.0)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(
+            sum("<LoadScenario " in command for command in received), 2
+        )
+        self.assertNotIn("<SimCtrl><Config/></SimCtrl>", received)
+        self.assertNotIn("<SimCtrl><Apply/></SimCtrl>", received)
+        self.assertEqual(received.count("<SimCtrl><Start/></SimCtrl>"), 2)
+        self.assertEqual(received.count("<SimCtrl><Stop/></SimCtrl>"), 2)
 
 
 if __name__ == "__main__":

@@ -196,6 +196,28 @@ class VtdScpClient:
             f"(last state: {last_state})"
         )
 
+    def get_state(self, timeout: float) -> str | None:
+        self.send('<Query entity="taskControl"><SimState/></Query>')
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                _, _, payload = self.receive(
+                    timeout=min(0.5, max(0.01, deadline - time.monotonic()))
+                )
+            except TimeoutError:
+                continue
+            try:
+                root = ET.fromstring(payload)
+            except ET.ParseError:
+                continue
+            for element in root.iter("SimState"):
+                source = element.attrib.get("source", "TaskControl")
+                if source.lower() == "taskcontrol":
+                    state = element.attrib.get("state")
+                    if state:
+                        return state.upper().replace("_", "-")
+        return None
+
     def wait_for_scenario(self, expected: Path, timeout: float) -> None:
         deadline = time.monotonic() + timeout
         next_query = 0.0
@@ -233,12 +255,18 @@ class VtdScpClient:
         inline: bool = False,
         settle_delay: float = 1.0,
     ) -> None:
-        self.send("<SimCtrl><Stop/></SimCtrl>")
-        self.send("<SimCtrl><Config/></SimCtrl>")
-        time.sleep(max(0.0, settle_delay))
-        self.reconnect(timeout)
-        self.send("<SimCtrl><Apply/></SimCtrl>")
-        self.wait_for_state("READY", timeout)
+        state = self.get_state(min(2.0, timeout))
+        if state in {"RUN", "PAUSE", "POST-INIT", "INIT", "WAIT-FOR-INIT-CONFIRM"}:
+            self.send("<SimCtrl><Stop/></SimCtrl>")
+            self.wait_for_state("READY", timeout)
+            state = "READY"
+        if state != "READY":
+            self.send("<SimCtrl><Stop/></SimCtrl>")
+            self.send("<SimCtrl><Config/></SimCtrl>")
+            time.sleep(max(0.0, settle_delay))
+            self.reconnect(timeout)
+            self.send("<SimCtrl><Apply/></SimCtrl>")
+            self.wait_for_state("READY", timeout)
         self.send(scenario_load_command(scenario_path, inline=inline))
         if inline:
             time.sleep(max(0.0, settle_delay))
