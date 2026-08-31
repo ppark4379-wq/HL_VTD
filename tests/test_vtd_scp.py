@@ -152,6 +152,7 @@ class VtdScpTests(unittest.TestCase):
                 client.configure_scenario(
                     scenario, timeout=2.0, settle_delay=0.05
                 )
+                client.initialize(timeout=2.0)
                 client.start(timeout=2.0)
                 client.stop(timeout=2.0)
             thread.join(timeout=2.0)

@@ -162,7 +162,9 @@ def run_automated(
         scp.configure_scenario(
             scenario_file, args.vtd_timeout, inline=args.inline_scenario
         )
-        print("[auto-vtd] VTD is READY; starting HL_VTD")
+        print("[auto-vtd] VTD is READY; initializing scenario")
+        scp.initialize(args.vtd_timeout)
+        print("[auto-vtd] VTD is initialized; starting HL_VTD")
         controller = subprocess.Popen(command, cwd=REPO_ROOT)
         try:
             try:
@@ -185,7 +187,7 @@ def run_automated(
                     controller.wait(timeout=0.1)
                 except subprocess.TimeoutExpired:
                     pass
-            print("[auto-vtd] sending Play")
+            print("[auto-vtd] HL_VTD is connected; sending Play")
             scp.start(args.vtd_timeout)
             print("[auto-vtd] VTD is RUNNING; CSV logging is active")
             try:

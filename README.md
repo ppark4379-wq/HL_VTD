@@ -76,6 +76,7 @@ python3 tools/verification/run_scenario.py \
 ```text
 Scenario 검증 및 XML 전송
 → VTD Configure/Apply 완료 대기
+→ Scenario Init 완료 대기
 → HL_VTD 실행 및 TCP 연결 대기
 → VTD Play
 → CSV 로깅
