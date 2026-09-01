@@ -30,6 +30,7 @@ add_executable(hl_vtd
     src/control/longitudinal/longitudinal_controller.cpp
     src/control/safety/safety_limiter.cpp
     src/logger/logger.cpp
+    src/logger/decision_trace.cpp
     src/utils/csv_utils.cpp
     src/utils/geometry.cpp
     src/utils/math_utils.cpp
@@ -67,6 +68,7 @@ add_executable(controller_logic_tests
     src/utils/csv_utils.cpp
     src/utils/geometry.cpp
     src/utils/math_utils.cpp
+    src/logger/decision_trace.cpp
 )
 target_compile_features(controller_logic_tests PRIVATE cxx_std_17)
 target_include_directories(controller_logic_tests

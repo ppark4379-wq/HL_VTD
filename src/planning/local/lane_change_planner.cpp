@@ -1,5 +1,6 @@
 #include "planning/local/lane_change_planner.hpp"
 
+#include "logger/decision_trace.hpp"
 #include "planning/collision/collision_checker.hpp"
 #include "planning/global/reference_path_generator.hpp"
 #include "planning/local/path_planner.hpp"
@@ -10,6 +11,7 @@
 #include <cmath>
 #include <limits>
 #include <queue>
+#include <sstream>
 
 namespace {
 
@@ -23,18 +25,53 @@ void resetLaneChange(LaneChangeData& state) {
 }
 
 const WorldObjectState* findBlockingObstacle(
-    const WorldState& world, const LaneChangeConfig& config) {
+    const WorldState& world, const LaneChangeConfig& config,
+    DecisionTraceData* trace) {
     const WorldObjectState* result = nullptr;
     for (const auto& object : world.objects) {
+        std::ostringstream detail;
+        detail << "object=" << object.raw.id
+               << " relative_s=" << object.relativeS
+               << " relative_d=" << object.relativeD
+               << " speed=" << object.raw.speed
+               << " road=" << object.roadId
+               << " section=" << object.sectionIndex
+               << " lane=" << object.laneId;
         if (!object.isAhead || !object.isOnEgoPath ||
             std::abs(object.raw.speed) >= 0.3 ||
             object.relativeS < config.obstacleTriggerMinimumDistance ||
             object.relativeS > config.obstacleTriggerMaximumDistance) {
+            detail << " result=reject reasons="
+                   << (!object.isAhead ? "not_ahead;" : "")
+                   << (!object.isOnEgoPath ? "not_on_ego_path;" : "")
+                   << (std::abs(object.raw.speed) >= 0.3 ? "moving;" : "")
+                   << (object.relativeS < config.obstacleTriggerMinimumDistance
+                           ? "too_close_for_new_lane_change;" : "")
+                   << (object.relativeS > config.obstacleTriggerMaximumDistance
+                           ? "beyond_trigger_range;" : "");
+            traceDecision(trace, "obstacle_scan", "candidate_checked",
+                          detail.str());
             continue;
         }
+        detail << " result=static_blocker_candidate";
+        traceDecision(trace, "obstacle_scan", "candidate_checked",
+                      detail.str());
         if (result == nullptr || object.relativeS < result->relativeS) {
             result = &object;
         }
+    }
+    if (result == nullptr) {
+        traceDecision(trace, "obstacle_scan", "no_blocker",
+                      "no static object satisfies path/speed/12-45m trigger");
+    } else {
+        std::ostringstream detail;
+        detail << "object=" << result->raw.id
+               << " relative_s=" << result->relativeS
+               << " relative_d=" << result->relativeD
+               << " road=" << result->roadId
+               << " section=" << result->sectionIndex
+               << " lane=" << result->laneId;
+        traceDecision(trace, "obstacle_scan", "blocker_selected", detail.str());
     }
     return result;
 }
@@ -43,13 +80,35 @@ bool targetLaneHasSafeGap(const WorldState& world,
                           int roadId,
                           int sectionIndex,
                           int targetLaneId,
-                          const LaneChangeConfig& config) {
+                          const LaneChangeConfig& config,
+                          DecisionTraceData* trace) {
+    bool foundObject = false;
     for (const auto& object : world.objects) {
         if (!object.laneValid || object.roadId != roadId ||
             object.sectionIndex != sectionIndex ||
             object.laneId != targetLaneId || !object.pathValid) continue;
+        foundObject = true;
         const double gap = object.pathS - world.egoPathS;
-        if (gap >= 0.0 && gap < config.minimumTargetAheadGap) return false;
+        const double objectLongitudinalSpeed =
+            static_cast<double>(object.raw.speed) *
+            std::cos(object.raw.heading - world.ego.heading);
+        const double closingSpeed = gap >= 0.0
+                                        ? world.egoSpeed - objectLongitudinalSpeed
+                                        : objectLongitudinalSpeed - world.egoSpeed;
+        const double ttc = calculateTTC(std::abs(gap), closingSpeed);
+        std::ostringstream detail;
+        detail << "target=" << roadId << '/' << sectionIndex << '/'
+               << targetLaneId << " object=" << object.raw.id
+               << " gap=" << gap
+               << " object_longitudinal_speed=" << objectLongitudinalSpeed
+               << " closing_speed=" << closingSpeed
+               << " ttc=" << ttc;
+        if (gap >= 0.0 && gap < config.minimumTargetAheadGap) {
+            detail << " result=reject reason=ahead_gap_below_"
+                   << config.minimumTargetAheadGap;
+            traceDecision(trace, "target_lane", "gap_ttc_checked", detail.str());
+            return false;
+        }
         // 뒤쪽 간격 기준은 "따라오는 차"를 위한 것이다. 이미 지나쳐 온 정지
         // 물체는 접근해 오지 않으므로 이 기준을 적용하지 않는다. 적용하면
         // 옆 차선의 정지 장애물을 지난 직후 12 m 동안 회피가 막힌다.
@@ -57,16 +116,27 @@ bool targetLaneHasSafeGap(const WorldState& world,
         // 예측 검사가 그대로 걸러 준다.
         const bool objectIsStatic = std::abs(object.raw.speed) < 0.3;
         if (gap < 0.0 && !objectIsStatic &&
-            -gap < config.minimumTargetBehindGap) return false;
-
-        const double objectLongitudinalSpeed =
-            static_cast<double>(object.raw.speed) *
-            std::cos(object.raw.heading - world.ego.heading);
-        const double closingSpeed = gap >= 0.0
-                                        ? world.egoSpeed - objectLongitudinalSpeed
-                                        : objectLongitudinalSpeed - world.egoSpeed;
-        if (calculateTTC(std::abs(gap), closingSpeed) <
-            config.minimumTargetTTC) return false;
+            -gap < config.minimumTargetBehindGap) {
+            detail << " result=reject reason=behind_gap_below_"
+                   << config.minimumTargetBehindGap;
+            traceDecision(trace, "target_lane", "gap_ttc_checked", detail.str());
+            return false;
+        }
+        if (ttc < config.minimumTargetTTC) {
+            detail << " result=reject reason=ttc_below_"
+                   << config.minimumTargetTTC;
+            traceDecision(trace, "target_lane", "gap_ttc_checked", detail.str());
+            return false;
+        }
+        detail << " result=pass";
+        traceDecision(trace, "target_lane", "gap_ttc_checked", detail.str());
+    }
+    if (!foundObject) {
+        std::ostringstream detail;
+        detail << "target=" << roadId << '/' << sectionIndex << '/'
+               << targetLaneId
+               << " result=pass reason=no_object_matched_target_lane";
+        traceDecision(trace, "target_lane", "gap_ttc_checked", detail.str());
     }
     return true;
 }
@@ -199,25 +269,47 @@ bool buildKeepTargetPath(std::vector<Waypoint>& output,
                          const WorldState& world,
                          const PathGeneratorData& map,
                          const PathPlannerData& globalPath,
-                         std::size_t nearestGlobalIndex) {
+                         std::size_t nearestGlobalIndex,
+                         DecisionTraceData* trace) {
     const LaneKey targetKey{world.egoRoadId, world.egoSectionIndex,
                             targetLaneId};
     if (!findNextGlobalRoadLane(reconnectLane, reconnectGlobalIndex,
                                 globalPath, map, nearestGlobalIndex,
-                                world.egoRoadId)) return false;
+                                world.egoRoadId)) {
+        traceDecision(trace, "target_lane", "keep_route_rejected",
+                      "reason=no_next_global_road_lane");
+        return false;
+    }
+    {
+        std::ostringstream detail;
+        detail << "target=" << targetKey.roadId << '/' << targetKey.sectionIndex
+               << '/' << targetKey.laneId << " reconnect="
+               << reconnectLane.roadId << '/' << reconnectLane.sectionIndex
+               << '/' << reconnectLane.laneId
+               << " global_index=" << reconnectGlobalIndex;
+        traceDecision(trace, "target_lane", "keep_route_goal", detail.str());
+    }
     const std::vector<LaneKey> forwardRoute =
         findForwardLaneRoute(map, targetKey, reconnectLane);
-    if (forwardRoute.empty()) return false;
+    if (forwardRoute.empty()) {
+        traceDecision(trace, "target_lane", "keep_route_rejected",
+                      "reason=target_lane_cannot_reach_exact_next_global_lane_without_lateral_or_detour_edges");
+        return false;
+    }
 
     const auto roadFound = map.roads.find(world.egoRoadId);
     if (roadFound == map.roads.end()) return false;
     const Road& road = roadFound->second;
     const LaneSection& section = road.sections[world.egoSectionIndex];
     if (!laneChangeAllowed(section, world.egoLaneId, targetLaneId,
-                           world.egoRoadS)) return false;
+                           world.egoRoadS)) {
+        traceDecision(trace, "target_lane", "keep_route_rejected",
+                      "reason=road_mark_forbids_lane_change_at_ego_road_s");
+        return false;
+    }
     if (!targetLaneHasSafeGap(world, world.egoRoadId,
                               world.egoSectionIndex, targetLaneId,
-                              config)) return false;
+                              config, trace)) return false;
 
     output.clear();
     const double transitionEndS = world.egoPathS + config.transitionLength;
@@ -298,7 +390,8 @@ bool buildReturnCandidatePath(std::vector<Waypoint>& output,
                         const WorldState& world,
                         const PathGeneratorData& map,
                         const PathPlannerData& globalPath,
-                        std::size_t nearestGlobalIndex) {
+                        std::size_t nearestGlobalIndex,
+                        DecisionTraceData* trace) {
     if (!obstacle.laneValid || !obstacle.pathValid) return false;
     const auto obstacleRoadFound = map.roads.find(obstacle.roadId);
     if (obstacleRoadFound == map.roads.end() || obstacle.sectionIndex < 0 ||
@@ -328,7 +421,7 @@ bool buildReturnCandidatePath(std::vector<Waypoint>& output,
         return false;
     }
     if (!targetLaneHasSafeGap(world, obstacle.roadId, obstacle.sectionIndex,
-                              targetLaneId, config)) {
+                              targetLaneId, config, trace)) {
         return false;
     }
 
@@ -505,8 +598,9 @@ bool buildReturnCandidatePath(std::vector<Waypoint>& output,
 
 bool candidatePathIsSafe(const std::vector<Waypoint>& points,
                          const PlanningBehaviorConfig& config,
-                         const LaneChangeConfig& laneChangeConfig,
-                         const WorldState& world) {
+                          const LaneChangeConfig& laneChangeConfig,
+                          const WorldState& world,
+                          DecisionTraceData* trace) {
     LocalPathData candidate;
     candidate.valid = points.size() >= 2;
     candidate.points = points;
@@ -532,6 +626,22 @@ bool candidatePathIsSafe(const std::vector<Waypoint>& points,
     checkPredictedCollisions(safety, predictionWorld, candidate,
                              predictionHorizon,
                              config.collisionPredictionStep);
+    {
+        std::ostringstream detail;
+        detail << "points=" << points.size()
+               << " remaining_length=" << remainingLength
+               << " assumed_ego_speed=" << predictionWorld.egoSpeed
+               << " horizon=" << predictionHorizon
+               << " step=" << config.collisionPredictionStep
+               << " current_collision=" << safety.collision
+               << " predicted_collision=" << safety.predictedCollision
+               << " predicted_ttc=" << safety.predictedCollisionTTC
+               << " risk_object=" << safety.riskObjectId
+               << " result="
+               << (!safety.collision && !safety.predictedCollision
+                       ? "pass" : "reject");
+        traceDecision(trace, "candidate_obb", "full_path_checked", detail.str());
+    }
     return !safety.collision && !safety.predictedCollision;
 }
 
@@ -544,10 +654,11 @@ bool tryPrepareObstacleLaneChange(
     const WorldState& world,
     const PathGeneratorData& map,
     const PathPlannerData& globalPath,
-    std::size_t nearestGlobalIndex) {
+    std::size_t nearestGlobalIndex,
+    DecisionTraceData* trace) {
     if (state.phase != LaneChangePhase::None || !world.egoLaneValid ||
         !world.egoPathValid) return false;
-    const WorldObjectState* obstacle = findBlockingObstacle(world, config);
+    const WorldObjectState* obstacle = findBlockingObstacle(world, config, trace);
     if (obstacle == nullptr) return false;
 
     // 후보 차선은 Ego가 아니라 "장애물이 놓인 차선"의 양옆이다. 장애물 앞
@@ -589,8 +700,20 @@ bool tryPrepareObstacleLaneChange(
     }
 
     for (int targetLaneId : adjacent) {
+        {
+            std::ostringstream detail;
+            detail << "obstacle=" << obstacle->raw.id
+                   << " source_lane=" << obstacleLaneId
+                   << " target_lane=" << targetLaneId;
+            traceDecision(trace, "lane_change", "target_candidate_started",
+                          detail.str());
+        }
         if (targetLaneId == 0 ||
-            (targetLaneId > 0) != (obstacleLaneId > 0)) continue;
+            (targetLaneId > 0) != (obstacleLaneId > 0)) {
+            traceDecision(trace, "lane_change", "target_candidate_rejected",
+                          "reason=center_or_opposite_direction_lane");
+            continue;
+        }
         std::vector<Waypoint> candidate;
         const std::uint8_t signal =
             turnSignalTowardLane(world, map, targetLaneId);
@@ -599,8 +722,9 @@ bool tryPrepareObstacleLaneChange(
         if (signal != 0 &&
             buildKeepTargetPath(candidate, reconnectLane, reconnectIndex,
                                 targetLaneId, config, world, map,
-                                globalPath, nearestGlobalIndex) &&
-            candidatePathIsSafe(candidate, safetyConfig, config, world)) {
+                                globalPath, nearestGlobalIndex, trace) &&
+            candidatePathIsSafe(candidate, safetyConfig, config, world,
+                                trace)) {
             state = {};
             state.phase = LaneChangePhase::Prepare;
             state.routeMode = LaneChangeRouteMode::KeepTargetLane;
@@ -617,8 +741,13 @@ bool tryPrepareObstacleLaneChange(
             state.startRouteS = world.egoPathS;
             state.rejoinRouteS = candidate.back().s;
             state.path = std::move(candidate);
+            traceDecision(trace, "lane_change", "candidate_selected",
+                          "mode=keep_target_lane phase=prepare");
             return true;
         }
+
+        traceDecision(trace, "lane_change", "return_candidate_started",
+                      "keep-target route unavailable or unsafe; checking out-and-back route");
 
         std::uint8_t returnCandidateSignal{};
         double returnStartS{};
@@ -627,8 +756,15 @@ bool tryPrepareObstacleLaneChange(
         if (!buildReturnCandidatePath(
                 candidate, returnCandidateSignal, returnStartS, rejoinS,
                 targetLaneId, *obstacle, config, world, map, globalPath,
-                nearestGlobalIndex)) continue;
-        if (!candidatePathIsSafe(candidate, safetyConfig, config, world)) {
+                nearestGlobalIndex, trace)) {
+            traceDecision(trace, "lane_change", "return_candidate_rejected",
+                          "reason=route_geometry_gap_or_road_mark_check_failed");
+            continue;
+        }
+        if (!candidatePathIsSafe(candidate, safetyConfig, config, world,
+                                 trace)) {
+            traceDecision(trace, "lane_change", "return_candidate_rejected",
+                          "reason=obb_collision_prediction");
             continue;
         }
         state = {};
@@ -646,8 +782,12 @@ bool tryPrepareObstacleLaneChange(
         state.returnStartRouteS = returnStartS;
         state.rejoinRouteS = rejoinS;
         state.path = std::move(candidate);
+        traceDecision(trace, "lane_change", "candidate_selected",
+                      "mode=return_to_source phase=prepare");
         return true;
     }
+    traceDecision(trace, "lane_change", "no_safe_candidate",
+                  "all adjacent lane candidates were rejected");
     return false;
 }
 
@@ -656,18 +796,30 @@ void advanceLaneChangePhase(LaneChangeData& state,
                             const WorldState& world,
                             double dt,
                             bool executionBlocked,
-                            bool candidatePathSafe) {
+                            bool candidatePathSafe,
+                            DecisionTraceData* trace) {
     if (state.phase == LaneChangePhase::None) return;
     if (state.phase == LaneChangePhase::Prepare) {
         if (executionBlocked || !candidatePathSafe) {
+            std::ostringstream detail;
+            detail << "execution_blocked=" << executionBlocked
+                   << " candidate_path_safe=" << candidatePathSafe;
+            traceDecision(trace, "lane_change", "prepare_wait_or_cancel",
+                          detail.str());
             state.phaseElapsed = 0.0;
-            if (!candidatePathSafe) resetLaneChange(state);
+            if (!candidatePathSafe) {
+                traceDecision(trace, "lane_change", "phase_transition",
+                              "prepare->none reason=candidate_became_unsafe");
+                resetLaneChange(state);
+            }
             return;
         }
         state.phaseElapsed += std::max(0.0, dt);
         if (state.phaseElapsed >= config.prepareTime) {
             state.phase = LaneChangePhase::Execute;
             state.phaseElapsed = 0.0;
+            traceDecision(trace, "lane_change", "phase_transition",
+                          "prepare->execute");
         }
         return;
     }
@@ -686,11 +838,20 @@ void advanceLaneChangePhase(LaneChangeData& state,
                 state.phase = LaneChangePhase::Settle;
                 state.phaseElapsed = 0.0;
                 state.turnSignal = 0;
+                traceDecision(trace, "lane_change", "phase_transition",
+                              "execute->settle mode=keep_target_lane exact_reconnect_lane_reached");
             }
             return;
         }
 
+        const bool wasWaiting = state.waitingForReturn;
         state.waitingForReturn = !candidatePathSafe;
+        if (state.waitingForReturn != wasWaiting) {
+            traceDecision(trace, "lane_change", "return_wait_changed",
+                          state.waitingForReturn
+                              ? "waiting=true reason=remaining_return_path_unsafe"
+                              : "waiting=false reason=remaining_return_path_safe");
+        }
         if (world.egoPathS >= state.returnStartRouteS - 5.0) {
             state.turnSignal = state.returnTurnSignal;
         }
@@ -699,12 +860,18 @@ void advanceLaneChangePhase(LaneChangeData& state,
             state.phaseElapsed = 0.0;
             state.waitingForReturn = false;
             state.turnSignal = 0;
+            traceDecision(trace, "lane_change", "phase_transition",
+                          "execute->settle mode=return_to_source");
         }
         return;
     }
     if (state.phase == LaneChangePhase::Settle) {
         state.phaseElapsed += std::max(0.0, dt);
-        if (state.phaseElapsed >= config.settleTime) resetLaneChange(state);
+        if (state.phaseElapsed >= config.settleTime) {
+            traceDecision(trace, "lane_change", "phase_transition",
+                          "settle->none maneuver_complete");
+            resetLaneChange(state);
+        }
     }
 }
 

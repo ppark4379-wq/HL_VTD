@@ -6,6 +6,7 @@
 #include "control/config/control_config.hpp"
 #include "control/control_process.hpp"
 #include "logger/logger.hpp"
+#include "logger/decision_trace.hpp"
 #include "planning/planning_process.hpp"
 #include "data/gt/world_process.hpp"
 #include "data/map/static_zones.hpp"
@@ -34,6 +35,8 @@ struct CliOptions {
     bool check_config_only = false;
     bool receive_only = false;
     bool debug_objects = false;
+    bool decision_logging = false;
+    std::filesystem::path decision_log_path;
     std::filesystem::path ready_file;
 };
 
@@ -107,6 +110,13 @@ CliOptions parseOptions(int argc, char* argv[]) {
             options.receive_only = true;
         } else if (argument == "--debug-objects") {
             options.debug_objects = true;
+        } else if (argument == "--decision-log") {
+            if (++i >= argc) {
+                throw std::invalid_argument(
+                    "--decision-log requires a file path");
+            }
+            options.decision_log_path = argv[i];
+            options.decision_logging = true;
         } else if (argument == "--ready-file") {
             if (++i >= argc) {
                 throw std::invalid_argument("--ready-file requires a file path");
@@ -118,6 +128,7 @@ CliOptions parseOptions(int argc, char* argv[]) {
                    "[--path PATH] [--map-config PATH] [--vehicle-config PATH] "
                    "[--log CSV] [--scenario-id ID] "
                    "[--run-id ID] [--receive-only] [--debug-objects] "
+                   "[--decision-log PATH] "
                    "[--ready-file PATH] [--check-config]\n";
             std::exit(0);
         } else {
@@ -286,6 +297,14 @@ int main(int argc, char* argv[]) {
             std::cout << "[logger] output: " << logger.outputPath << '\n';
         }
 
+        DecisionTraceData decisionTrace;
+        if (options.decision_logging) {
+            initializeDecisionTrace(decisionTrace,
+                                    options.decision_log_path);
+            std::cout << "[decision-log] output: "
+                      << decisionTrace.outputPath << '\n';
+        }
+
         auto receiver = makeGtReceiver(config.vtd);
         connectGtReceiver(receiver);
         writeReadyFile(options.ready_file);
@@ -298,11 +317,21 @@ int main(int argc, char* argv[]) {
 
         while (receiveGtFrame(receiver)) {
             const GtFrame& gt = getLatestGtFrame(receiver);
+            const double elapsedWallTime = std::chrono::duration<double>(
+                LogClock::now() - logStartTime).count();
+            DecisionTraceData* trace = options.decision_logging
+                                           ? &decisionTrace
+                                           : nullptr;
+            if (trace != nullptr) {
+                beginDecisionTraceFrame(*trace, frameCount,
+                                        elapsedWallTime);
+            }
             updateFrameClock(clock, getLatestGtReceiveTime(receiver),
                              drivingConfig.runtime.nominalDt);
             runWorldProcess(world, gt, getLatestGtReceiveTime(receiver), clock.dt,
                             mapData, planning.pathPlanner.waypoints, vehicle);
-            runPlanningProcess(planning, gt, world.state, mapData, clock.dt);
+            runPlanningProcess(planning, gt, world.state, mapData, clock.dt,
+                               trace);
             runControlProcess(control, world.state, planning.result, clock.dt);
 
             if (!options.receive_only) {
@@ -310,8 +339,6 @@ int main(int argc, char* argv[]) {
             }
 
             if (options.logging) {
-                const double elapsedWallTime = std::chrono::duration<double>(
-                    LogClock::now() - logStartTime).count();
                 const LogFrameInput logInput{
                     frameCount, elapsedWallTime, gt, world.state,
                     planning.result.trackingPlan, control};

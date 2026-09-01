@@ -6,6 +6,8 @@
 
 #include <string>
 
+struct DecisionTraceData;
+
 bool initializePlanning(PlanningProcessData& data,
                         const PathPlannerConfig& plannerConfig,
                         const PlanningBehaviorConfig& behaviorConfig,
@@ -16,4 +18,5 @@ void runPlanningProcess(PlanningProcessData& data,
                         const GtFrame& gt,
                         const WorldState& world,
                         const PathGeneratorData& map,
-                        double dt);
+                        double dt,
+                        DecisionTraceData* trace = nullptr);

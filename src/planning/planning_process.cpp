@@ -1,5 +1,6 @@
 #include "planning/planning_process.hpp"
 
+#include "logger/decision_trace.hpp"
 #include "planning/behavior/behavior_planner.hpp"
 #include "planning/collision/collision_checker.hpp"
 #include "planning/local/local_path_planner.hpp"
@@ -10,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <sstream>
 
 namespace {
 
@@ -191,7 +193,8 @@ bool flashingRedHoldComplete(StopManagerData& manager,
 void updateStopRequests(PlanningProcessData& data,
                         const WorldState& world,
                         const StaticZoneData& zones,
-                        double dt) {
+                        double dt,
+                        DecisionTraceData* trace) {
     data.stopManager.requests.clear();
     const StopLine* line =
         findActiveStopLine(world, zones, data.config.stopLineBehindWindow,
@@ -251,11 +254,23 @@ void updateStopRequests(PlanningProcessData& data,
         }
         if (object.isAhead && object.isOnEgoPath &&
             std::abs(object.raw.speed) < 0.3 && object.relativeS < 30.0) {
+            const double stopRouteS = std::max(
+                world.frontBumperPathS,
+                object.pathS - data.config.minimumFollowDistance);
             addStopRequest(data.stopManager, StopReason::Obstacle,
-                           std::max(world.frontBumperPathS,
-                                    object.pathS -
-                                        data.config.minimumFollowDistance),
+                           stopRouteS,
                            static_cast<int>(object.raw.id));
+            std::ostringstream detail;
+            detail << "object=" << object.raw.id
+                   << " relative_s=" << object.relativeS
+                   << " object_path_s=" << object.pathS
+                   << " stop_route_s=" << stopRouteS
+                   << " front_bumper_path_s=" << world.frontBumperPathS
+                   << " minimum_follow_distance="
+                   << data.config.minimumFollowDistance
+                   << " stop_safety_margin=" << data.config.stopSafetyMargin;
+            traceDecision(trace, "obstacle_stop", "stop_request_created",
+                          detail.str());
         }
     }
 
@@ -360,7 +375,8 @@ void runPlanningProcess(PlanningProcessData& data,
                         const GtFrame& gt,
                         const WorldState& world,
                         const PathGeneratorData& map,
-                        double dt) {
+                        double dt,
+                        DecisionTraceData* trace) {
     resetPlanningFrame(data);
 
     PathPlan tracking = runPurePursuit(data.pathPlanner, gt, world.egoSpeed);
@@ -404,9 +420,9 @@ void runPlanningProcess(PlanningProcessData& data,
 
     tryPrepareObstacleLaneChange(
         data.laneChange, data.laneChangeConfig, data.config, world, map,
-        data.pathPlanner, tracking.nearestIndex);
+        data.pathPlanner, tracking.nearestIndex, trace);
 
-    updateStopRequests(data, world, map.staticZones, dt);
+    updateStopRequests(data, world, map.staticZones, dt, trace);
     selectStopDecision(data.frame.stop, data.stopManager,
                        world.frontBumperPathS);
 
@@ -417,7 +433,8 @@ void runPlanningProcess(PlanningProcessData& data,
                                     world, data.config,
                                     data.laneChangeConfig);
     advanceLaneChangePhase(data.laneChange, data.laneChangeConfig, world, dt,
-                           hasLaneChangeBlockingStop(data), candidateSafe);
+                           hasLaneChangeBlockingStop(data), candidateSafe,
+                           trace);
 
     if (data.laneChange.phase == LaneChangePhase::Execute) {
         tracking = trackLaneChangePath(
@@ -488,6 +505,30 @@ void runPlanningProcess(PlanningProcessData& data,
                                 data.config.emergencyTTC) ||
                            data.frame.pathSafety.minimumTTC <=
                                data.config.emergencyTTC;
+    if (trace != nullptr && trace->enabled) {
+        std::ostringstream detail;
+        detail << "ego_road=" << world.egoRoadId
+               << " ego_section=" << world.egoSectionIndex
+               << " ego_lane=" << world.egoLaneId
+               << " ego_path_s=" << world.egoPathS
+               << " ego_path_d=" << world.egoPathD
+               << " ego_speed=" << world.egoSpeed
+               << " lane_change_phase="
+               << static_cast<int>(data.laneChange.phase)
+               << " target_lane=" << data.laneChange.targetLaneId
+               << " stop_valid=" << data.frame.stop.valid
+               << " stop_distance=" << data.frame.stop.distanceToStop
+               << " min_ttc=" << data.frame.pathSafety.minimumTTC
+               << " collision=" << data.frame.pathSafety.collision
+               << " predicted_collision="
+               << data.frame.pathSafety.predictedCollision
+               << " predicted_ttc="
+               << data.frame.pathSafety.predictedCollisionTTC
+               << " risk_object=" << data.frame.pathSafety.riskObjectId
+               << " emergency=" << emergency
+               << " target_speed=" << data.frame.behavior.targetSpeed;
+        traceDecision(trace, "planning", "frame_result", detail.str());
+    }
     data.frame.behavior.emergencyBrake = emergency;
     if (emergency) data.frame.behavior.targetSpeed = 0.0;
 
