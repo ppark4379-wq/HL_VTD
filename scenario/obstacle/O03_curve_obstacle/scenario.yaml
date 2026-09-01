@@ -1,11 +1,11 @@
 schema_version: 1
 
 scenario:
-  id: B02
-  category: basic
-  name: speed_limit
-  description: 제한속도 준수 및 장거리 기본 경로 추종
-  file: B02_speed_limit.xml
+  id: O03
+  category: obstacle
+  name: curve_obstacle
+  description: 곡선 구간 정적 장애물 인지 및 대응
+  file: O03_curve_obstacle.xml
   format: vtd_native
   map: LivingLAB
 
@@ -34,17 +34,26 @@ entities:
     type: vehicle
     role: ego
 
+  - name: "New Object"
+    type: object
+    role: obstacle_candidate
+
 events: []
 
 expected_outcomes:
-  - follow_route
-  - comply_with_speed_limit
+  - follow_curve_route
+  - detect_obstacle
+  - decelerate_or_avoid
+  - avoid_collision
 
 evaluation:
   codes:
-    - S1.1.01
+    - S6.1.01
   required_metrics:
+    - relevant_object_id
+    - object_gap
+    - ttc
     - ego_speed
-    - current_speed_limit
-    - overspeed
+    - target_accel
+    - collision
   thresholds_status: pending

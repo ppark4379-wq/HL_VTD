@@ -10,31 +10,44 @@
     <TrafficElements/>
     <PulkTraffic/>
     <TrafficControl>
-        <Path Name="Path01" PathId="1">
-            <Waypoint PathOption="shortest" s="7.5235116769123422e+01" TrackId="429"/>
-            <Waypoint PathOption="shortest" s="1.2507585455748591e+00" TrackId="418"/>
-            <Waypoint PathOption="shortest" s="4.2772593534298061e+01" TrackId="128"/>
-            <Waypoint PathOption="shortest" s="5.1030988550128136e+01" TrackId="126"/>
-            <Waypoint PathOption="shortest" s="1.2274123792522400e+02" TrackId="2423"/>
-            <Waypoint PathOption="shortest" s="1.5727464770071290e+02" TrackId="2626"/>
-            <Waypoint PathOption="shortest" s="3.6920780157793281e+01" TrackId="2718"/>
-            <Waypoint PathOption="shortest" s="2.5592262014855947e+01" TrackId="2756"/>
-            <Waypoint PathOption="shortest" s="2.2260337074606511e+02" TrackId="2820"/>
-            <Waypoint PathOption="shortest" s="8.2978825199675697e+01" TrackId="2815"/>
-            <Waypoint PathOption="shortest" s="5.1824229639751449e+00" TrackId="2813"/>
-            <Waypoint PathOption="shortest" s="8.6744638931454059e+00" TrackId="2675"/>
-        </Path>
         <Player>
             <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_White" Name="Ego"/>
             <Init>
                 <Speed Value="0.0000000000000000e+00"/>
-                <PosRoute/>
-                <PathRef StartS="0.0000000000000000e+00" EndAction="loop" TargetS="4.9223212837901092e+03" StartLane="1" PathId="1"/>
+                <PosAbsolute X="1.5007500915527344e+03" Y="2.2667766952514648e+02" Z="5.9142649900000016e+01" Direction="1.7079236923402679e+00" AlignToRoad="true"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosAbsolute X="1.4999527587890625e+03" Y="2.6026144409179688e+02" Z="6.0628592794542620e+01" Direction="1.7296968195536693e+00" AlignToRoad="true"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="No Driver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player01"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosAbsolute X="1.4964598388671875e+03" Y="2.6501661682128906e+02" Z="6.0800622365315846e+01" Direction="1.6921862483515766e+00" AlignToRoad="true"/>
             </Init>
         </Player>
         <PlayerActions Player="Ego"/>
+        <PlayerActions Player="New Player">
+            <Action Name="">
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="8.0000000000000000e+00" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="8.0000000000000000e+00" X="1.5007500915527344e+03" Y="2.2667766952514648e+02"/>
+                <LaneChange Direction="1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="1.5000000000000000e+00" Time="5.0000000000000000e+00"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player01"/>
     </TrafficControl>
-    <MovingObjectsControl/>
+    <MovingObjectsControl>
+        <PathShape ShapeId="1" ShapeType="polyline" Closed="false" Name="PathShape01">
+            <Waypoint X="1.0686528320312500e+03" Y="-7.5129680633544922e+00" Options="0x00000000" Z="6.3675679474999995e+01" Weight="1.0000000000000000e+00" Yaw="2.3536629295598845e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.0506051025390625e+03" Y="1.0626371383666992e+01" Options="0x00000000" Z="6.3675679474999995e+01" Weight="1.0000000000000000e+00" Yaw="2.3536629295598845e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+        </PathShape>
+    </MovingObjectsControl>
     <LightSigns>
         <SignalController Id="1" DelayRef="-1" Delay="0.0000000000000000e+00">
             <Phase Duration="1.5000000000000000e+01" Type="go"/>
@@ -667,14 +680,16 @@
             <Phase Duration="3.0000000000000000e+00" Type="attention"/>
         </SignalController>
         <SignalController Id="128" DelayRef="-1" Delay="0.0000000000000000e+00">
-            <Phase Duration="1.5000000000000000e+01" Type="go"/>
-            <Phase Duration="3.0000000000000000e+00" Type="attention"/>
+            <Phase Duration="2.6000000000000000e+01" Type="blink"/>
             <Phase Duration="1.8000000000000000e+01" Type="stop"/>
+            <Phase Duration="3.0000000000000000e+00" Type="attention"/>
+            <Phase Duration="1.5000000000000000e+01" Type="go"/>
         </SignalController>
         <SignalController Id="129" DelayRef="-1" Delay="0.0000000000000000e+00">
-            <Phase Duration="1.5000000000000000e+01" Type="go"/>
-            <Phase Duration="3.0000000000000000e+00" Type="attention"/>
+            <Phase Duration="2.0000000000000000e+01" Type="blink"/>
             <Phase Duration="1.8000000000000000e+01" Type="stop"/>
+            <Phase Duration="3.0000000000000000e+00" Type="attention"/>
+            <Phase Duration="1.5000000000000000e+01" Type="go"/>
         </SignalController>
         <SignalController Id="130" DelayRef="-1" Delay="0.0000000000000000e+00">
             <Phase Duration="1.8000000000000000e+01" Type="stop"/>
@@ -5916,13 +5931,13 @@
         </Signal>
         <Signal Id="407">
             <LightState>
-                <Light state="false"/>
-            </LightState>
-            <LightState>
-                <Light state="false"/>
-            </LightState>
-            <LightState>
                 <Light state="true"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
             </LightState>
         </Signal>
         <Signal Id="408">
@@ -5938,13 +5953,13 @@
         </Signal>
         <Signal Id="409">
             <LightState>
-                <Light state="false"/>
-            </LightState>
-            <LightState>
-                <Light state="false"/>
-            </LightState>
-            <LightState>
                 <Light state="true"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
             </LightState>
         </Signal>
         <Signal Id="410">
@@ -5960,24 +5975,24 @@
         </Signal>
         <Signal Id="411">
             <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
                 <Light state="true"/>
-            </LightState>
-            <LightState>
-                <Light state="false"/>
-            </LightState>
-            <LightState>
-                <Light state="false"/>
             </LightState>
         </Signal>
         <Signal Id="412">
             <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
                 <Light state="true"/>
-            </LightState>
-            <LightState>
-                <Light state="false"/>
-            </LightState>
-            <LightState>
-                <Light state="false"/>
             </LightState>
         </Signal>
         <Signal Id="413">

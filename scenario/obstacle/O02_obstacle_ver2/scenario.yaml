@@ -1,0 +1,61 @@
+schema_version: 1
+
+scenario:
+  id: O02
+  category: obstacle
+  name: obstacle_ver2
+  description: 좌회전 경로의 동적·정적 장애물 대응
+  file: O02_obstacle_ver2.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+  - name: DynamicObs01
+    type: vehicle
+    role: obstacle_candidate
+  - name: DynamicObs02
+    type: vehicle
+    role: obstacle_candidate
+
+events: []
+
+expected_outcomes:
+  - follow_route
+  - detect_obstacle
+  - decelerate_or_avoid
+  - avoid_collision
+
+evaluation:
+  codes:
+    - S6.1.01
+  required_metrics:
+    - relevant_object_id
+    - object_gap
+    - ttc
+    - ego_speed
+    - target_accel
+    - collision
+  thresholds_status: pending

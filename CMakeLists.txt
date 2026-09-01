@@ -47,6 +47,22 @@ add_executable(vtd_path_to_checkpoints
     src/utils/math_utils.cpp
 )
 
+add_executable(path_shape_to_route
+    tools/path_shape_to_route.cpp
+    src/planning/global/reference_path_generator.cpp
+    src/data/map/map_loader.cpp
+    src/utils/csv_utils.cpp
+    src/utils/math_utils.cpp
+)
+
+add_executable(checkpoints_to_route
+    tools/reference_path_test.cpp
+    src/planning/global/reference_path_generator.cpp
+    src/data/map/map_loader.cpp
+    src/utils/csv_utils.cpp
+    src/utils/math_utils.cpp
+)
+
 add_executable(extract_static_zones
     tools/map_extraction/extract_static_zones.cpp
     src/planning/global/reference_path_generator.cpp
@@ -93,6 +109,12 @@ target_include_directories(vtd_path_to_checkpoints
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+target_compile_features(path_shape_to_route PRIVATE cxx_std_17)
+target_include_directories(path_shape_to_route
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_features(checkpoints_to_route PRIVATE cxx_std_17)
+target_include_directories(checkpoints_to_route
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 if(MSVC)
     target_compile_options(hl_vtd PRIVATE /W4 /permissive- /utf-8)
@@ -100,6 +122,8 @@ if(MSVC)
 else()
     target_compile_options(hl_vtd PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(vtd_path_to_checkpoints
+        PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(path_shape_to_route
         PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(controller_logic_tests
         PRIVATE -Wall -Wextra -Wpedantic)

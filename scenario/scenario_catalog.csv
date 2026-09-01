@@ -1,13 +1,17 @@
 scenario_id,category,package_path,eval_codes,status,notes
 B01,basic,basic/B01_lane_keep,S2.1.01,packaged,XML·route·manifest 정적 검증 대상
-B02,basic,basic/B02_speed_limit,S1.1.01,packaged,XML·route·manifest 정적 검증 대상
 B03,basic,basic/B03_curve_lane_keep,S2.1.01;S2.1.02;S2.1.03,packaged,XML·route·manifest 정적 검증 대상
 B04,basic,basic/B04_school_zone,S1.1.02,packaged,보호구역 속도 준수; 보호구역 좌표·제한속도 확정 필요
 T01,traffic,traffic/T01_green_light,S5.1.03,packaged,SignalController 12 녹색 유지; 실제 판제 주행 검증 전
 T02,traffic,traffic/T02_red_light,S5.1.01,packaged,SignalController 20 적색 유지; 실제 판제 주행 검증 전
 T03,traffic,traffic/T03_red_light_blink,official.flashing_red_stop,packaged,적색점멸 일시정지; 신호 Controller 설정·실주행 확인 필요
+T04,traffic,traffic/T04_red_light_blink_person,internal.flashing_red_pedestrian_crossing,packaged,적색점멸 구간 보행자 횡단 대응; 실주행 검증 전
 V01,vehicle,vehicle/V01_lead_vehicle,internal.dynamic_vehicle_following,packaged,선행차 추종·안전거리 유지; 실주행 검증 전
 V03,vehicle,vehicle/V03_lead_brake,internal.dynamic_vehicle_brake,packaged,내부 동적 이벤트 Tag; 실제 판제 주행 검증 전
 P01,pedestrian,pedestrian/P01_pedestrian_crossing,internal.dynamic_pedestrian_crossing,packaged,내부 동적 이벤트 Tag; 실제 판제 주행 검증 전
 O01,obstacle,obstacle/O01_front_obstacle,S6.1.01,packaged,XML·route·manifest 정적 검증 대상
+O02,obstacle,obstacle/O02_obstacle_ver2,S6.1.01,packaged,좌회전 경로 동적·정적 장애물 대응; 실주행 검증 전
+O03,obstacle,obstacle/O03_curve_obstacle,S6.1.01,packaged,곡선 구간 정적 장애물 대응; 실주행 검증 전
+O04,obstacle,obstacle/O04_lane_obstacle,S6.1.01,packaged,차로 내 정적 장애물 대응; 실주행 검증 전
 V04,vehicle,vehicle/V04_cut_in,internal.dynamic_vehicle_cut_in,packaged,내부 동적 이벤트 Tag; 옆 차선 차량 Cut-in; 실제 판제 주행 검증 전
+V05,vehicle,vehicle/V05_cut_in_delay,internal.dynamic_vehicle_cut_in,packaged,지연 후 차량 Cut-in 대응; 실주행 검증 전

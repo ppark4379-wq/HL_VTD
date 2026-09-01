@@ -3,7 +3,8 @@
 
 Ego가 PosRoute/PathRef를 사용하면 TrackId/road s/StartLane을 추출해 기존
 OpenDRIVE lane graph로 checkpoints.csv, route.csv, route.svg까지 재생성한다.
-PosAbsolute Scenario는 끝점을 추측하지 않고 XML만 복사하며 기존 경로는 보존한다.
+PosAbsolute Scenario는 기존 checkpoints.csv의 목적지를 유지하고 Ego 시작 좌표를
+갱신해 OpenDRIVE 경로를 다시 생성한다.
 """
 
 from __future__ import annotations
@@ -52,10 +53,17 @@ class EgoRoute:
 
 
 @dataclass(frozen=True)
+class EgoAbsolutePosition:
+    x: float
+    y: float
+
+
+@dataclass(frozen=True)
 class SyncConfig:
     repo_root: Path
     map_path: Path
     generator: Path
+    checkpoint_generator: Path
     plotter: Path
 
 
@@ -177,12 +185,31 @@ def find_ego_route(root: ET.Element) -> EgoRoute | None:
     return EgoRoute(path_id, start_lane, tuple(points))
 
 
-def parse_xml(path: Path) -> tuple[ET.ElementTree, EgoRoute | None]:
+def find_ego_absolute(root: ET.Element) -> EgoAbsolutePosition | None:
+    for player in root.findall("./TrafficControl/Player"):
+        description = player.find("Description")
+        if description is None or description.get("Name") != "Ego":
+            continue
+        position = player.find("./Init/PosAbsolute")
+        if position is None:
+            return None
+        try:
+            return EgoAbsolutePosition(float(position.attrib["X"]),
+                                       float(position.attrib["Y"]))
+        except (KeyError, ValueError) as error:
+            raise SyncError("Ego PosAbsolute X/Y가 올바르지 않습니다") from error
+    return None
+
+
+def parse_xml(
+    path: Path,
+) -> tuple[ET.ElementTree, EgoRoute | None, EgoAbsolutePosition | None]:
     try:
         tree = ET.parse(path)
     except (OSError, ET.ParseError) as error:
         raise SyncError(f"XML을 읽을 수 없습니다: {path}: {error}") from error
-    return tree, find_ego_route(tree.getroot())
+    root = tree.getroot()
+    return tree, find_ego_route(root), find_ego_absolute(root)
 
 
 def locate_generator(repo_root: Path, requested: Path | None) -> Path:
@@ -216,10 +243,44 @@ def make_config(args: argparse.Namespace) -> SyncConfig:
     if not map_path.is_file():
         raise SyncError(f"XODR을 찾지 못했습니다: {map_path}")
     generator = locate_generator(repo_root, args.generator)
+    checkpoint_generator = repo_root / "build" / "checkpoints_to_route"
+    if not checkpoint_generator.is_file():
+        raise SyncError(
+            "checkpoints_to_route를 찾지 못했습니다. 먼저 scripts/build.sh를 "
+            "실행하세요"
+        )
     plotter = repo_root / "tools" / "plot_reference_path.py"
     if not plotter.is_file():
         raise SyncError(f"경로 SVG 도구를 찾지 못했습니다: {plotter}")
-    return SyncConfig(repo_root, map_path, generator, plotter)
+    return SyncConfig(
+        repo_root, map_path, generator, checkpoint_generator, plotter
+    )
+
+
+def write_absolute_checkpoints(
+    source: Path, destination: Path, ego: EgoAbsolutePosition
+) -> int:
+    try:
+        with source.open(newline="", encoding="utf-8") as stream:
+            rows = list(csv.DictReader(stream))
+    except OSError as error:
+        raise SyncError(f"기존 checkpoints.csv를 읽을 수 없습니다: {source}") from error
+    if len(rows) < 2 or not {"seq", "x", "y"}.issubset(rows[0]):
+        raise SyncError(
+            "PosAbsolute 경로 재생성에는 seq,x,y 형식의 체크포인트 2개 이상이 필요합니다"
+        )
+    rows[0]["x"] = f"{ego.x:.8f}"
+    rows[0]["y"] = f"{ego.y:.8f}"
+    with destination.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(
+            stream, fieldnames=["seq", "x", "y"], lineterminator="\n"
+        )
+        writer.writeheader()
+        writer.writerows(
+            {"seq": row["seq"], "x": row["x"], "y": row["y"]}
+            for row in rows
+        )
+    return len(rows)
 
 
 def write_vtd_path(path: Path, route: EgoRoute) -> None:
@@ -256,7 +317,7 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
     source = source.expanduser().resolve()
     if not source.is_file() or source.suffix.lower() != ".xml":
         raise SyncError(f"VTD XML 파일이 아닙니다: {source}")
-    _, ego_route = parse_xml(source)
+    _, ego_route, ego_absolute = parse_xml(source)
     destination, destination_stem = resolve_destination(source, config.repo_root)
     xml_destination = destination / f"{destination_stem}.xml"
     if source == xml_destination.resolve():
@@ -267,12 +328,70 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
             raise SyncError(
                 "Ego가 PosRoute/PathRef를 사용하지 않아 경로를 자동 생성할 수 없습니다"
             )
-        atomic_copy(source, xml_destination)
-        print(
-            f"[sync] XML copied: {xml_destination}\n"
-            "[sync] Ego PosAbsolute Scenario: existing checkpoints/route were kept",
-            flush=True,
+        checkpoints = destination / "checkpoints.csv"
+        if ego_absolute is None or not checkpoints.is_file():
+            atomic_copy(source, xml_destination)
+            print(
+                f"[sync] XML copied: {xml_destination}\n"
+                "[sync] PosAbsolute checkpoints missing: existing route was kept",
+                flush=True,
+            )
+            return
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        staging = Path(
+            tempfile.mkdtemp(prefix=f".{destination_stem}.sync-", dir=destination.parent)
         )
+        try:
+            staged_xml = staging / f"{destination_stem}.xml"
+            staged_checkpoints = staging / "checkpoints.csv"
+            staged_route = staging / "route.csv"
+            staged_lane_map = staging / "lane_map.csv"
+            staged_svg = staging / "route.svg"
+            shutil.copy2(source, staged_xml)
+            checkpoint_count = write_absolute_checkpoints(
+                checkpoints, staged_checkpoints, ego_absolute
+            )
+            run_checked(
+                [
+                    str(config.checkpoint_generator),
+                    str(config.map_path),
+                    str(staged_checkpoints),
+                    str(staged_route),
+                    str(staged_lane_map),
+                ],
+                config.repo_root,
+            )
+            run_checked(
+                [
+                    sys.executable,
+                    str(config.plotter),
+                    str(staged_route),
+                    "--waypoints",
+                    str(staged_checkpoints),
+                    "--map",
+                    str(staged_lane_map),
+                    "--output",
+                    str(staged_svg),
+                ],
+                config.repo_root,
+            )
+            destination.mkdir(parents=True, exist_ok=True)
+            for staged, name in (
+                (staged_checkpoints, "checkpoints.csv"),
+                (staged_route, "route.csv"),
+                (staged_svg, "route.svg"),
+                (staged_xml, f"{destination_stem}.xml"),
+            ):
+                os.replace(staged, destination / name)
+            print(
+                f"[sync] synced PosAbsolute: {source} -> {destination}\n"
+                f"[sync] Ego start=({ego_absolute.x:.3f}, {ego_absolute.y:.3f}) "
+                f"checkpoints={checkpoint_count}",
+                flush=True,
+            )
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
         return
 
     destination.parent.mkdir(parents=True, exist_ok=True)

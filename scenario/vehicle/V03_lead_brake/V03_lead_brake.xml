@@ -12,30 +12,37 @@
     <TrafficElements/>
     <PulkTraffic/>
     <TrafficControl>
-        <Path Name="Path01" PathId="1">
-            <Waypoint PathOption="shortest" s="1.6253097545444487e+02" TrackId="128"/>
-            <Waypoint PathOption="shortest" s="7.7725832019308314e+01" TrackId="1928"/>
+        <Path Name="Path02" PathId="2">
+            <Waypoint PathOption="shortest" s="4.2369099578552767e+00" TrackId="429"/>
+            <Waypoint PathOption="shortest" s="3.3438458208781874e+01" TrackId="418"/>
+            <Waypoint PathOption="shortest" s="1.5655644080576963e+02" TrackId="128"/>
         </Path>
         <Player>
             <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_Black" Name="Ego"/>
             <Init>
                 <Speed Value="0.0000000000000000e+00"/>
-                <PosAbsolute X="3.5510278701782227e+02" Y="-1.2765158843994141e+02" Z="4.1637069847530697e+01" Direction="5.2539297829833229e+00" AlignToRoad="true"/>
+                <PosAbsolute X="3.5996002578735352e+02" Y="-1.3479981994628906e+02" Z="4.1906454957376788e+01" Direction="5.2586745642989827e+00" AlignToRoad="true"/>
             </Init>
         </Player>
         <Player>
-            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player01"/>
+            <Description Driver="KeepLaneDriver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player01"/>
             <Init>
-                <Speed Value="5.5555555555555554e+00"/>
-                <PosAbsolute X="3.7903732299804688e+02" Y="-1.6147802734375000e+02" Z="4.3121970628985359e+01" Direction="5.3837625928542376e+00" AlignToRoad="true"/>
+                <Speed Value="4.1666666666666670e+00"/>
+                <PosRoute/>
+                <PathRef StartS="1.1000000000000000e+02" EndAction="continue" TargetS="2.2000000000000000e+02" StartLane="4" PathId="2"/>
             </Init>
         </Player>
         <PlayerActions Player="Ego"/>
         <PlayerActions Player="New Player01">
             <Action Name="">
-                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.4000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="1.4000000000000000e+01" X="3.5510278701782227e+02" Y="-1.2765158843994141e+02"/>
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.8000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="1.8000000000000000e+01" X="3.5996002578735352e+02" Y="-1.3479981994628906e+02"/>
                 <SpeedChange Rate="3.5000000000000000e+01" Target="0.0000000000000000e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+            <Action Name="">
+                <Speed CounterID="" CounterComp="COMP_EQ" NetDist="false" CounterVal="0" Pivot="New Player01" Value="2.7777777777777779e-01" OnExcess="false"/>
+                <EditorPos Radius="2.7777777777777779e-01" X="3.7333647143636489e+02" Y="-1.5380326750152898e+02"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
             </Action>
         </PlayerActions>
     </TrafficControl>
@@ -132,14 +139,14 @@
             <Phase Duration="3.0000000000000000e+00" Type="attention"/>
         </SignalController>
         <SignalController Id="19" DelayRef="-1" Delay="0.0000000000000000e+00">
+            <Phase Duration="1.8000000000000000e+01" Type="stop"/>
             <Phase Duration="1.5000000000000000e+01" Type="go"/>
             <Phase Duration="3.0000000000000000e+00" Type="attention"/>
-            <Phase Duration="1.8000000000000000e+01" Type="stop"/>
         </SignalController>
         <SignalController Id="20" DelayRef="-1" Delay="0.0000000000000000e+00">
-            <Phase Duration="1.5000000000000000e+01" Type="go"/>
+            <Phase Duration="1.2000000000000000e+01" Type="stop"/>
+            <Phase Duration="1.4000000000000000e+01" Type="go"/>
             <Phase Duration="3.0000000000000000e+00" Type="attention"/>
-            <Phase Duration="1.8000000000000000e+01" Type="stop"/>
         </SignalController>
         <SignalController Id="21" DelayRef="-1" Delay="0.0000000000000000e+00">
             <Phase Duration="1.8000000000000000e+01" Type="stop"/>
@@ -2355,13 +2362,13 @@
         </Signal>
         <Signal Id="78">
             <LightState>
-                <Light state="false"/>
-            </LightState>
-            <LightState>
-                <Light state="false"/>
-            </LightState>
-            <LightState>
                 <Light state="true"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
             </LightState>
         </Signal>
         <Signal Id="79">
@@ -2369,21 +2376,21 @@
                 <Light state="false"/>
             </LightState>
             <LightState>
-                <Light state="true"/>
+                <Light state="false"/>
             </LightState>
             <LightState>
-                <Light state="false"/>
+                <Light state="true"/>
             </LightState>
         </Signal>
         <Signal Id="80">
             <LightState>
-                <Light state="false"/>
-            </LightState>
-            <LightState>
-                <Light state="false"/>
-            </LightState>
-            <LightState>
                 <Light state="true"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
             </LightState>
         </Signal>
         <Signal Id="81">
@@ -2391,18 +2398,18 @@
                 <Light state="false"/>
             </LightState>
             <LightState>
-                <Light state="true"/>
+                <Light state="false"/>
             </LightState>
             <LightState>
-                <Light state="false"/>
+                <Light state="true"/>
             </LightState>
         </Signal>
         <Signal Id="82">
             <LightState>
-                <Light state="true"/>
+                <Light state="false"/>
             </LightState>
             <LightState>
-                <Light state="false"/>
+                <Light state="true"/>
             </LightState>
             <LightState>
                 <Light state="false"/>
@@ -2410,10 +2417,10 @@
         </Signal>
         <Signal Id="83">
             <LightState>
-                <Light state="true"/>
+                <Light state="false"/>
             </LightState>
             <LightState>
-                <Light state="false"/>
+                <Light state="true"/>
             </LightState>
             <LightState>
                 <Light state="false"/>
