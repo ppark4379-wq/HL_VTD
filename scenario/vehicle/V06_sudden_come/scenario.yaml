@@ -1,0 +1,106 @@
+schema_version: 1
+
+scenario:
+  id: V06
+  category: vehicle
+  name: sudden_come
+  description: 인접 차량이 급가속하며 접근하는 상황에서 Ego의 회피 차선 변경 대응
+  file: V06_sudden_come.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 5.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+
+  approaching_vehicle_speed_mps:
+    type: float
+    unit: m/s
+    default: 4.1666666667
+
+  target_speed_mps:
+    type: float
+    unit: m/s
+    default: 13.8888888889
+
+  lane_change_direction:
+    type: int
+    default: 1
+
+  lane_change_duration_s:
+    type: float
+    unit: s
+    default: 3.0
+
+runtime_bindings:
+  - parameter: approaching_vehicle_speed_mps
+    target:
+      type: player_init_speed
+      player: "New Player"
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+
+  - name: "New Player"
+    type: vehicle
+    role: relevant_object
+
+events:
+  - name: sudden_vehicle_approach
+    subject: "New Player"
+    trigger:
+      type: absolute_position
+      x: 1494.5324707
+      y: 251.5111084
+      radius_m: 5.0
+    action:
+      type: speed_change
+      target_speed_parameter: target_speed_mps
+
+  - name: ego_avoidance_lane_change
+    subject: Ego
+    trigger:
+      type: absolute_position
+      x: 1491.3533630
+      y: 284.9852829
+      radius_m: 7.0
+    action:
+      type: lane_change
+      direction_parameter: lane_change_direction
+      duration_parameter: lane_change_duration_s
+
+expected_outcomes:
+  - detect_relevant_object
+  - change_lane_safely
+  - avoid_collision
+
+evaluation:
+  codes:
+    - internal.dynamic_vehicle_approach
+  required_metrics:
+    - relevant_object_id
+    - object_gap
+    - relative_speed
+    - ttc
+    - ego_speed
+    - target_accel
+    - collision
+  thresholds_status: pending

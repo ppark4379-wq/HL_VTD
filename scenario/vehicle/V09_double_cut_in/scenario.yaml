@@ -1,0 +1,136 @@
+schema_version: 1
+
+scenario:
+  id: V09
+  category: vehicle
+  name: double_cut_in
+  description: 양쪽 차선의 두 차량이 Ego 전방으로 동시에 끼어드는 상황 대응
+  file: V09_double_cut_in.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+
+  lead_vehicle_speed_mps:
+    type: float
+    unit: m/s
+    default: 2.7777777777777777
+    random:
+      min: 2.0
+      max: 8.0
+
+  second_vehicle_speed_mps:
+    type: float
+    unit: m/s
+    default: 2.7777777777777777
+    random:
+      min: 2.0
+      max: 8.0
+
+  trigger_distance_m:
+    type: float
+    unit: m
+    default: 11.0
+
+  lead_lane_change_direction:
+    type: int
+    default: -1
+
+  lead_lane_change_duration_s:
+    type: float
+    unit: s
+    default: 2.5
+
+  second_lane_change_direction:
+    type: int
+    default: 1
+
+  second_lane_change_duration_s:
+    type: float
+    unit: s
+    default: 3.0
+
+runtime_bindings:
+  - parameter: lead_vehicle_speed_mps
+    target:
+      type: player_init_speed
+      player: LeadVehicle
+
+  - parameter: second_vehicle_speed_mps
+    target:
+      type: player_init_speed
+      player: "New Player"
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+
+  - name: LeadVehicle
+    type: vehicle
+    role: relevant_object
+
+  - name: "New Player"
+    type: vehicle
+    role: relevant_object
+
+events:
+  - name: left_vehicle_cut_in
+    subject: LeadVehicle
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_parameter: trigger_distance_m
+    action:
+      type: lane_change
+      direction_parameter: lead_lane_change_direction
+      duration_parameter: lead_lane_change_duration_s
+
+  - name: right_vehicle_cut_in
+    subject: "New Player"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_parameter: trigger_distance_m
+    action:
+      type: lane_change
+      direction_parameter: second_lane_change_direction
+      duration_parameter: second_lane_change_duration_s
+
+expected_outcomes:
+  - detect_both_relevant_objects
+  - detect_double_cut_in
+  - select_safe_response
+  - decelerate_if_needed
+  - avoid_collision
+
+evaluation:
+  codes:
+    - internal.dynamic_vehicle_cut_in
+  required_metrics:
+    - relevant_object_id
+    - object_gap
+    - relative_speed
+    - ttc
+    - ego_speed
+    - target_accel
+    - collision
+  thresholds_status: pending

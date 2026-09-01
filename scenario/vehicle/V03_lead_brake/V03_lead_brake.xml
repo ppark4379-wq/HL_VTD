@@ -42,7 +42,7 @@
             <Action Name="">
                 <Speed CounterID="" CounterComp="COMP_EQ" NetDist="false" CounterVal="0" Pivot="New Player01" Value="2.7777777777777779e-01" OnExcess="false"/>
                 <EditorPos Radius="2.7777777777777779e-01" X="3.7333647143636489e+02" Y="-1.5380326750152898e+02"/>
-                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="3.0000000000000000e+00"/>
             </Action>
         </PlayerActions>
     </TrafficControl>

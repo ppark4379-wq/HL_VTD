@@ -1,0 +1,80 @@
+schema_version: 1
+
+scenario:
+  id: V07
+  category: vehicle
+  name: obstacle_sudden_come
+  description: 급가속 접근 차량과 정적 장애물이 함께 존재하는 상황 대응
+  file: V07_obstacle_sudden_come.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 3.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+
+  approaching_vehicle_speed_mps:
+    type: float
+    unit: m/s
+    default: 4.1666666667
+
+  target_speed_mps:
+    type: float
+    unit: m/s
+    default: 13.8888888889
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+
+  - name: "New Player"
+    type: vehicle
+    role: relevant_object
+
+events:
+  - name: sudden_vehicle_approach
+    subject: "New Player"
+    trigger:
+      type: absolute_position
+      x: 1497.3541260
+      y: 251.5111084
+      radius_m: 5.0
+    action:
+      type: speed_change
+      target_speed_parameter: target_speed_mps
+
+expected_outcomes:
+  - detect_relevant_object
+  - detect_static_obstacle
+  - decelerate_if_needed
+  - avoid_collision
+
+evaluation:
+  codes:
+    - internal.dynamic_vehicle_obstacle_approach
+  required_metrics:
+    - relevant_object_id
+    - object_gap
+    - relative_speed
+    - ttc
+    - ego_speed
+    - target_accel
+    - collision
+  thresholds_status: pending

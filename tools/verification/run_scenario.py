@@ -9,11 +9,15 @@ import shlex
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 
 from validate_scenario import REPO_ROOT, load_manifest, validate_scenario
 from vtd_scp import ScpError, VtdScpClient
+from scenario_parameters import ParameterError, render_scenario, resolve_parameters
+
+import yaml
 
 
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -88,6 +92,30 @@ def parse_args() -> argparse.Namespace:
         help="Maximum scenario runtime in seconds (default: unlimited)",
     )
     parser.add_argument(
+        "--decision-log",
+        type=Path,
+        default=None,
+        help="Write the detailed planning decision trace to this file",
+    )
+    parser.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="Override a bound scenario parameter (repeatable)",
+    )
+    parser.add_argument(
+        "--randomize",
+        action="store_true",
+        help="Randomize parameters that declare a random min/max range",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed used with --randomize",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the resolved files and command without starting HL_VTD",
@@ -110,6 +138,9 @@ def build_command(
     run_id: str,
     log_file: Path,
     ready_file: Path | None = None,
+    decision_log: Path | None = None,
+    ignore_traffic_lights: bool = False,
+    control_config: Path | None = None,
 ) -> list[str]:
     command = [
         str(binary),
@@ -126,7 +157,39 @@ def build_command(
     ]
     if ready_file is not None:
         command.extend(("--ready-file", str(ready_file)))
+    if decision_log is not None:
+        command.extend(("--decision-log", str(decision_log)))
+    if ignore_traffic_lights:
+        command.append("--ignore-traffic-lights")
+    if control_config is not None:
+        command.extend(("--control-config", str(control_config)))
     return command
+
+
+def render_control_config(manifest: dict, destination: Path) -> Path | None:
+    control = manifest.get("control", {})
+    target_kph = control.get("target_speed_kph") if isinstance(control, dict) else None
+    if target_kph is None:
+        return None
+    if not isinstance(target_kph, (int, float)) or target_kph <= 0:
+        raise ValueError("control.target_speed_kph must be positive")
+    config = load_manifest(REPO_ROOT / "config" / "control.yaml")
+    speed = config.get("speed")
+    if not isinstance(speed, dict):
+        raise ValueError("speed mapping is missing from config/control.yaml")
+    for key in (
+        "straight_target_kph",
+        "curve_target_kph",
+        "sharp_curve_target_kph",
+        "school_zone_target_kph",
+    ):
+        speed[key] = float(target_kph)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        yaml.safe_dump(config, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    return destination
 
 
 def load_vtd_host(network_config: Path) -> str:
@@ -165,7 +228,11 @@ def run_automated(
             )
             print("[auto-vtd] VTD is READY; initializing scenario")
             try:
-                scp.initialize(min(15.0, args.vtd_timeout))
+                # Image generators can need substantially longer than 15 seconds
+                # to load the road and visual databases.  Use the configured VTD
+                # transition timeout here as well; otherwise a healthy IG is torn
+                # down while it is still initializing.
+                scp.initialize(args.vtd_timeout)
             except ScpError:
                 print(
                     "[auto-vtd] IG did not initialize; rebuilding the VTD setup"
@@ -258,7 +325,31 @@ def main() -> int:
         / run_id
         / "run.csv"
     ).resolve()
+    scenario_file = report.scenario_file.resolve()
+    try:
+        parameter_values = resolve_parameters(
+            report.manifest, args.param, args.randomize, args.seed
+        )
+        bindings = report.manifest.get("runtime_bindings", [])
+        if bindings:
+            rendered_file = log_file.parent / "scenario.rendered.xml"
+            applied = render_scenario(
+                scenario_file, rendered_file, report.manifest, parameter_values
+            )
+            scenario_file = rendered_file
+            for name, value in applied.items():
+                print(f"[parameter] {name}={value:g}")
+    except (OSError, ET.ParseError, ParameterError) as error:
+        print(f"[run_scenario] parameter rendering failed: {error}", file=sys.stderr)
+        return 2
     ready_file = log_file.parent / "controller.ready" if args.auto_vtd else None
+    try:
+        runtime_control_config = render_control_config(
+            report.manifest, log_file.parent / "control.rendered.yaml"
+        )
+    except (OSError, ValueError, RuntimeError) as error:
+        print(f"[run_scenario] control config rendering failed: {error}", file=sys.stderr)
+        return 2
     command = build_command(
         binary,
         args.config.resolve(),
@@ -267,11 +358,14 @@ def main() -> int:
         run_id,
         log_file,
         ready_file,
+        args.decision_log.resolve() if args.decision_log else None,
+        bool(report.manifest.get("control", {}).get("ignore_traffic_lights", False)),
+        runtime_control_config,
     )
 
     print()
     print(f"Scenario : {scenario_id}")
-    print(f"File     : {report.scenario_file}")
+    print(f"File     : {scenario_file}")
     print(f"Route    : {report.route_file}")
     print(f"Log      : {log_file}")
     print(f"Command  : {shlex.join(command)}")
@@ -283,13 +377,13 @@ def main() -> int:
             return 2
         print(f"VTD SCP  : {scp_host}:{args.scp_port} (automatic Load/Apply/Play/Stop)")
         vtd_scenario_file = (
-            args.vtd_scenario_file or report.scenario_file.resolve()
+            args.vtd_scenario_file or scenario_file
         )
         delivery = "inline XML" if args.inline_scenario else "VTD file path"
         print(f"VTD file : {vtd_scenario_file} ({delivery})")
     else:
         scp_host = ""
-        vtd_scenario_file = report.scenario_file.resolve()
+        vtd_scenario_file = scenario_file
         print("VTD      : Load/Apply/Play manually (use --auto-vtd to automate).")
 
     if args.dry_run:

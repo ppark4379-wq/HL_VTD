@@ -116,9 +116,8 @@
             <Phase Duration="3.0000000000000000e+00" Type="attention"/>
         </SignalController>
         <SignalController Id="19" DelayRef="-1" Delay="0.0000000000000000e+00">
-            <Phase Duration="1.5000000000000000e+01" Type="go"/>
-            <Phase Duration="3.0000000000000000e+00" Type="attention"/>
             <Phase Duration="1.8000000000000000e+01" Type="stop"/>
+            <Phase Duration="3.0000000000000000e+00" Type="attention"/>
         </SignalController>
         <SignalController Id="20" DelayRef="-1" Delay="0.0000000000000000e+00">
             <Phase Duration="6.0000000000000000e+01" Type="stop"/>
@@ -2361,15 +2360,27 @@
             <LightState>
                 <Light state="true"/>
             </LightState>
+            <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
+            </LightState>
         </Signal>
         <Signal Id="81">
+            <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
+            </LightState>
             <LightState>
                 <Light state="false"/>
             </LightState>
         </Signal>
         <Signal Id="82">
             <LightState>
-                <Light state="true"/>
+                <Light state="false"/>
             </LightState>
             <LightState>
                 <Light state="false"/>
@@ -2379,6 +2390,12 @@
             </LightState>
         </Signal>
         <Signal Id="83">
+            <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
+            </LightState>
             <LightState>
                 <Light state="false"/>
             </LightState>

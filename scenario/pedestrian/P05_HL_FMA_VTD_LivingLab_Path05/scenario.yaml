@@ -1,0 +1,58 @@
+schema_version: 1
+
+scenario:
+  id: P05
+  category: pedestrian
+  name: HL_FMA_VTD_LivingLab_Path05
+  description: LivingLAB Path05를 따라 External Ego를 주행시키는 기본 시나리오
+  file: P05_HL_FMA_VTD_LivingLab_Path05.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+control:
+  ignore_traffic_lights: true
+  target_speed_kph: 50.0
+
+parameters:
+  ego_initial_speed_mps:
+    type: float
+    unit: m/s
+    default: 13.88888888888889
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+
+events: []
+
+expected_outcomes:
+  - follow_reference_path
+  - remain_in_driving_lane
+  - reach_route_end
+  - avoid_collision
+
+evaluation:
+  codes:
+    - S2.1.01
+  required_metrics:
+    - lateral_error
+    - heading_error
+    - ego_speed
+    - route_progress
+    - collision
+  thresholds_status: pending

@@ -9,9 +9,19 @@ T04,traffic,traffic/T04_red_light_blink_person,internal.flashing_red_pedestrian_
 V01,vehicle,vehicle/V01_lead_vehicle,internal.dynamic_vehicle_following,packaged,선행차 추종·안전거리 유지; 실주행 검증 전
 V03,vehicle,vehicle/V03_lead_brake,internal.dynamic_vehicle_brake,packaged,내부 동적 이벤트 Tag; 실제 판제 주행 검증 전
 P01,pedestrian,pedestrian/P01_pedestrian_crossing,internal.dynamic_pedestrian_crossing,packaged,내부 동적 이벤트 Tag; 실제 판제 주행 검증 전
+P00,pedestrian,pedestrian/P00_HL_FMA_VTD_LivingLab,S2.1.01,packaged,LivingLAB 장거리 External Ego 경로 추종; 실주행 검증 전
+P02,pedestrian,pedestrian/P02_HL_FMA_VTD_LivingLab_Path02,S2.1.01,packaged,LivingLAB Path02 External Ego 경로 추종; 신호등 무시; 실주행 검증 전
+P03,pedestrian,pedestrian/P03_HL_FMA_VTD_LivingLab_Path03,S2.1.01,packaged,LivingLAB Path03 External Ego 경로 추종; 신호등 무시; 실주행 검증 전
+P04,pedestrian,pedestrian/P04_HL_FMA_VTD_LivingLab_Path04,S2.1.01,packaged,LivingLAB Path04 External Ego 경로 추종; 신호등 무시; 실주행 검증 전
+P05,pedestrian,pedestrian/P05_HL_FMA_VTD_LivingLab_Path05,S2.1.01,packaged,LivingLAB Path05 External Ego 경로 추종; 신호등 무시; 실주행 검증 전
+P06,pedestrian,pedestrian/P06_HL_FMA_VTD_LivingLab_Path06,S2.1.01,packaged,LivingLAB Path06 External Ego 보호구역 탐색; 신호등 무시; 실주행 검증 전
 O01,obstacle,obstacle/O01_front_obstacle,S6.1.01,packaged,XML·route·manifest 정적 검증 대상
 O02,obstacle,obstacle/O02_obstacle_ver2,S6.1.01,packaged,좌회전 경로 동적·정적 장애물 대응; 실주행 검증 전
 O03,obstacle,obstacle/O03_curve_obstacle,S6.1.01,packaged,곡선 구간 정적 장애물 대응; 실주행 검증 전
 O04,obstacle,obstacle/O04_lane_obstacle,S6.1.01,packaged,차로 내 정적 장애물 대응; 실주행 검증 전
 V04,vehicle,vehicle/V04_cut_in,internal.dynamic_vehicle_cut_in,packaged,내부 동적 이벤트 Tag; 옆 차선 차량 Cut-in; 실제 판제 주행 검증 전
 V05,vehicle,vehicle/V05_cut_in_delay,internal.dynamic_vehicle_cut_in,packaged,지연 후 차량 Cut-in 대응; 실주행 검증 전
+V06,vehicle,vehicle/V06_sudden_come,internal.dynamic_vehicle_approach,packaged,인접 차량 급가속 접근 및 Ego 회피 차선 변경; 실주행 검증 전
+V07,vehicle,vehicle/V07_obstacle_sudden_come,internal.dynamic_vehicle_obstacle_approach,packaged,급가속 접근 차량과 정적 장애물 복합 대응; 실주행 검증 전
+V08,vehicle,vehicle/V08_side_vehicle,internal.dynamic_side_vehicle_stop,packaged,옆 차선 차량 급정지 대응; 실주행 검증 전
+V09,vehicle,vehicle/V09_double_cut_in,internal.dynamic_vehicle_cut_in,packaged,양쪽 차선 두 차량의 동시 Cut-in 대응; 실주행 검증 전

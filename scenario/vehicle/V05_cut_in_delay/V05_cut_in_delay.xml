@@ -34,9 +34,9 @@
         <PlayerActions Player="Ego"/>
         <PlayerActions Player="New Player">
             <Action Name="">
-                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="8.0000000000000000e+00" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="8.0000000000000000e+00" X="1.5007500915527344e+03" Y="2.2667766952514648e+02"/>
-                <LaneChange Direction="1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="1.5000000000000000e+00" Time="5.0000000000000000e+00"/>
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="6.0000000000000000e+00" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="6.0000000000000000e+00" X="1.5007500915527344e+03" Y="2.2667766952514648e+02"/>
+                <LaneChange Direction="1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="1.5000000000000000e+00" Time="2.0000000000000000e+00"/>
                 <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
             </Action>
         </PlayerActions>
