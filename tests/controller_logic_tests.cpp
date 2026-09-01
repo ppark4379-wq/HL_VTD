@@ -181,6 +181,119 @@ WorldState makeWorldWithObstacle() {
     return world;
 }
 
+void testLaneChangeAcrossRenumberedLaneSection() {
+    PathGeneratorData map;
+    Road road;
+    road.id = 418;
+    road.length = 100.0;
+    Geometry geometry;
+    geometry.type = GeometryType::Line;
+    geometry.length = road.length;
+    road.geometries.push_back(geometry);
+    road.laneOffsets.push_back({0.0, 0.0, 0.0, 0.0, 0.0});
+    road.laneOffsets.push_back({50.0, 3.5, 0.0, 0.0, 0.0});
+
+    LaneSection before;
+    before.s = 0.0;
+    for (int laneId : {-1, -2}) {
+        LaneDefinition lane;
+        lane.id = laneId;
+        lane.type = "driving";
+        lane.widths.push_back(constantWidth(3.5));
+        lane.roadMarks.push_back({0.0, "both", "standard"});
+        before.lanes.emplace(laneId, lane);
+    }
+    before.lanes.at(-1).successor = -2;
+    before.lanes.at(-2).successor = -3;
+
+    LaneSection after;
+    after.s = 50.0;
+    for (int laneId : {-1, -2, -3}) {
+        LaneDefinition lane;
+        lane.id = laneId;
+        lane.type = "driving";
+        lane.widths.push_back(constantWidth(3.5));
+        lane.roadMarks.push_back({50.0, "both", "standard"});
+        after.lanes.emplace(laneId, lane);
+    }
+    after.lanes.at(-2).predecessor = -1;
+    after.lanes.at(-3).predecessor = -2;
+    road.sections.push_back(before);
+    road.sections.push_back(after);
+    map.roads.emplace(road.id, road);
+    map.laneGraph[{418, 0, -1}].push_back({418, 1, -2});
+    map.laneGraph[{418, 0, -2}].push_back({418, 1, -3});
+    map.laneGraph[{418, 1, -2}].push_back({418, 1, -3});
+    map.laneGraph[{418, 1, -3}].push_back({418, 1, -2});
+
+    PathPlannerData globalPath;
+    for (int index = 0; index <= 100; ++index) {
+        Waypoint point;
+        point.x = static_cast<double>(index);
+        point.y = -1.75;
+        point.yaw = 0.0;
+        point.s = static_cast<double>(index);
+        point.roadS = point.s;
+        point.roadId = 418;
+        point.sectionIndex = index < 50 ? 0 : 1;
+        point.laneId = index < 50 ? -1 : -2;
+        globalPath.waypoints.push_back(point);
+    }
+
+    WorldState world;
+    world.ego.x = 35.0F;
+    world.ego.y = -1.75F;
+    world.ego.heading = 0.0F;
+    world.egoSpeed = 5.0;
+    world.egoLaneValid = true;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoRoadId = 418;
+    world.egoLaneId = -1;
+    world.egoSectionIndex = 0;
+    world.egoRoadS = 35.0;
+    world.egoPathS = 35.0;
+    world.frontBumperPathS = 38.8;
+    world.egoObb = makeObb2D(36.4, -1.75, 0.0, 4.8, 1.9);
+
+    WorldObjectState obstacle;
+    obstacle.raw.id = 4;
+    obstacle.raw.x = 60.0F;
+    obstacle.raw.y = -1.75F;
+    obstacle.raw.length = 4.0F;
+    obstacle.raw.width = 2.0F;
+    obstacle.obb = makeObb2D(60.0, -1.75, 0.0, 4.0, 2.0);
+    obstacle.laneValid = true;
+    obstacle.roadId = 418;
+    obstacle.laneId = -2;
+    obstacle.sectionIndex = 1;
+    obstacle.roadS = 60.0;
+    obstacle.pathValid = true;
+    obstacle.pathS = 60.0;
+    obstacle.relativeS = 25.0;
+    obstacle.isAhead = true;
+    obstacle.isOnEgoPath = true;
+    world.objects.push_back(obstacle);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    safetyConfig.collisionPredictionHorizon = 5.0;
+    assert(tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 35));
+    assert(laneChange.routeMode == LaneChangeRouteMode::ReturnToSource);
+    assert(laneChange.targetLaneId == -2);
+    const auto nearObstacle = std::min_element(
+        laneChange.path.begin(), laneChange.path.end(),
+        [](const Waypoint& left, const Waypoint& right) {
+            return std::abs(left.s - 60.0) < std::abs(right.s - 60.0);
+        });
+    assert(nearObstacle != laneChange.path.end());
+    assert(nearObstacle->sectionIndex == 1);
+    assert(nearObstacle->laneId == -3);
+    assert(nearObstacle->y < -4.0);
+}
+
 void testStaticZoneRouteAlignment() {
     StaticZoneData zones;
     StopLine line;
@@ -364,6 +477,7 @@ int main() {
     testStaticZoneRouteAlignment();
     testPredictedCollisionIsNotCurrentCollision();
     testObstacleLaneChange();
+    testLaneChangeAcrossRenumberedLaneSection();
     testKeepTargetLaneWhenItRejoinsNextRoad();
     testNearbyAdjacentVehicleCapsSpeedBeforeCutIn();
     testSharpCurveHasSeparateSpeed();
