@@ -43,3 +43,9 @@ void checkPredictedCollisions(PathSafetyResult& output,
                               const LocalPathData& localPath,
                               double horizon,
                               double step);
+
+// 현재 충돌이거나 충돌/TTC가 비상제동 임계 이내일 때만 true.
+// 차선 복귀 후보가 멀리서 막힌 사실은 복귀 속도를 낮추거나
+// 대기 지점으로 감속할 이유이지, 즉시 비상정지 이유는 아니다.
+bool requiresEmergencyBrake(const PathSafetyResult& safety,
+                            double emergencyTTC);

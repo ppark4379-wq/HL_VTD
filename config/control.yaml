@@ -39,6 +39,14 @@ planning:
   # 옆 차선 차량도 주의속도로 감속한다. 끼어들기 후 제동거리를 남기기 위함.
   nearby_object_caution_kph: 15.0   # [km/h] 근접 전방 객체 주의속도
   nearby_object_lateral_distance: 5.5 # [m] 옆 차선 포함 경로 횡방 탐색폭
+  # 같은 방향의 바로 옆 차선에 정차한 승용차급 객체는 갑작스러운 출발·끼어들기에
+  # 대비해 가까운 구간에서만 미리 감속한다. 작은 콘과 큰 수목·구조물은 제외한다.
+  stationary_adjacent_vehicle_caution_kph: 20.0 # [km/h] 정차 차량 옆 통과 주의속도
+  stationary_adjacent_vehicle_maximum_distance: 25.0 # [m] 너무 먼 주차 차량은 무시
+  stationary_vehicle_minimum_length: 2.5 # [m] 차량형 bounding box 길이 하한
+  stationary_vehicle_maximum_length: 7.5 # [m] 차량형 bounding box 길이 상한
+  stationary_vehicle_minimum_width: 1.4  # [m] 차량형 bounding box 폭 하한
+  stationary_vehicle_maximum_width: 2.8  # [m] 차량형 bounding box 폭 상한
   emergency_ttc: 1.5               # [s] 긴급제동 TTC
   collision_prediction_horizon: 3.0 # [s] OBB 예측 범위
   collision_prediction_step: 0.2   # [s] OBB 예측 간격
@@ -105,4 +113,4 @@ runtime:
   nominal_dt: 0.05                # [s] 20 Hz
   speed_filter_alpha: 0.25        # (0, 1], 작을수록 부드럽게 반영
   max_valid_position_speed_kph: 288.0 # 초기화·리스폰 위치 점프 검출 기준
-  input_timeout: 0.25             # [s] GT 미수신 시 비상제동 후 연결 종료
+  input_timeout: 1.0              # [s] GT 미수신 시 비상제동 후 연결 종료

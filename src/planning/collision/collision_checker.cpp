@@ -216,3 +216,14 @@ void checkPredictedCollisions(PathSafetyResult& output,
         }
     }
 }
+
+bool requiresEmergencyBrake(const PathSafetyResult& safety,
+                            double emergencyTTC) {
+    if (safety.collision) return true;
+    if (emergencyTTC < 0.0 || !std::isfinite(emergencyTTC)) return true;
+    if (safety.predictedCollision &&
+        safety.predictedCollisionTTC <= emergencyTTC) {
+        return true;
+    }
+    return safety.minimumTTC <= emergencyTTC;
+}

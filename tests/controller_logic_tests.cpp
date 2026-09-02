@@ -1,4 +1,5 @@
 #include "data/map/static_zones.hpp"
+#include "network/receive/rdb_clock.hpp"
 #include "network/send/control_sender.hpp"
 #include "planning/behavior/behavior_planner.hpp"
 #include "planning/collision/collision_checker.hpp"
@@ -10,7 +11,9 @@
 #include <cassert>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <iostream>
+#include <limits>
 
 namespace {
 
@@ -34,6 +37,69 @@ void testTrafficControllerParsing() {
     assert(map.signalToController.at(54) == 11);
     assert(map.signalToController.at(55) == 11);
     assert(map.signalToController.at(58) == 11);
+}
+
+template <typename T>
+void writeNative(std::vector<std::uint8_t>& bytes,
+                 std::size_t offset,
+                 const T& value) {
+    std::memcpy(bytes.data() + offset, &value, sizeof(value));
+}
+
+std::vector<std::uint8_t> makeRdbClockMessage(std::uint32_t frameNo,
+                                              double simulationTime,
+                                              double egoX,
+                                              double egoY) {
+    constexpr std::size_t headerSize = 24;
+    constexpr std::size_t entryHeaderSize = 16;
+    constexpr std::size_t objectSize = 112;
+    std::vector<std::uint8_t> message(
+        headerSize + entryHeaderSize + objectSize, 0);
+    writeNative(message, 0, std::uint16_t{35712});
+    writeNative(message, 2, std::uint16_t{0x011A});
+    writeNative(message, 4, std::uint32_t{headerSize});
+    writeNative(message, 8,
+                std::uint32_t{entryHeaderSize + objectSize});
+    writeNative(message, 12, frameNo);
+    writeNative(message, 16, simulationTime);
+
+    writeNative(message, headerSize, std::uint32_t{entryHeaderSize});
+    writeNative(message, headerSize + 4, std::uint32_t{objectSize});
+    writeNative(message, headerSize + 8, std::uint32_t{objectSize});
+    writeNative(message, headerSize + 12, std::uint16_t{9});
+    const std::size_t objectOffset = headerSize + entryHeaderSize;
+    std::memcpy(message.data() + objectOffset + 8, "Ego", 4);
+    writeNative(message, objectOffset + 64, egoX);
+    writeNative(message, objectOffset + 72, egoY);
+    return message;
+}
+
+void testRdbSimulationTimeMatchesGtInFrameOrder() {
+    RdbClockData clock;
+    const auto first = makeRdbClockMessage(20, 1.0, 10.0, 20.0);
+    const auto second = makeRdbClockMessage(21, 1.05, 10.0, 20.0);
+    clock.streamBuffer.insert(clock.streamBuffer.end(),
+                              first.begin(), first.end());
+    clock.streamBuffer.insert(clock.streamBuffer.end(),
+                              second.begin(), second.end());
+    extractRdbClockSamples(clock);
+    assert(clock.samples.size() == 2);
+
+    EgoState ego;
+    ego.x = 10.0F;
+    ego.y = 20.0F;
+    const auto firstMatch = matchRdbSimulationTime(clock, ego);
+    const auto secondMatch = matchRdbSimulationTime(clock, ego);
+    assert(firstMatch.has_value() &&
+           std::abs(*firstMatch - 1.0) < 1e-12);
+    assert(secondMatch.has_value() &&
+           std::abs(*secondMatch - 1.05) < 1e-12);
+    assert(clock.samples.empty());
+
+    // 새 RDB 샘플 없이 같은 GT가 반복되면 같은 simTime을 재사용한다.
+    const auto duplicateMatch = matchRdbSimulationTime(clock, ego);
+    assert(duplicateMatch.has_value() &&
+           std::abs(*duplicateMatch - 1.05) < 1e-12);
 }
 
 Polynomial constantWidth(double width) {
@@ -379,6 +445,61 @@ void testPredictedCollisionIsNotCurrentCollision() {
     assert(!safety.collision);
     assert(safety.predictedCollision);
     assert(safety.predictedCollisionTTC > 0.0);
+}
+
+void testBlockedReturnUsesWaitingSpeedUntilCollisionIsUrgent() {
+    PathSafetyResult safety;
+    resetPathSafety(safety);
+    safety.predictedCollision = true;
+    safety.predictedCollisionTTC = 3.0;
+    safety.minimumTTC = 3.0;
+
+    // 복귀 경로 멀리의 점유는 복귀 보류/감속 사유이지만,
+    // 즉시 비상제동 사유는 아니다.
+    assert(!requiresEmergencyBrake(safety, 1.5));
+
+    safety.predictedCollisionTTC = 1.4;
+    safety.minimumTTC = 1.4;
+    assert(requiresEmergencyBrake(safety, 1.5));
+
+    safety.predictedCollision = false;
+    safety.predictedCollisionTTC =
+        std::numeric_limits<double>::infinity();
+    safety.minimumTTC = std::numeric_limits<double>::infinity();
+    safety.collision = true;
+    assert(requiresEmergencyBrake(safety, 1.5));
+}
+
+void testMovingReturnConflictCanClearAtWaitingSpeed() {
+    WorldState world = makeWorldWithObstacle();
+    WorldObjectState& object = world.objects.front();
+    object.raw.x = 20.0F;
+    object.raw.speed = 4.0F;
+    object.raw.heading = 0.0F;
+    object.pathS = 20.0;
+    object.relativeS = 10.0;
+    object.relativeD = 0.0;
+    object.isAhead = true;
+    object.isOnEgoPath = true;
+    object.obb = makeObb2D(20.0, -1.75, 0.0, 4.0, 2.0);
+
+    LocalPathData path;
+    path.valid = true;
+    path.points = makeStraightGlobalPath().waypoints;
+
+    PathSafetyResult fastSafety;
+    resetPathSafety(fastSafety);
+    world.egoSpeed = 6.0;
+    checkPredictedCollisions(fastSafety, world, path, 5.0, 0.1);
+    assert(fastSafety.predictedCollision);
+
+    // 같은 경로도 2 m/s로 감속하면 4 m/s 앞차가 먼저
+    // 멀어진다. 이 경우는 멈추지 말고 느린 복귀가 안전하다.
+    PathSafetyResult waitingSafety;
+    resetPathSafety(waitingSafety);
+    world.egoSpeed = 2.0;
+    checkPredictedCollisions(waitingSafety, world, path, 5.0, 0.1);
+    assert(!waitingSafety.predictedCollision);
 }
 
 void testObstacleLaneChange() {
@@ -901,6 +1022,111 @@ void testNearbyAdjacentVehicleCapsSpeedBeforeCutIn() {
     assert(std::abs(output.targetSpeed - 50.0 / 3.6) < 1e-9);
 }
 
+void testStationaryAdjacentVehicleUsesShortRangeCaution() {
+    PlanningBehaviorConfig config;
+    config.stationaryAdjacentVehicleCautionSpeed = 20.0 / 3.6;
+    config.stationaryAdjacentVehicleMaximumDistance = 25.0;
+    config.nearbyObjectLateralDistance = 5.5;
+
+    WorldState world;
+    world.egoSpeed = 40.0 / 3.6;
+    world.ego.heading = 0.0F;
+    world.egoLaneValid = true;
+    world.egoRoadId = 10;
+    world.egoSectionIndex = 2;
+    world.egoLaneId = 3;
+
+    WorldObjectState parkedVehicle;
+    parkedVehicle.raw.id = 7;
+    parkedVehicle.raw.speed = 0.0F;
+    parkedVehicle.raw.heading = 0.0F;
+    parkedVehicle.raw.length = 4.85F;
+    parkedVehicle.raw.width = 1.89F;
+    parkedVehicle.laneValid = true;
+    parkedVehicle.roadId = 10;
+    parkedVehicle.sectionIndex = 2;
+    parkedVehicle.laneId = 2;
+    parkedVehicle.pathValid = true;
+    parkedVehicle.isAhead = true;
+    parkedVehicle.isOnEgoPath = false;
+    parkedVehicle.relativeS = 20.0;
+    parkedVehicle.relativeD = 3.5;
+    world.objects.push_back(parkedVehicle);
+
+    BehaviorState state;
+    BehaviorDecision output;
+    ConstraintSet constraints;
+    constraints.speedLimit = 50.0 / 3.6;
+    StopDecision stop;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Follow);
+    assert(std::abs(output.targetSpeed - 20.0 / 3.6) < 1e-9);
+
+    // 25 m 밖의 차량까지 미리 감속하지 않는다.
+    world.objects.front().relativeS = 26.0;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Cruise);
+
+    // 같은 위치라도 콘 크기의 정적 물체에는 기존처럼 순항한다.
+    world.objects.front().relativeS = 20.0;
+    world.objects.front().raw.length = 0.6F;
+    world.objects.front().raw.width = 0.6F;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Cruise);
+
+    // 두 차선 떨어진 정차 차량 역시 감속 대상이 아니다.
+    world.objects.front().raw.length = 4.85F;
+    world.objects.front().raw.width = 1.89F;
+    world.objects.front().laneId = 1;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Cruise);
+}
+
+void testCloserVehicleConstraintOverridesFarStopPlan() {
+    PlanningBehaviorConfig config;
+    config.followTimeGap = 1.8;
+    config.minimumFollowDistance = 5.0;
+    config.nearbyObjectCautionSpeed = 20.0 / 3.6;
+    config.nearbyObjectLateralDistance = 5.5;
+
+    WorldState world;
+    world.egoSpeed = 50.0 / 3.6;
+    WorldObjectState cuttingIn;
+    cuttingIn.raw.id = 6;
+    cuttingIn.raw.speed = 2.0F;
+    cuttingIn.raw.heading = 0.0F;
+    cuttingIn.pathValid = true;
+    cuttingIn.isAhead = true;
+    cuttingIn.relativeS = 10.0;
+    cuttingIn.relativeD = 3.5;
+    world.objects.push_back(cuttingIn);
+
+    ConstraintSet constraints;
+    constraints.speedLimit = 50.0 / 3.6;
+    StopDecision farSignalStop;
+    farSignalStop.valid = true;
+    farSignalStop.reason = StopReason::RedLight;
+    farSignalStop.distanceToStop = 76.0;
+
+    BehaviorState state;
+    BehaviorDecision output;
+    updateBehavior(state, output, constraints, farSignalStop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Follow);
+    assert(std::abs(output.targetSpeed - 2.0) < 1e-6);
+
+    // 정지점이 더 가까우면 신호 정지 제약이 그대로 우선한다.
+    farSignalStop.distanceToStop = 1.0;
+    updateBehavior(state, output, constraints, farSignalStop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Stop);
+    assert(std::abs(output.targetSpeed) < 1e-9);
+}
+
 void testSafeAvoidanceIgnoresStaticSiblingObstacles() {
     PlanningBehaviorConfig config;
     WorldState world;
@@ -971,9 +1197,12 @@ void testSharpCurveHasSeparateSpeed() {
 
 int main() {
     testTrafficControllerParsing();
+    testRdbSimulationTimeMatchesGtInFrameOrder();
     testStaticZoneRouteAlignment();
     testSchoolZoneReferencePointConfig();
     testPredictedCollisionIsNotCurrentCollision();
+    testBlockedReturnUsesWaitingSpeedUntilCollisionIsUrgent();
+    testMovingReturnConflictCanClearAtWaitingSpeed();
     testObstacleLaneChange();
     testLaneChangeWhenAdjacentLaneStartsAhead();
     testO01ObstacleRoadLaneMerge();
@@ -984,6 +1213,8 @@ int main() {
     testLimitedLateralOffsetAvoidance();
     testKeepTargetLaneWhenItRejoinsNextRoad();
     testNearbyAdjacentVehicleCapsSpeedBeforeCutIn();
+    testStationaryAdjacentVehicleUsesShortRangeCaution();
+    testCloserVehicleConstraintOverridesFarStopPlan();
     testSafeAvoidanceIgnoresStaticSiblingObstacles();
     testSharpCurveHasSeparateSpeed();
     std::cout << "controller_logic_tests: PASS\n";

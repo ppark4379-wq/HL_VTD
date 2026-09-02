@@ -1,5 +1,6 @@
 #include "network/receive/gt_receiver.hpp"
 #include "network/receive/gt_printer.hpp"
+#include "network/receive/rdb_clock.hpp"
 #include "network/network_config.hpp"
 #include "network/send/control_sender.hpp"
 #include "network/vtd_client.hpp"
@@ -14,11 +15,13 @@
 #include "planning/global/reference_path_generator.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -172,23 +175,50 @@ void printDrivingStatus(const GtFrame& gt,
 }
 
 struct FrameClockData {
-    double previousTime{};
+    double previousReceiveTime{};
+    double previousSimulationTime{};
     double dt{0.05};
-    bool initialized{};
+    bool wallClockInitialized{};
+    bool simulationClockInitialized{};
+    bool usingSimulationTime{};
 };
 
-void updateFrameClock(FrameClockData& clock, double receiveTime,
+void updateFrameClock(FrameClockData& clock,
+                      std::optional<double> simulationTime,
+                      double receiveTime,
                       double nominalDt) {
-    const double measured = clock.initialized && receiveTime > clock.previousTime
-                                ? receiveTime - clock.previousTime
-                                : nominalDt;
+    if (simulationTime.has_value() && std::isfinite(*simulationTime)) {
+        double measured = nominalDt;
+        if (clock.simulationClockInitialized) {
+            if (*simulationTime >= clock.previousSimulationTime) {
+                measured = *simulationTime - clock.previousSimulationTime;
+            }
+        }
+        // RDB 시각은 시뮬레이션이 느리거나 빠르게 실행되어도 0.05 s 단위로
+        // 진행한다. 큰 점프는 드롭된 GT 프레임의 실제 시간차이므로 유지한다.
+        // 같은 simTime은 새 물리 프레임이 아니라 중복 snapshot이다.
+        clock.dt = measured;
+        clock.previousSimulationTime = *simulationTime;
+        clock.simulationClockInitialized = true;
+        clock.usingSimulationTime = true;
+        return;
+    }
+
+    // 한 프레임이라도 RDB 좌표 매칭이 끊기면 다음 일치값을 새 기준점으로
+    // 삼는다. 누락 구간을 다음 한 프레임의 이동량에 중복 적용하지 않는다.
+    clock.simulationClockInitialized = false;
+    clock.usingSimulationTime = false;
+    const double measured =
+        clock.wallClockInitialized && receiveTime > clock.previousReceiveTime
+            ? receiveTime - clock.previousReceiveTime
+            : nominalDt;
     // TCP는 여러 GT 프레임을 한 recv에 합칠 수 있다. 버퍼에서 연속으로
     // 꺼낸 프레임의 wall-clock dt가 거의 0이어도 시뮬레이션 주기는 0이 아니다.
     clock.dt = measured >= nominalDt * 0.25 && measured <= nominalDt * 4.0
                    ? measured
                    : nominalDt;
-    clock.previousTime = receiveTime;
-    clock.initialized = true;
+    clock.previousReceiveTime = receiveTime;
+    clock.wallClockInitialized = true;
 }
 
 void printNetworkConfig(
@@ -198,6 +228,8 @@ void printNetworkConfig(
               << "[network] VTD TCP: " << config.vtd.host_ip << ':'
               << config.vtd.tcp_port
               << " (1109-byte GT receive + 9-byte control send)\n"
+              << "[network] VTD RDB clock: " << config.vtd.host_ip << ':'
+              << config.vtd.rdb_port << " (frameNo/simTime)\n"
               << "[network] VTD RTSP: " << config.vtd.host_ip << ':'
               << config.vtd.rtsp_port << '\n'
               << "[network] configured controller UDP (unused by control): "
@@ -324,12 +356,47 @@ int main(int argc, char* argv[]) {
         setVtdReceiveTimeout(receiver.client,
                              drivingConfig.runtime.inputTimeout);
 
+        auto rdbClock = makeRdbClock(config.vtd);
+        std::size_t nextRdbConnectionAttemptFrame = 0;
+        bool simulationClockAnnounced = false;
+
         using LogClock = std::chrono::steady_clock;
         const auto logStartTime = LogClock::now();
         std::size_t frameCount = 0;
 
         while (receiveGtFrame(receiver)) {
             const GtFrame& gt = getLatestGtFrame(receiver);
+            if (!isRdbClockConnected(rdbClock) &&
+                frameCount >= nextRdbConnectionAttemptFrame) {
+                // VTD 초기화 순서에 따라 첫 GT 시점에는 RDB 포트가 아직
+                // 준비되지 않을 수 있으므로 5초 간격으로 재시도한다.
+                nextRdbConnectionAttemptFrame = frameCount + 100;
+                try {
+                    connectRdbClock(rdbClock);
+                    setVtdReceiveTimeout(rdbClock.client, 0.002);
+                    std::cout << "[network] RDB simulation clock connected\n";
+                } catch (const std::exception& error) {
+                    disconnectRdbClock(rdbClock);
+                    std::cerr
+                        << "[network-warning] RDB simulation clock unavailable; "
+                        << "using guarded receive-time fallback: "
+                        << error.what() << '\n';
+                }
+            }
+            std::optional<double> simulationTime;
+            if (isRdbClockConnected(rdbClock)) {
+                try {
+                    pollRdbClock(rdbClock);
+                    simulationTime = matchRdbSimulationTime(rdbClock, gt.ego);
+                } catch (const std::exception& error) {
+                    disconnectRdbClock(rdbClock);
+                    nextRdbConnectionAttemptFrame = frameCount + 100;
+                    std::cerr
+                        << "[network-warning] RDB simulation clock lost; "
+                        << "using guarded receive-time fallback: "
+                        << error.what() << '\n';
+                }
+            }
             const double elapsedWallTime = std::chrono::duration<double>(
                 LogClock::now() - logStartTime).count();
             DecisionTraceData* trace = options.decision_logging
@@ -339,8 +406,13 @@ int main(int argc, char* argv[]) {
                 beginDecisionTraceFrame(*trace, frameCount,
                                         elapsedWallTime);
             }
-            updateFrameClock(clock, getLatestGtReceiveTime(receiver),
+            updateFrameClock(clock, simulationTime,
+                             getLatestGtReceiveTime(receiver),
                              drivingConfig.runtime.nominalDt);
+            if (clock.usingSimulationTime && !simulationClockAnnounced) {
+                std::cout << "[network] ego speed now uses VTD simulation time\n";
+                simulationClockAnnounced = true;
+            }
             runWorldProcess(world, gt, getLatestGtReceiveTime(receiver), clock.dt,
                             mapData, planning.pathPlanner.waypoints, vehicle);
             runPlanningProcess(planning, gt, world.state, mapData, clock.dt,
@@ -381,6 +453,7 @@ int main(int argc, char* argv[]) {
         }
 
         disconnectGtReceiver(receiver);
+        disconnectRdbClock(rdbClock);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "[error] " << error.what() << '\n';

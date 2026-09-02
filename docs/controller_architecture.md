@@ -17,6 +17,10 @@
 - `vtd_client.*`: TCP 9910 연결·수신·송신·수신 타임아웃을 처리한다.
 - `receive/packet_parser.*`: 1109바이트를 Ego 1대, 객체 30칸, 신호등 1개로 역직렬화한다.
 - `receive/gt_receiver.*`: TCP 스트림을 정확히 1109바이트 프레임 단위로 조립한다.
+- `receive/rdb_clock.*`: VTD RDB 48190의 `frameNo/simTime`과 Ego 위치를 읽어
+  같은 GT 프레임에 매칭한다. 속도와 제어 주기는 매칭된 시뮬레이션 시간차를
+  사용하며, RDB를 쓸 수 없거나 매칭이 끊기면 검증된 nominal/수신시각
+  fallback을 사용한다.
 - `receive/gt_printer.*`: 선택적으로 수신 객체 상태를 화면에 표시한다.
 - `send/control_sender.*`: steering 4B, targetAccel 4B, turnSignal 1B를 padding 없는 9바이트로 만들어 동일한 TCP 9910에 보낸다.
 

@@ -51,6 +51,57 @@ const WorldObjectState* findNearbyForwardObject(
     return nearest;
 }
 
+bool hasVehicleSizedBoundingBox(const WorldObjectState& object,
+                                const PlanningBehaviorConfig& config) {
+    const double length = static_cast<double>(object.raw.length);
+    const double width = static_cast<double>(object.raw.width);
+    return length >= config.stationaryVehicleMinimumLength &&
+           length <= config.stationaryVehicleMaximumLength &&
+           width >= config.stationaryVehicleMinimumWidth &&
+           width <= config.stationaryVehicleMaximumWidth &&
+           length >= width * 1.4;
+}
+
+// 움직임만으로는 끼어들기 의도를 알 수 없는 정차 차량을 별도로 찾는다.
+// 모든 정적 물체를 감속 대상으로 만들지 않도록 차량형 OBB, 같은 방향의 바로
+// 옆 차선, 짧은 전방 거리 조건을 모두 만족해야 한다.
+const WorldObjectState* findStationaryAdjacentVehicle(
+    const WorldState& world,
+    const PlanningBehaviorConfig& config,
+    int safelyAvoidedObjectId) {
+    if (!world.egoLaneValid || world.egoLaneId == 0) return nullptr;
+
+    const WorldObjectState* nearest = nullptr;
+    for (const auto& object : world.objects) {
+        const bool sameLaneDirection =
+            object.laneId != 0 &&
+            ((object.laneId > 0) == (world.egoLaneId > 0));
+        const bool immediatelyAdjacent =
+            std::abs(object.laneId - world.egoLaneId) == 1;
+        const bool alignedWithEgo =
+            std::cos(static_cast<double>(object.raw.heading) -
+                     static_cast<double>(world.ego.heading)) > 0.7;
+        if (std::abs(object.raw.speed) >= 0.3 ||
+            !object.laneValid || !object.pathValid || !object.isAhead ||
+            object.isOnEgoPath ||
+            object.roadId != world.egoRoadId ||
+            object.sectionIndex != world.egoSectionIndex ||
+            !sameLaneDirection || !immediatelyAdjacent || !alignedWithEgo ||
+            object.relativeS >
+                config.stationaryAdjacentVehicleMaximumDistance ||
+            std::abs(object.relativeD) >
+                config.nearbyObjectLateralDistance ||
+            !hasVehicleSizedBoundingBox(object, config)) {
+            continue;
+        }
+        if (static_cast<int>(object.raw.id) == safelyAvoidedObjectId) continue;
+        if (nearest == nullptr || object.relativeS < nearest->relativeS) {
+            nearest = &object;
+        }
+    }
+    return nearest;
+}
+
 // 앞차 속도를 Ego 진행방향 성분으로 환산한다.
 double longitudinalSpeedOf(const WorldObjectState& object,
                            const WorldState& world) {
@@ -115,15 +166,18 @@ void updateBehavior(BehaviorState& state,
             ? std::min(cruiseSpeed, constraints.speedLimit)
             : cruiseSpeed;
 
+    double targetSpeed = limitedCruise;
+    LonMode selectedMode = stop.valid ? LonMode::Stop : LonMode::Cruise;
+
+    // 정지 요청은 다른 종방향 위험 검사를 끝내는 우선순위가 아니다.
+    // 모든 속도 제약을 계산한 뒤 가장 보수적인(가장 낮은) 값을 적용한다.
+    // 예: 먼 적색신호 정지계획이 있어도 가까운 끼어들기 차량은 즉시 감속한다.
     if (stop.valid) {
-        state.longitudinal = LonMode::Stop;
-        output.longitudinal = LonMode::Stop;
         const double distance =
             std::max(0.0, stop.distanceToStop - config.stopSafetyMargin);
-        output.targetSpeed = std::min(
+        targetSpeed = std::min(
             limitedCruise,
             std::sqrt(2.0 * config.comfortableDeceleration * distance));
-        return;
     }
 
     // 현재 속도에 비례해 탐색거리를 늘린다. 50 km/h에서 기본값은
@@ -136,12 +190,22 @@ void updateBehavior(BehaviorState& state,
         config.nearbyObjectLateralDistance,
         state.safelyAvoidedObjectId);
     if (nearby != nullptr) {
-        state.longitudinal = LonMode::Follow;
-        output.longitudinal = LonMode::Follow;
-        output.targetSpeed = std::min(
+        const double nearbyTarget = std::min(
             {limitedCruise, config.nearbyObjectCautionSpeed,
              std::max(0.0, longitudinalSpeedOf(*nearby, world))});
-        return;
+        if (nearbyTarget < targetSpeed) {
+            targetSpeed = nearbyTarget;
+            selectedMode = LonMode::Follow;
+        }
+    }
+
+    const WorldObjectState* stationaryAdjacent =
+        findStationaryAdjacentVehicle(
+            world, config, state.safelyAvoidedObjectId);
+    if (stationaryAdjacent != nullptr &&
+        config.stationaryAdjacentVehicleCautionSpeed < targetSpeed) {
+        targetSpeed = config.stationaryAdjacentVehicleCautionSpeed;
+        selectedMode = LonMode::Follow;
     }
 
     // Follow 진입과 해제에 서로 다른 임계값을 써서 경계에서의 진동을 막는다.
@@ -157,15 +221,16 @@ void updateBehavior(BehaviorState& state,
                 ? desiredGap * config.followReleaseRatio
                 : desiredGap;
         if (lead->relativeS < threshold) {
-            state.longitudinal = LonMode::Follow;
-            output.longitudinal = LonMode::Follow;
-            output.targetSpeed = std::clamp(
+            const double leadTarget = std::clamp(
                 longitudinalSpeedOf(*lead, world), 0.0, limitedCruise);
-            return;
+            if (leadTarget < targetSpeed) {
+                targetSpeed = leadTarget;
+                selectedMode = LonMode::Follow;
+            }
         }
     }
 
-    state.longitudinal = LonMode::Cruise;
-    output.longitudinal = LonMode::Cruise;
-    output.targetSpeed = limitedCruise;
+    state.longitudinal = selectedMode;
+    output.longitudinal = selectedMode;
+    output.targetSpeed = targetSpeed;
 }

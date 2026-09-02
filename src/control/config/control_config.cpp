@@ -73,6 +73,14 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.behavior.minimumFollowDistance > 0.0 &&
            config.behavior.nearbyObjectCautionSpeed > 0.0 &&
            config.behavior.nearbyObjectLateralDistance > 0.0 &&
+           config.behavior.stationaryAdjacentVehicleCautionSpeed > 0.0 &&
+           config.behavior.stationaryAdjacentVehicleMaximumDistance > 0.0 &&
+           config.behavior.stationaryVehicleMinimumLength > 0.0 &&
+           config.behavior.stationaryVehicleMaximumLength >=
+               config.behavior.stationaryVehicleMinimumLength &&
+           config.behavior.stationaryVehicleMinimumWidth > 0.0 &&
+           config.behavior.stationaryVehicleMaximumWidth >=
+               config.behavior.stationaryVehicleMinimumWidth &&
            config.behavior.crosswalkApproachSpeed > 0.0 &&
            config.behavior.crosswalkNearbyObjectDistance > 0.0 &&
            config.behavior.crosswalkClearanceSpeed > 0.0 &&
@@ -156,6 +164,20 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.nearbyObjectCautionSpeed) &&
         setConfigValue(values, "planning.nearby_object_lateral_distance",
                        config.behavior.nearbyObjectLateralDistance) &&
+        setSpeedConfigValue(
+            values, "planning.stationary_adjacent_vehicle_caution_kph",
+            config.behavior.stationaryAdjacentVehicleCautionSpeed) &&
+        setConfigValue(
+            values, "planning.stationary_adjacent_vehicle_maximum_distance",
+            config.behavior.stationaryAdjacentVehicleMaximumDistance) &&
+        setConfigValue(values, "planning.stationary_vehicle_minimum_length",
+                       config.behavior.stationaryVehicleMinimumLength) &&
+        setConfigValue(values, "planning.stationary_vehicle_maximum_length",
+                       config.behavior.stationaryVehicleMaximumLength) &&
+        setConfigValue(values, "planning.stationary_vehicle_minimum_width",
+                       config.behavior.stationaryVehicleMinimumWidth) &&
+        setConfigValue(values, "planning.stationary_vehicle_maximum_width",
+                       config.behavior.stationaryVehicleMaximumWidth) &&
         setConfigValue(values, "planning.emergency_ttc",
                        config.behavior.emergencyTTC) &&
         setConfigValue(values, "planning.collision_prediction_horizon",

@@ -13,6 +13,7 @@
 vtd:
   host_ip: "127.0.0.1"
   tcp_port: 9910
+  rdb_port: 48190  # VTD frameNo/simTime 수신(위치 기반 속도 계산 시간축)
   rtsp_port: 8554
 
 # controller.udp_port는 현재 제어 명령 송신에 쓰지 않는다.

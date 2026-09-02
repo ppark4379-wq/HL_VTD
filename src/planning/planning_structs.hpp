@@ -38,6 +38,15 @@ struct PlanningBehaviorConfig {
     // 옆 차선 차량이 급격히 진입해도 제동 거리를 확보한다.
     double nearbyObjectCautionSpeed{5.5555555556};
     double nearbyObjectLateralDistance{5.5};
+    // 바로 옆 차선에 정차한 승용차급 객체는 아직 움직임이 없어도 출발·끼어들기
+    // 가능성이 있으므로 짧은 범위에서만 주의속도를 적용한다. 콘·수목 등은
+    // GT bounding box 치수 범위로 제외한다.
+    double stationaryAdjacentVehicleCautionSpeed{5.5555555556};
+    double stationaryAdjacentVehicleMaximumDistance{25.0};
+    double stationaryVehicleMinimumLength{2.5};
+    double stationaryVehicleMaximumLength{7.5};
+    double stationaryVehicleMinimumWidth{1.4};
+    double stationaryVehicleMaximumWidth{2.8};
     double emergencyTTC{1.5};
     double collisionPredictionHorizon{3.0};
     double collisionPredictionStep{0.2};

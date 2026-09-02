@@ -10,6 +10,7 @@ add_executable(hl_vtd
     src/network/vtd_client.cpp
     src/network/receive/packet_parser.cpp
     src/network/receive/gt_receiver.cpp
+    src/network/receive/rdb_clock.cpp
     src/network/receive/gt_printer.cpp
     src/network/send/control_sender.cpp
     src/planning/local/path_planner.cpp
@@ -74,6 +75,8 @@ add_executable(extract_static_zones
 
 add_executable(controller_logic_tests
     tests/controller_logic_tests.cpp
+    src/network/receive/rdb_clock.cpp
+    src/network/vtd_client.cpp
     src/planning/behavior/behavior_planner.cpp
     src/planning/local/lane_change_planner.cpp
     src/planning/local/path_planner.cpp
@@ -134,6 +137,8 @@ endif()
 if(WIN32)
     target_compile_definitions(hl_vtd PRIVATE NOMINMAX)
     target_link_libraries(hl_vtd PRIVATE ws2_32)
+    target_compile_definitions(controller_logic_tests PRIVATE NOMINMAX)
+    target_link_libraries(controller_logic_tests PRIVATE ws2_32)
 endif()
 
 # Allows both `./build/hl_vtd` and `cd build && ./hl_vtd` to use the default path.

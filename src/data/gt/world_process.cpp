@@ -43,7 +43,12 @@ void updateEgoMotion(WorldProcessData& data,
     const double dx = gt.ego.x - data.previousX;
     const double dy = gt.ego.y - data.previousY;
     const double jumpDistance = std::hypot(dx, dy);
-    if (dt <= 1e-6 || jumpDistance > data.config.respawnJumpDistance) {
+    // 동일한 VTD simTime의 중복 GT는 물리 시간이 흐르지 않았다. 기존 속도를
+    // 유지하고, 다음 실제 프레임에서 누적 simTime으로 이동량을 나눈다.
+    if (dt <= 1e-6) {
+        return;
+    }
+    if (jumpDistance > data.config.respawnJumpDistance) {
         data.filteredSpeed = 0.0;
         data.state.respawnDetected = jumpDistance > data.config.respawnJumpDistance;
         return;

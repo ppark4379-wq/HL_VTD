@@ -320,15 +320,14 @@ bool evaluateLaneChangeCandidate(PathSafetyResult& safety,
                                  const LaneChangeData& laneChange,
                                  const WorldState& world,
                                  const PlanningBehaviorConfig& config,
-                                 const LaneChangeConfig& laneChangeConfig) {
+                                 double minimumPredictionSpeed) {
     LocalPathData candidate;
     makeLaneChangeLocalPath(candidate, laneChange);
     resetPathSafety(safety);
     if (!candidate.valid) return false;
     WorldState predictionWorld = world;
     predictionWorld.egoSpeed = std::max(
-        {1.0, std::abs(world.egoSpeed),
-         laneChangeConfig.maximumLaneChangeSpeed});
+        {1.0, std::abs(world.egoSpeed), minimumPredictionSpeed});
     const double remainingLength =
         std::max(0.0, candidate.points.back().s - world.egoPathS);
     const double fullManeuverHorizon =
@@ -444,20 +443,38 @@ void runPlanningProcess(PlanningProcessData& data,
 
     updateStopRequests(data, world, map.staticZones, dt, trace);
 
-    PathSafetyResult candidateSafety;
-    const bool candidateSafe =
+    PathSafetyResult maneuverSpeedSafety;
+    const bool candidateSafeAtManeuverSpeed =
         data.laneChange.phase == LaneChangePhase::None ||
-        evaluateLaneChangeCandidate(candidateSafety, data.laneChange,
-                                    world, data.config,
-                                    data.laneChangeConfig);
+        evaluateLaneChangeCandidate(
+            maneuverSpeedSafety, data.laneChange, world, data.config,
+            data.laneChangeConfig.maximumLaneChangeSpeed);
+
+    // 빠른 복귀(6 m/s)는 아직 충돌하지만 현재 속도에서
+    // 2 m/s로 감속해 복귀하면 앞차가 먼저 빠져나가 안전할 수 있다.
+    // 두 속도를 별도로 검증해, 느린 경로마저 충돌할 때만
+    // 고정 대기 지점에 정지시킨다.
+    PathSafetyResult waitingSpeedSafety;
+    const bool checkWaitingSpeed =
+        data.laneChange.phase == LaneChangePhase::Execute &&
+        data.laneChange.routeMode == LaneChangeRouteMode::ReturnToSource &&
+        !candidateSafeAtManeuverSpeed;
+    const bool candidateSafeAtWaitingSpeed =
+        candidateSafeAtManeuverSpeed ||
+        (checkWaitingSpeed &&
+         evaluateLaneChangeCandidate(
+             waitingSpeedSafety, data.laneChange, world, data.config,
+             data.laneChangeConfig.returnWaitingSpeed));
     advanceLaneChangePhase(data.laneChange, data.laneChangeConfig, world, dt,
-                           hasLaneChangeExecutionBlocker(data.stopManager,
-                                                         candidateSafe),
-                           candidateSafe,
+                           hasLaneChangeExecutionBlocker(
+                               data.stopManager,
+                               candidateSafeAtManeuverSpeed),
+                           candidateSafeAtManeuverSpeed,
                            trace);
 
     const bool safelyAvoidingObstacle =
-        data.laneChange.phase != LaneChangePhase::None && candidateSafe;
+        data.laneChange.phase != LaneChangePhase::None &&
+        candidateSafeAtWaitingSpeed;
     selectStopDecision(data.frame.stop, data.stopManager,
                        world.frontBumperPathS, safelyAvoidingObstacle);
 
@@ -498,17 +515,20 @@ void runPlanningProcess(PlanningProcessData& data,
             data.frame.behavior.targetSpeed,
             data.laneChangeConfig.maximumLaneChangeSpeed);
         if (data.laneChange.waitingForReturn) {
-            const double distanceToWaitingPoint = std::max(
-                0.0, data.laneChange.returnStartRouteS -
-                         world.frontBumperPathS -
-                         data.config.stopSafetyMargin);
-            const double waitingPointSpeed = std::sqrt(
-                2.0 * data.config.comfortableDeceleration *
-                distanceToWaitingPoint);
             data.frame.behavior.targetSpeed = std::min(
-                {data.frame.behavior.targetSpeed,
-                 data.laneChangeConfig.returnWaitingSpeed,
-                 waitingPointSpeed});
+                data.frame.behavior.targetSpeed,
+                data.laneChangeConfig.returnWaitingSpeed);
+            if (!candidateSafeAtWaitingSpeed) {
+                const double distanceToWaitingPoint = std::max(
+                    0.0, data.laneChange.returnStartRouteS -
+                             world.frontBumperPathS -
+                             data.config.stopSafetyMargin);
+                const double waitingPointSpeed = std::sqrt(
+                    2.0 * data.config.comfortableDeceleration *
+                    distanceToWaitingPoint);
+                data.frame.behavior.targetSpeed = std::min(
+                    data.frame.behavior.targetSpeed, waitingPointSpeed);
+            }
         }
     }
 
@@ -525,16 +545,12 @@ void runPlanningProcess(PlanningProcessData& data,
                              data.frame.localPath,
                              data.config.collisionPredictionHorizon,
                              data.config.collisionPredictionStep);
-    const bool blockedReturnNow =
-        data.laneChange.waitingForReturn &&
-        data.frame.pathSafety.predictedCollision;
-    const bool emergency = data.frame.pathSafety.collision ||
-                           blockedReturnNow ||
-                           (data.frame.pathSafety.predictedCollision &&
-                            data.frame.pathSafety.predictedCollisionTTC <=
-                                data.config.emergencyTTC) ||
-                           data.frame.pathSafety.minimumTTC <=
-                               data.config.emergencyTTC;
+    // 복귀 경로가 멀리서 막혀 있을 때는 검증된 저속 복귀를 하거나
+    // 위의 대기 지점 속도로 감속한다. 충돌 예측이 있다는
+    // 사실만으로 즉시 -4 m/s^2를 명령하지 않고, 현재 충돌이거나
+    // TTC가 임계 이내로 들어온 실제 긴급 상황에서만 비상제동한다.
+    const bool emergency = requiresEmergencyBrake(
+        data.frame.pathSafety, data.config.emergencyTTC);
     if (trace != nullptr && trace->enabled) {
         std::ostringstream detail;
         detail << "ego_road=" << world.egoRoadId
@@ -546,6 +562,10 @@ void runPlanningProcess(PlanningProcessData& data,
                << " lane_change_phase="
                << static_cast<int>(data.laneChange.phase)
                << " target_lane=" << data.laneChange.targetLaneId
+               << " maneuver_path_safe="
+               << candidateSafeAtManeuverSpeed
+               << " waiting_speed_path_safe="
+               << candidateSafeAtWaitingSpeed
                << " stop_valid=" << data.frame.stop.valid
                << " stop_distance=" << data.frame.stop.distanceToStop
                << " min_ttc=" << data.frame.pathSafety.minimumTTC

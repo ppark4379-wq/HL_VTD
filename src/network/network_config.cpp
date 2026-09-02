@@ -126,6 +126,8 @@ NetworkConfig loadNetworkConfig(const std::filesystem::path& path) {
             config.vtd.tcp_port = parsePort(value, line_number);
         } else if (full_key == "vtd.rtsp_port") {
             config.vtd.rtsp_port = parsePort(value, line_number);
+        } else if (full_key == "vtd.rdb_port") {
+            config.vtd.rdb_port = parsePort(value, line_number);
         } else if (full_key == "controller.ip") {
             config.controller.ip = parseString(value, line_number);
         } else if (full_key == "controller.udp_port") {
