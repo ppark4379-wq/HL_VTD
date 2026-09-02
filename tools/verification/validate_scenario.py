@@ -712,15 +712,26 @@ def validate_naming(
     else:
         report.add("PASS", f"scenario id format: {scenario_id}")
     expected_prefix = f"{scenario_id}_"
-    if not report.package.name.startswith(expected_prefix):
-        report.add("FAIL", f"package name must start with {expected_prefix!r}")
+    valid_package_name = (
+        report.package.name == scenario_id
+        or report.package.name.startswith(expected_prefix)
+    )
+    if not valid_package_name:
+        report.add(
+            "FAIL",
+            f"package name must be {scenario_id!r} or start with {expected_prefix!r}",
+        )
     else:
         report.add("PASS", f"package naming: {report.package.name}")
     if non_empty_string(scenario_file):
-        if not Path(scenario_file).stem.startswith(expected_prefix):
+        scenario_stem = Path(scenario_file).stem
+        if scenario_stem != scenario_id and not scenario_stem.startswith(
+            expected_prefix
+        ):
             report.add(
                 "FAIL",
-                f"scenario file name must start with {expected_prefix!r}",
+                f"scenario file name must be {scenario_id!r} "
+                f"or start with {expected_prefix!r}",
             )
         else:
             report.add("PASS", f"scenario file naming: {scenario_file}")

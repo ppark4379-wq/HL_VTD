@@ -1,0 +1,254 @@
+schema_version: 1
+
+scenario:
+  id: M01
+  category: mixed
+  name: mixed_dynamic_traffic
+  description: LivingLAB 장거리 경로에서 다중 차량의 출현·급정지·차선변경과 정적 장애물을 함께 검증
+  file: M01.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+
+  - name: "New Player"
+    type: vehicle
+    role: traffic_vehicle
+
+  - name: "New Player01"
+    type: vehicle
+    role: relevant_object
+
+  - name: "New Player03"
+    type: vehicle
+    role: relevant_object
+
+  - name: "New Player04"
+    type: vehicle
+    role: traffic_vehicle
+
+  - name: "New Player05"
+    type: vehicle
+    role: relevant_object
+
+  - name: "New Player06"
+    type: vehicle
+    role: relevant_object
+
+  - name: "New Player08"
+    type: vehicle
+    role: relevant_object
+
+  - name: "New Player09"
+    type: vehicle
+    role: relevant_object
+
+  - name: "New Object"
+    type: obstacle
+    role: traffic_cone
+
+  - name: "New Object Copy "
+    type: obstacle
+    role: traffic_cone
+
+  - name: "New Object Copy 01"
+    type: obstacle
+    role: traffic_cone
+
+  - name: "New Object01"
+    type: obstacle
+    role: wheel_stack
+
+  - name: "New Object01 Copy "
+    type: obstacle
+    role: wheel_stack
+
+  - name: "New Object02"
+    type: obstacle
+    role: garage
+
+  - name: "New Object03"
+    type: obstacle
+    role: bicycle
+
+  - name: "New Object04"
+    type: obstacle
+    role: bucket
+
+  - name: "New Object04 Copy "
+    type: obstacle
+    role: bucket
+
+  - name: "New Object04 Copy 01"
+    type: obstacle
+    role: bucket
+
+events:
+  - name: player_accelerates
+    subject: "New Player"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 8.0
+    action:
+      type: speed_change
+      target_speed_mps: 4.722222222222222
+      rate_mps2: 4.0
+
+  - name: player01_accelerates
+    subject: "New Player01"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 11.0
+    action:
+      type: speed_change
+      target_speed_mps: 6.388888888888888
+      rate_mps2: 4.01
+      autonomous_delay_s: 1.0
+
+  - name: player03_accelerates
+    subject: "New Player03"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 20.0
+    action:
+      type: speed_change
+      target_speed_mps: 6.666666666666666
+      rate_mps2: 4.0
+
+  - name: player03_stops
+    subject: "New Player03"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 12.0
+    action:
+      type: speed_change
+      target_speed_mps: 0.0
+      rate_mps2: 4.0
+      autonomous_delay_s: 4.0
+
+  - name: player04_accelerates
+    subject: "New Player04"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 15.0
+    action:
+      type: speed_change
+      target_speed_mps: 5.555555555555555
+      rate_mps2: 4.0
+      autonomous_delay_s: 1.0
+
+  - name: player05_cut_in
+    subject: "New Player05"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 12.0
+    action:
+      type: lane_change_and_speed_change
+      lane_change_direction: 1
+      duration_s: 3.0
+      target_speed_mps: 2.7777777777777777
+      rate_mps2: 4.0
+      autonomous_delay_s: 7.0
+
+  - name: player06_cut_in
+    subject: "New Player06"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 13.0
+    action:
+      type: lane_change_and_speed_change
+      lane_change_direction: -1
+      duration_s: 3.0
+      target_speed_mps: 5.277777777777778
+      rate_mps2: 4.0
+      autonomous_delay_s: 7.0
+
+  - name: player08_accelerates
+    subject: "New Player08"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 16.0
+    action:
+      type: speed_change
+      target_speed_mps: 6.111111111111111
+      rate_mps2: 4.0
+
+  - name: player08_stops
+    subject: "New Player08"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 8.0
+    action:
+      type: speed_change
+      target_speed_mps: 0.0
+      rate_mps2: 4.0
+      autonomous_delay_s: 6.0
+
+  - name: player09_accelerates
+    subject: "New Player09"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 15.0
+    action:
+      type: speed_change
+      target_speed_mps: 6.388888888888888
+      rate_mps2: 4.0
+      # M01의 281초 전체 주행 동안 PathShape 조향을 유지하고,
+      # VTD ghostdriver의 장애물 회피 경로로 전환되지 않게 한다.
+      autonomous_delay_s: 600.0
+
+expected_outcomes:
+  - follow_reference_path
+  - detect_dynamic_vehicles
+  - respond_to_cut_in_and_braking
+  - detect_static_obstacles
+  - avoid_collision
+  - reach_route_end
+
+evaluation:
+  codes:
+    - internal.mixed_dynamic_traffic
+  required_metrics:
+    - relevant_object_id
+    - object_gap
+    - relative_speed
+    - ttc
+    - ego_speed
+    - lateral_error
+    - target_accel
+    - collision
+    - route_progress
+  thresholds_status: pending

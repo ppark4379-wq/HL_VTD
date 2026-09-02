@@ -23,9 +23,6 @@ validation:
   start_position_tolerance_m: 2.0
   start_heading_tolerance_deg: 10.0
 
-control:
-  ignore_traffic_lights: true
-
 parameters:
   ego_initial_speed_mps:
     type: float
