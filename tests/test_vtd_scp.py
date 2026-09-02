@@ -76,6 +76,25 @@ class VtdScpTests(unittest.TestCase):
             ['<Camera name=\'bird"Cam\' showOwner="true"><Set/></Camera>'],
         )
 
+    def test_set_player_driver_control_command(self) -> None:
+        client = VtdScpClient.__new__(VtdScpClient)
+        sent: list[str] = []
+        client.send = sent.append
+        client.set_player_driver_control('Ego"Car', "extern")
+        self.assertEqual(
+            sent,
+            [
+                '<Player name=\'Ego"Car\'><Driver '
+                'ctrlLatLong="extern"/></Player>'
+            ],
+        )
+
+    def test_set_player_driver_control_rejects_unknown_source(self) -> None:
+        client = VtdScpClient.__new__(VtdScpClient)
+        client.send = lambda _payload: None
+        with self.assertRaises(ValueError):
+            client.set_player_driver_control("Ego", "invalid")
+
     def test_force_reconfigure_does_not_reuse_ready_state(self) -> None:
         client = VtdScpClient.__new__(VtdScpClient)
         sent: list[str] = []

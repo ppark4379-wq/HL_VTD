@@ -83,6 +83,20 @@ Scenario 검증 및 XML 전송
 → 제어기 종료 후 VTD Stop
 ```
 
+Runner는 Play 직후 External Ego의 driver input을
+`ctrlLatLong="extern"`으로 고정한다. `00_HL_VTD` Setup에서도
+`Config/ModuleManager/moduleManager.xml`의 Ego를 담당하는
+`DynamicsPlugin`에 다음 항목을 넣어야 재초기화와 외부 제어기
+재연결 시 ghostdriver fallback이 다시 활성화되지 않는다.
+
+```xml
+<Player default="true" />
+<Driver ctrlLatLong="extern" />
+```
+
+Traffic 프로세스는 계속 실행되며 Internal NPC를 제어한다. 위 설정은
+Ego만 HL_VTD 외부 제어 명령을 사용하게 한다.
+
 제어기 PC와 VTD PC가 분리되어 있으면 `config/network.yaml`의
 `vtd.host_ip`를 VTD PC 주소로 설정합니다. SCP는 같은 주소의 TCP 48179번을
 사용하므로 VTD PC 방화벽에서도 이 포트를 허용해야 합니다. 두 PC를 사용할

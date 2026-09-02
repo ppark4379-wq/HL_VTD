@@ -289,6 +289,19 @@ class VtdScpClient:
             f"<Camera name={quoted_name} showOwner=\"true\"><Set/></Camera>"
         )
 
+    def set_player_driver_control(
+        self,
+        player_name: str,
+        control_source: str = "extern",
+    ) -> None:
+        if control_source not in {"extern", "ghostdriver", "none"}:
+            raise ValueError(f"invalid VTD driver control source: {control_source!r}")
+        self.send(
+            f"<Player name={quoteattr(player_name)}>"
+            f"<Driver ctrlLatLong={quoteattr(control_source)}/>"
+            "</Player>"
+        )
+
     def start(self, timeout: float) -> None:
         self.send("<SimCtrl><Start/></SimCtrl>")
         self.wait_for_state("RUN", timeout)

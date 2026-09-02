@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, field
 import re
 import shlex
 import subprocess
@@ -21,6 +22,131 @@ import yaml
 
 
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+DEFAULT_TASK_CONTROL_LOG = Path("/tmp/taskRec_TaskControl.txt")
+TRAFFIC_LOSS_MARKERS = (
+    "no traffic info available",
+    "waiting for connection <traffic>",
+    "<traffic> disconnected",
+    "connection <traffic> lost",
+)
+TRAFFIC_CONNECTED_MARKER = '"<traffic> connected"'
+
+
+def scenario_requires_traffic(scenario_file: Path) -> bool:
+    root = ET.parse(scenario_file).getroot()
+    return any(
+        description.get("Control", "").lower() == "internal"
+        for description in root.findall(".//TrafficControl/Player/Description")
+    )
+
+
+def ghostdriver_pids() -> set[int]:
+    pids: set[int] = set()
+    for proc_entry in Path("/proc").glob("[0-9]*"):
+        try:
+            command_name = (proc_entry / "comm").read_text(
+                encoding="utf-8"
+            ).strip()
+        except (OSError, UnicodeError):
+            continue
+        if command_name.startswith("ghostdriver"):
+            pids.add(int(proc_entry.name))
+    return pids
+
+
+@dataclass
+class TrafficHealthMonitor:
+    log_path: Path
+    timeout: float
+    monitor_process: bool = True
+    recovery_quiet_period: float = 0.6
+    offset: int = 0
+    file_identity: tuple[int, int] | None = None
+    fragment: str = ""
+    initial_pids: set[int] = field(default_factory=set)
+    loss_started: float | None = None
+    last_loss_signal: float | None = None
+    last_reason: str = ""
+
+    def arm(self) -> None:
+        try:
+            stat = self.log_path.stat()
+            self.offset = stat.st_size
+            self.file_identity = (stat.st_dev, stat.st_ino)
+        except OSError:
+            self.offset = 0
+            self.file_identity = None
+        self.fragment = ""
+        self.initial_pids = ghostdriver_pids() if self.monitor_process else set()
+        self.loss_started = None
+        self.last_loss_signal = None
+        self.last_reason = ""
+
+    def _new_log_lines(self) -> list[str]:
+        try:
+            stat = self.log_path.stat()
+        except OSError:
+            return []
+        identity = (stat.st_dev, stat.st_ino)
+        if self.file_identity != identity or stat.st_size < self.offset:
+            self.offset = 0
+            self.fragment = ""
+            self.file_identity = identity
+        try:
+            with self.log_path.open("rb") as stream:
+                stream.seek(self.offset)
+                data = stream.read()
+                self.offset = stream.tell()
+        except OSError:
+            return []
+        if not data:
+            return []
+        text = self.fragment + data.decode("utf-8", errors="replace")
+        lines = text.splitlines(keepends=True)
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            self.fragment = lines.pop()
+        else:
+            self.fragment = ""
+        return [line.rstrip("\r\n") for line in lines]
+
+    def _mark_loss(self, now: float, reason: str) -> None:
+        if self.loss_started is None:
+            self.loss_started = now
+        self.last_loss_signal = now
+        self.last_reason = reason
+
+    def _mark_recovered(self) -> None:
+        self.loss_started = None
+        self.last_loss_signal = None
+        self.last_reason = ""
+
+    def poll(self, now: float | None = None) -> str | None:
+        current_time = time.monotonic() if now is None else now
+        for line in self._new_log_lines():
+            normalized = line.lower()
+            if TRAFFIC_CONNECTED_MARKER in normalized:
+                self._mark_recovered()
+            for marker in TRAFFIC_LOSS_MARKERS:
+                if marker in normalized:
+                    self._mark_loss(current_time, line.strip())
+                    break
+
+        if self.monitor_process and self.initial_pids:
+            current_pids = ghostdriver_pids()
+            if not current_pids:
+                self._mark_loss(current_time, "ghostdriver process exited")
+
+        if self.loss_started is None or self.last_loss_signal is None:
+            return None
+        if current_time - self.last_loss_signal > self.recovery_quiet_period:
+            self._mark_recovered()
+            return None
+        if current_time - self.loss_started < self.timeout:
+            return None
+        return (
+            f"Traffic health check failed after {self.timeout:g}s: "
+            f"{self.last_reason}"
+        )
 
 
 def default_run_id() -> str:
@@ -92,6 +218,24 @@ def parse_args() -> argparse.Namespace:
         help="Maximum scenario runtime in seconds (default: unlimited)",
     )
     parser.add_argument(
+        "--traffic-loss-timeout",
+        type=float,
+        default=1.0,
+        help=(
+            "Fail an auto-VTD run when Traffic is disconnected for this many "
+            "seconds; 0 disables the check (default: 1.0)"
+        ),
+    )
+    parser.add_argument(
+        "--task-control-log",
+        type=Path,
+        default=DEFAULT_TASK_CONTROL_LOG,
+        help=(
+            "Local TaskControl log used by the Traffic health check "
+            f"(default: {DEFAULT_TASK_CONTROL_LOG})"
+        ),
+    )
+    parser.add_argument(
         "--decision-log",
         type=Path,
         default=None,
@@ -127,6 +271,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--vtd-timeout must be greater than zero")
     if args.run_timeout is not None and args.run_timeout <= 0:
         parser.error("--run-timeout must be greater than zero")
+    if args.traffic_loss_timeout < 0:
+        parser.error("--traffic-loss-timeout must be zero or greater")
     return args
 
 
@@ -217,8 +363,10 @@ def run_automated(
     scenario_file: Path,
     scp_host: str,
     ready_file: Path,
+    requires_traffic: bool,
 ) -> int:
     controller: subprocess.Popen[bytes] | None = None
+    traffic_monitor: TrafficHealthMonitor | None = None
     with VtdScpClient(scp_host, args.scp_port, args.vtd_timeout) as scp:
         try:
             print(f"[auto-vtd] connected to SCP {scp_host}:{args.scp_port}")
@@ -269,15 +417,46 @@ def run_automated(
                     controller.wait(timeout=0.1)
                 except subprocess.TimeoutExpired:
                     pass
+            if (
+                args.traffic_loss_timeout > 0
+                and requires_traffic
+            ):
+                traffic_monitor = TrafficHealthMonitor(
+                    args.task_control_log,
+                    args.traffic_loss_timeout,
+                    monitor_process=scp_host in {"127.0.0.1", "localhost", "::1"},
+                )
+                traffic_monitor.arm()
+                print(
+                    "[auto-vtd] Traffic health check enabled: "
+                    f"{args.traffic_loss_timeout:g}s grace, "
+                    f"log={args.task_control_log}"
+                )
             print("[auto-vtd] HL_VTD is connected; sending Play")
             scp.start(args.vtd_timeout)
+            # External Ego control must not fall back to Traffic/ghostdriver.
+            # Besides competing with the HL_VTD participant, VTD 2025.2's
+            # obstacle-bypass path can crash inside ghostdriver for this map.
+            scp.set_player_driver_control("Ego", "extern")
+            print("[auto-vtd] Ego driver control source set to extern")
             print("[auto-vtd] VTD is RUNNING; CSV logging is active")
-            try:
-                return controller.wait(timeout=args.run_timeout)
-            except subprocess.TimeoutExpired as error:
-                raise ScpError(
-                    f"scenario exceeded --run-timeout {args.run_timeout:g}s"
-                ) from error
+            run_started = time.monotonic()
+            while True:
+                if traffic_monitor is not None:
+                    traffic_failure = traffic_monitor.poll()
+                    if traffic_failure is not None:
+                        raise ScpError(traffic_failure)
+                exit_status = controller.poll()
+                if exit_status is not None:
+                    return exit_status
+                if (
+                    args.run_timeout is not None
+                    and time.monotonic() - run_started >= args.run_timeout
+                ):
+                    raise ScpError(
+                        f"scenario exceeded --run-timeout {args.run_timeout:g}s"
+                    )
+                time.sleep(0.1)
         finally:
             if controller is not None:
                 terminate_process(controller)
@@ -403,7 +582,7 @@ def main() -> int:
             ready_file.unlink(missing_ok=True)
             return run_automated(
                 args, command, vtd_scenario_file, scp_host,
-                ready_file,
+                ready_file, scenario_requires_traffic(scenario_file),
             )
         completed = subprocess.run(command, cwd=REPO_ROOT, check=False)
         return completed.returncode
