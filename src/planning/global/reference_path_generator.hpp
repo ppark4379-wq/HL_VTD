@@ -109,6 +109,9 @@ RoadPose roadToWorld(const Road& road, double s);
 double laneOffset(const Road& road, const LaneSection& section,
                   int laneId, double roadS);
 
+// 특정 s에서 lane 폭을 계산한다.
+double laneWidthAt(const LaneSection& section, int laneId, double roadS);
+
 // 월드 좌표를 road 기준선에 투영해 roadS와 부호 있는 횡방향 거리 t를 구한다.
 // roadToWorld의 역변환이다. 탐색이 필요하므로 정변환보다 비싸다.
 struct RoadProjection { double s{}; double t{}; double distance{}; };

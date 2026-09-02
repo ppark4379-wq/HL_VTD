@@ -9,14 +9,16 @@ namespace {
 
 // 현재 차선 전방에서 가장 가까운 객체를 찾는다.
 const WorldObjectState* findLeadObject(const WorldState& world,
-                                      int avoidedObstacleId) {
+                                      bool staticObstacleAvoidanceActive,
+                                      int safelyAvoidedObjectId) {
     const WorldObjectState* lead = nullptr;
     for (const auto& object : world.objects) {
         if (!object.isAhead || !object.isOnEgoPath) continue;
-        // 차선변경으로 비켜 가는 중인 장애물은 선행차가 아니다. 이걸 앞차로
-        // 잡으면 최소 추종거리 규칙이 회피 기동 중에 정지를 강제한다.
-        if (avoidedObstacleId >= 0 &&
-            static_cast<int>(object.raw.id) == avoidedObstacleId) continue;
+        if (staticObstacleAvoidanceActive &&
+            std::abs(object.raw.speed) < 0.3) {
+            continue;
+        }
+        if (static_cast<int>(object.raw.id) == safelyAvoidedObjectId) continue;
         if (lead == nullptr || object.relativeS < lead->relativeS) {
             lead = &object;
         }
@@ -28,9 +30,9 @@ const WorldObjectState* findLeadObject(const WorldState& world,
 // 가까이 나란히 달리면 끼어들기 후 제동거리를 미리 확보한다.
 const WorldObjectState* findNearbyForwardObject(
     const WorldState& world,
-    int avoidedObstacleId,
     double maximumDistance,
-    double lateralDistance) {
+    double lateralDistance,
+    int safelyAvoidedObjectId) {
     const WorldObjectState* nearest = nullptr;
     for (const auto& object : world.objects) {
         // 이 로직은 끼어드는 이동 차량을 위한 사전 감속이다.
@@ -41,10 +43,7 @@ const WorldObjectState* findNearbyForwardObject(
             std::abs(object.relativeD) > lateralDistance) {
             continue;
         }
-        if (avoidedObstacleId >= 0 &&
-            static_cast<int>(object.raw.id) == avoidedObstacleId) {
-            continue;
-        }
+        if (static_cast<int>(object.raw.id) == safelyAvoidedObjectId) continue;
         if (nearest == nullptr || object.relativeS < nearest->relativeS) {
             nearest = &object;
         }
@@ -64,11 +63,17 @@ double longitudinalSpeedOf(const WorldObjectState& object,
 
 void selectStopDecision(StopDecision& output,
                         const StopManagerData& manager,
-                        double egoRouteS) {
+                        double egoRouteS,
+                        bool ignoreObstacleStops) {
     output = {};
     double nearestS = std::numeric_limits<double>::infinity();
     for (const auto& request : manager.requests) {
-        if (!request.active || request.stopRouteS >= nearestS) continue;
+        if (!request.active ||
+            (ignoreObstacleStops &&
+             request.reason == StopReason::Obstacle) ||
+            request.stopRouteS >= nearestS) {
+            continue;
+        }
         nearestS = request.stopRouteS;
         output.valid = true;
         output.reason = request.reason;
@@ -127,8 +132,9 @@ void updateBehavior(BehaviorState& state,
         config.minimumFollowDistance +
         config.followTimeGap * std::max(0.0, world.egoSpeed);
     const WorldObjectState* nearby = findNearbyForwardObject(
-        world, state.avoidedObstacleId, cautionDistance,
-        config.nearbyObjectLateralDistance);
+        world, cautionDistance,
+        config.nearbyObjectLateralDistance,
+        state.safelyAvoidedObjectId);
     if (nearby != nullptr) {
         state.longitudinal = LonMode::Follow;
         output.longitudinal = LonMode::Follow;
@@ -140,7 +146,8 @@ void updateBehavior(BehaviorState& state,
 
     // Follow 진입과 해제에 서로 다른 임계값을 써서 경계에서의 진동을 막는다.
     const WorldObjectState* lead =
-        findLeadObject(world, state.avoidedObstacleId);
+        findLeadObject(world, state.staticObstacleAvoidanceActive,
+                       state.safelyAvoidedObjectId);
     if (lead != nullptr) {
         const double desiredGap =
             config.minimumFollowDistance +

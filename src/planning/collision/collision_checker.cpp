@@ -157,9 +157,13 @@ void checkCurrentCollisions(PathSafetyResult& output,
 }
 
 void updateMinimumTTC(PathSafetyResult& output,
-                      const std::vector<WorldObjectState>& objects) {
+                      const std::vector<WorldObjectState>& objects,
+                      bool ignoreStaticObjects,
+                      int ignoredObjectId) {
     for (const auto& object : objects) {
         if (!object.isAhead || !object.isOnEgoPath) continue;
+        if (ignoreStaticObjects && std::abs(object.raw.speed) < 0.3) continue;
+        if (static_cast<int>(object.raw.id) == ignoredObjectId) continue;
         if (object.ttc >= output.minimumTTC) continue;
         output.minimumTTC = object.ttc;
         output.riskObjectId = static_cast<int>(object.raw.id);

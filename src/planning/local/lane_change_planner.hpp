@@ -14,6 +14,7 @@ bool tryPrepareObstacleLaneChange(
     const PathGeneratorData& map,
     const PathPlannerData& globalPath,
     std::size_t nearestGlobalIndex,
+    const std::vector<int>* persistentStoppedObjectIds = nullptr,
     DecisionTraceData* trace = nullptr);
 
 void advanceLaneChangePhase(LaneChangeData& state,
@@ -24,7 +25,11 @@ void advanceLaneChangePhase(LaneChangeData& state,
                             bool candidatePathSafe,
                             DecisionTraceData* trace = nullptr);
 
-bool isAvoidedLaneChangeObject(const LaneChangeData& state, int objectId);
+// A verified lane-change path is collision-checked against every world object,
+// so obstacle stops on the original route must not keep that maneuver in
+// Prepare. Traffic rules and other non-obstacle stops still block execution.
+bool hasLaneChangeExecutionBlocker(const StopManagerData& stopManager,
+                                   bool candidatePathSafe);
 
 void makeLaneChangeLocalPath(LocalPathData& output,
                              const LaneChangeData& state);

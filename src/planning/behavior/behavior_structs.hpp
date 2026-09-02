@@ -112,8 +112,12 @@ struct BehaviorState {
     LaneChangePhase laneChange{LaneChangePhase::None};
     SystemHealth health{SystemHealth::Ok};
     double recoveryHoldTime{};
-    // 차선변경으로 회피 중인 장애물. Follow 판단에서 제외한다. 없으면 -1.
-    int avoidedObstacleId{-1};
+    // 모든 객체에 대한 OBB 검사를 통과한 정적 장애물 회피 경로가 활성 상태다.
+    // 하나의 장애물이 여러 VTD 객체로 구성돼도 그 정적 조각을 앞차로 잡지 않는다.
+    bool staticObstacleAvoidanceActive{};
+    // 선택했던 객체가 재출발해도 현재 회피 경로가 안전한 동안에는 기동을
+    // 유지한다. 경로가 위험해지는 즉시 -1로 해제되어 Follow/TTC가 복귀한다.
+    int safelyAvoidedObjectId{-1};
 };
 
 // 이번 프레임의 행동 결정 결과.

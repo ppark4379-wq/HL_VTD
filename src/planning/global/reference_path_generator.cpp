@@ -801,6 +801,12 @@ double laneOffset(const Road& road, const LaneSection& section,
         return offset;
     }
 
+double laneWidthAt(const LaneSection& section, int laneId, double roadS) {
+        const auto found = section.lanes.find(laneId);
+        if (found == section.lanes.end()) return 0.0;
+        return evaluatePiecewise(found->second.widths, roadS, 0.0);
+    }
+
     // s 위치에서 적용되는 roadMark의 laneChange 값을 찾는다.
 std::string laneChangeMarkAt(const LaneDefinition& lane, double s) {
     if (lane.roadMarks.empty()) return "none";

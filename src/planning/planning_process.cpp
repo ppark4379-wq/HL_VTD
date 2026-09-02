@@ -71,6 +71,37 @@ void addStopRequest(StopManagerData& manager, StopReason reason,
     manager.requests.push_back({reason, true, routeS, holdTime, sourceId});
 }
 
+std::vector<int> updatePersistentStoppedObjects(
+    PlanningProcessData& data, const WorldState& world, double dt) {
+    std::vector<StationaryObjectState> current;
+    std::vector<int> eligible;
+    current.reserve(world.objects.size());
+    for (const auto& object : world.objects) {
+        double previousDuration = 0.0;
+        const auto previous = std::find_if(
+            data.stationaryObjects.begin(), data.stationaryObjects.end(),
+            [&](const StationaryObjectState& state) {
+                return state.id == object.raw.id;
+            });
+        if (previous != data.stationaryObjects.end()) {
+            previousDuration = previous->duration;
+        }
+        const bool stationary = std::abs(object.raw.speed) < 0.3;
+        const double duration = stationary
+            ? previousDuration + std::max(0.0, dt)
+            : 0.0;
+        current.push_back({object.raw.id, duration});
+        if (stationary &&
+            duration >= data.laneChangeConfig.stoppedLeadWaitTime &&
+            world.egoSpeed <=
+                data.laneChangeConfig.stoppedEgoMaximumSpeed) {
+            eligible.push_back(static_cast<int>(object.raw.id));
+        }
+    }
+    data.stationaryObjects = std::move(current);
+    return eligible;
+}
+
 bool crosswalkHasRiskObject(const Crosswalk& crosswalk,
                             const WorldState& world,
                             double predictionHorizon) {
@@ -203,7 +234,7 @@ void updateStopRequests(PlanningProcessData& data,
     if (signalState != 2) data.stopManager.yellow = {};
     if (signalState != 6 || line == nullptr) data.stopManager.hold = {};
 
-    if (line != nullptr) {
+    if (!data.config.ignoreTrafficLights && line != nullptr) {
         if (signalState == 1) {
             addStopRequest(data.stopManager, StopReason::RedLight,
                            line->routeS, line->id);
@@ -248,10 +279,6 @@ void updateStopRequests(PlanningProcessData& data,
     }
 
     for (const auto& object : world.objects) {
-        if (isAvoidedLaneChangeObject(data.laneChange,
-                                      static_cast<int>(object.raw.id))) {
-            continue;
-        }
         if (object.isAhead && object.isOnEgoPath &&
             std::abs(object.raw.speed) < 0.3 && object.relativeS < 30.0) {
             const double stopRouteS = std::max(
@@ -287,16 +314,6 @@ void updateStopRequests(PlanningProcessData& data,
             }
         }
     }
-}
-
-bool hasLaneChangeBlockingStop(const PlanningProcessData& data) {
-    for (const auto& request : data.stopManager.requests) {
-        if (!request.active) continue;
-        if (request.reason == StopReason::Obstacle &&
-            request.sourceId == data.laneChange.obstacleId) continue;
-        return true;
-    }
-    return false;
 }
 
 bool evaluateLaneChangeCandidate(PathSafetyResult& safety,
@@ -418,13 +435,14 @@ void runPlanningProcess(PlanningProcessData& data,
                 : limit;
     }
 
+    const std::vector<int> persistentStoppedObjectIds =
+        updatePersistentStoppedObjects(data, world, dt);
     tryPrepareObstacleLaneChange(
         data.laneChange, data.laneChangeConfig, data.config, world, map,
-        data.pathPlanner, tracking.nearestIndex, trace);
+        data.pathPlanner, tracking.nearestIndex,
+        &persistentStoppedObjectIds, trace);
 
     updateStopRequests(data, world, map.staticZones, dt, trace);
-    selectStopDecision(data.frame.stop, data.stopManager,
-                       world.frontBumperPathS);
 
     PathSafetyResult candidateSafety;
     const bool candidateSafe =
@@ -433,8 +451,15 @@ void runPlanningProcess(PlanningProcessData& data,
                                     world, data.config,
                                     data.laneChangeConfig);
     advanceLaneChangePhase(data.laneChange, data.laneChangeConfig, world, dt,
-                           hasLaneChangeBlockingStop(data), candidateSafe,
+                           hasLaneChangeExecutionBlocker(data.stopManager,
+                                                         candidateSafe),
+                           candidateSafe,
                            trace);
+
+    const bool safelyAvoidingObstacle =
+        data.laneChange.phase != LaneChangePhase::None && candidateSafe;
+    selectStopDecision(data.frame.stop, data.stopManager,
+                       world.frontBumperPathS, safelyAvoidingObstacle);
 
     if (data.laneChange.phase == LaneChangePhase::Execute) {
         tracking = trackLaneChangePath(
@@ -457,10 +482,11 @@ void runPlanningProcess(PlanningProcessData& data,
     if (!world.inputValid || world.respawnDetected) {
         data.behaviorState.health = SystemHealth::Recovery;
     }
-    data.behaviorState.avoidedObstacleId =
-        data.laneChange.phase == LaneChangePhase::Execute
-            ? data.laneChange.obstacleId
-            : -1;
+    data.behaviorState.staticObstacleAvoidanceActive =
+        safelyAvoidingObstacle;
+    data.behaviorState.safelyAvoidedObjectId = safelyAvoidingObstacle
+        ? data.laneChange.obstacleId
+        : -1;
     updateBehavior(data.behaviorState, data.frame.behavior,
                    data.frame.constraints, data.frame.stop, world,
                    tracking.targetSpeed, data.config, dt);
@@ -490,7 +516,11 @@ void runPlanningProcess(PlanningProcessData& data,
     resetPathSafety(data.frame.pathSafety);
     checkCurrentCollisions(data.frame.pathSafety, world.egoObb,
                            world.objects);
-    updateMinimumTTC(data.frame.pathSafety, world.objects);
+    updateMinimumTTC(data.frame.pathSafety, world.objects,
+                     safelyAvoidingObstacle,
+                     safelyAvoidingObstacle
+                         ? data.laneChange.obstacleId
+                         : -1);
     checkPredictedCollisions(data.frame.pathSafety, world,
                              data.frame.localPath,
                              data.config.collisionPredictionHorizon,

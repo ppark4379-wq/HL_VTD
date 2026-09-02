@@ -84,8 +84,17 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.laneChange.obstacleTriggerMinimumDistance > 0.0 &&
            config.laneChange.obstacleTriggerMaximumDistance >
                config.laneChange.obstacleTriggerMinimumDistance &&
+           config.laneChange.stoppedLeadWaitTime > 0.0 &&
+           config.laneChange.stoppedLeadMinimumDistance > 0.0 &&
+           config.laneChange.stoppedLeadMinimumDistance <
+               config.laneChange.obstacleTriggerMinimumDistance &&
+           config.laneChange.stoppedEgoMaximumSpeed > 0.0 &&
            config.laneChange.transitionLength > 0.0 &&
            config.laneChange.minimumTargetTTC > 0.0 &&
+           config.laneChange.maximumObstacleLaneIntrusion >= 0.0 &&
+           config.laneChange.lateralOffsetStep > 0.0 &&
+           config.laneChange.maximumLateralOffset >= 0.0 &&
+           config.laneChange.minimumLaneEdgeClearance >= 0.0 &&
            config.laneChange.returnWaitingSpeed > 0.0 &&
            config.laneChange.returnWaitingSpeed <=
                config.laneChange.maximumLaneChangeSpeed &&
@@ -173,6 +182,12 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.laneChange.obstacleTriggerMinimumDistance) &&
         setConfigValue(values, "lane_change.obstacle_trigger_maximum_distance",
                        config.laneChange.obstacleTriggerMaximumDistance) &&
+        setConfigValue(values, "lane_change.stopped_lead_wait_time",
+                       config.laneChange.stoppedLeadWaitTime) &&
+        setConfigValue(values, "lane_change.stopped_lead_minimum_distance",
+                       config.laneChange.stoppedLeadMinimumDistance) &&
+        setSpeedConfigValue(values, "lane_change.stopped_ego_maximum_speed_kph",
+                       config.laneChange.stoppedEgoMaximumSpeed) &&
         setConfigValue(values, "lane_change.transition_length",
                        config.laneChange.transitionLength) &&
         setConfigValue(values, "lane_change.obstacle_clearance",
@@ -191,6 +206,14 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.laneChange.maximumLaneChangeSpeed) &&
         setSpeedConfigValue(values, "lane_change.return_waiting_speed_kph",
                        config.laneChange.returnWaitingSpeed) &&
+        setConfigValue(values, "lane_change.maximum_obstacle_lane_intrusion",
+                       config.laneChange.maximumObstacleLaneIntrusion) &&
+        setConfigValue(values, "lane_change.lateral_offset_step",
+                       config.laneChange.lateralOffsetStep) &&
+        setConfigValue(values, "lane_change.maximum_lateral_offset",
+                       config.laneChange.maximumLateralOffset) &&
+        setConfigValue(values, "lane_change.minimum_lane_edge_clearance",
+                       config.laneChange.minimumLaneEdgeClearance) &&
         setConfigValue(values, "speed_pd.kp",
                        config.controller.kp) &&
         setConfigValue(values, "speed_pd.kd",

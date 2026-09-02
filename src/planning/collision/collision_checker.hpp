@@ -29,7 +29,9 @@ void checkCurrentCollisions(PathSafetyResult& output,
 // Read : objects
 // Write: output.minimumTTC, output.riskObjectId
 void updateMinimumTTC(PathSafetyResult& output,
-                      const std::vector<WorldObjectState>& objects);
+                      const std::vector<WorldObjectState>& objects,
+                      bool ignoreStaticObjects = false,
+                      int ignoredObjectId = -1);
 
 // Ego가 지역경로를 따라 주행한다고 가정하고 미래 OBB 충돌을 검사한다.
 // 직선 등속 예측을 쓰면 곡선에서 반대 차선 차량과 가짜 충돌이 발생하므로

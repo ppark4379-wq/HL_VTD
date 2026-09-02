@@ -63,6 +63,10 @@ planning:
 lane_change:
   obstacle_trigger_minimum_distance: 12.0 # [m] 너무 가까우면 차선변경 대신 제동
   obstacle_trigger_maximum_distance: 45.0 # [m] 정적 장애물 탐색거리
+  # 주행하던 선행차가 계속 정지하면 영구 정지 대신 안전한 회피를 다시 검토한다.
+  stopped_lead_wait_time: 2.0             # [s] 정지 지속 후 회피 후보 승격
+  stopped_lead_minimum_distance: 5.0      # [m] 정지 Ego가 회피를 시작할 최소 간격
+  stopped_ego_maximum_speed_kph: 2.0      # [km/h] 가까운 거리 회피 허용 Ego 속도
   transition_length: 12.0                 # [m] 한 번의 횡이동 길이
   obstacle_clearance: 10.0                # [m] 장애물 통과 뒤 복귀 여유
   prepare_time: 0.5                       # [s] 이동 전 방향지시등 선행시간
@@ -72,6 +76,11 @@ lane_change:
   minimum_target_ttc: 3.0                 # [s] 목표 차선 최소 TTC
   maximum_lane_change_speed_kph: 21.6     # 차선변경 중 목표속도 상한
   return_waiting_speed_kph: 7.2           # 복귀 경로가 막혔을 때 감속 목표
+  # 장애물이 옆 차선을 이 값 이하로 침범했을 때만 중앙 밖 회피 후보를 만든다.
+  maximum_obstacle_lane_intrusion: 1.55   # [m] 횡오프셋 허용 최대 침범량
+  lateral_offset_step: 0.2                # [m] 0.2, 0.4, 0.6 ... 후보 간격
+  maximum_lateral_offset: 1.0            # [m] 차선 중앙 기준 최대 횡오프셋
+  minimum_lane_edge_clearance: 0.0        # [m] Ego OBB와 차선 끝선 최소 여유
 
 # 종방향 PD 속도 제어 설정
 speed_pd:

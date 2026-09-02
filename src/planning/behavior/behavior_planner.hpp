@@ -11,7 +11,8 @@ struct WorldState;
 // Write: output
 void selectStopDecision(StopDecision& output,
                         const StopManagerData& manager,
-                        double egoRouteS);
+                        double egoRouteS,
+                        bool ignoreObstacleStops = false);
 
 // 제약과 정지 결정을 종방향 행동 및 목표속도로 변환한다.
 // Read : state, constraints, stop, world

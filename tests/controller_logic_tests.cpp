@@ -4,6 +4,7 @@
 #include "planning/collision/collision_checker.hpp"
 #include "planning/global/reference_path_generator.hpp"
 #include "planning/local/lane_change_planner.hpp"
+#include "planning/local/path_planner.hpp"
 #include "utils/geometry.hpp"
 
 #include <cassert>
@@ -294,6 +295,40 @@ void testLaneChangeAcrossRenumberedLaneSection() {
     assert(nearObstacle->y < -4.0);
 }
 
+void testLimitedLateralOffsetAvoidance() {
+    PathGeneratorData map = makeStraightTwoLaneMap();
+    PathPlannerData globalPath = makeStraightGlobalPath();
+    WorldState world = makeWorldWithObstacle();
+    world.objects.front().raw.width = 5.8F;
+    world.objects.front().obb = makeObb2D(35.0, -1.75, 0.0, 4.0, 5.8);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    config.maximumObstacleLaneIntrusion = 1.25;
+    config.lateralOffsetStep = 0.2;
+    config.maximumLateralOffset = 0.8;
+    config.minimumLaneEdgeClearance = 0.0;
+    PlanningBehaviorConfig safetyConfig;
+    safetyConfig.collisionPredictionHorizon = 5.0;
+    assert(tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 10));
+    const auto nearObstacle = std::min_element(
+        laneChange.path.begin(), laneChange.path.end(),
+        [](const Waypoint& left, const Waypoint& right) {
+            return std::abs(left.s - 35.0) < std::abs(right.s - 35.0);
+        });
+    assert(nearObstacle != laneChange.path.end());
+    assert(nearObstacle->y < -5.55);
+
+    WorldState impossible = makeWorldWithObstacle();
+    impossible.objects.front().raw.width = 7.0F;
+    impossible.objects.front().obb =
+        makeObb2D(35.0, -1.75, 0.0, 4.0, 7.0);
+    LaneChangeData rejected;
+    assert(!tryPrepareObstacleLaneChange(
+        rejected, config, safetyConfig, impossible, map, globalPath, 10));
+}
+
 void testStaticZoneRouteAlignment() {
     StaticZoneData zones;
     StopLine line;
@@ -384,6 +419,400 @@ void testObstacleLaneChange() {
     assert(!tryPrepareObstacleLaneChange(
         farBlocked, config, safetyConfig, farBlockedWorld,
         map, globalPath, 10));
+
+    // 급정거 선행차 뒤에 Ego가 이미 가까이 정지했어도, 정지 지속시간을
+    // 충족했다면 짧은 횡이동 경로를 OBB 검사한 뒤 회피할 수 있다.
+    WorldState stoppedBehind = makeWorldWithObstacle();
+    stoppedBehind.egoSpeed = 0.0;
+    stoppedBehind.objects.front().raw.x = 21.0F;
+    stoppedBehind.objects.front().pathS = 21.0;
+    stoppedBehind.objects.front().relativeS = 11.0;
+    stoppedBehind.objects.front().obb =
+        makeObb2D(21.0, -1.75, 0.0, 4.0, 2.0);
+    LaneChangeData tooCloseNormally;
+    assert(!tryPrepareObstacleLaneChange(
+        tooCloseNormally, config, safetyConfig, stoppedBehind,
+        map, globalPath, 10));
+    const std::vector<int> persistentStoppedIds{7};
+    LaneChangeData stoppedLeadAvoidance;
+    assert(tryPrepareObstacleLaneChange(
+        stoppedLeadAvoidance, config, safetyConfig, stoppedBehind,
+        map, globalPath, 10, &persistentStoppedIds));
+
+    // 교차로나 중첩 도로에서 객체의 독립 최근접 차선 매칭이 다른 road를
+    // 선택해도, Ego 참조경로 위 장애물은 경로 차선으로 회피해야 한다.
+    WorldState mismatchedLane = makeWorldWithObstacle();
+    mismatchedLane.objects.front().roadId = 72;
+    mismatchedLane.objects.front().sectionIndex = 0;
+    mismatchedLane.objects.front().laneId = -3;
+    mismatchedLane.objects.front().roadS = 44.0;
+    LaneChangeData rematchedAvoidance;
+    assert(tryPrepareObstacleLaneChange(
+        rematchedAvoidance, config, safetyConfig, mismatchedLane,
+        map, globalPath, 10));
+    assert(rematchedAvoidance.targetLaneId == -2);
+}
+
+void testLaneChangeWhenAdjacentLaneStartsAhead() {
+    PathGeneratorData map = makeStraightTwoLaneMap();
+
+    Road approach;
+    approach.id = 550;
+    approach.length = 20.0;
+    Geometry geometry;
+    geometry.type = GeometryType::Line;
+    geometry.x = -20.0;
+    geometry.length = 20.0;
+    approach.geometries.push_back(geometry);
+    LaneSection approachSection;
+    LaneDefinition approachLane;
+    approachLane.id = -1;
+    approachLane.type = "driving";
+    approachLane.widths.push_back(constantWidth(3.5));
+    approachSection.lanes.emplace(-1, approachLane);
+    approach.sections.push_back(approachSection);
+    map.roads.emplace(550, approach);
+    map.laneGraph[{550, 0, -1}].push_back({1, 0, -1});
+
+    const auto addTwoLaneRoad = [&](int roadId, double x, double length) {
+        Road road;
+        road.id = roadId;
+        road.length = length;
+        Geometry roadGeometry;
+        roadGeometry.type = GeometryType::Line;
+        roadGeometry.x = x;
+        roadGeometry.length = length;
+        road.geometries.push_back(roadGeometry);
+        LaneSection section;
+        for (int laneId : {-1, -2}) {
+            LaneDefinition lane;
+            lane.id = laneId;
+            lane.type = "driving";
+            lane.widths.push_back(constantWidth(3.5));
+            lane.roadMarks.push_back({0.0, "both", "standard"});
+            section.lanes.emplace(laneId, lane);
+        }
+        road.sections.push_back(section);
+        map.roads.emplace(roadId, std::move(road));
+    };
+    addTwoLaneRoad(2, 20.0, 5.0);
+    addTwoLaneRoad(3, 25.0, 75.0);
+    for (int laneId : {-1, -2}) {
+        map.laneGraph[{1, 0, laneId}].push_back({2, 0, laneId});
+        map.laneGraph[{2, 0, laneId}].push_back({3, 0, laneId});
+    }
+
+    PathPlannerData globalPath;
+    for (int index = 0; index <= 20; ++index) {
+        Waypoint point;
+        point.x = -20.0 + index;
+        point.y = -1.75;
+        point.yaw = 0.0;
+        point.s = static_cast<double>(index);
+        point.roadS = static_cast<double>(index);
+        point.roadId = 550;
+        point.laneId = -1;
+        point.sectionIndex = 0;
+        globalPath.waypoints.push_back(point);
+    }
+    for (int index = 1; index <= 20; ++index) {
+        Waypoint point;
+        point.x = static_cast<double>(index);
+        point.y = -1.75;
+        point.yaw = 0.0;
+        point.s = 20.0 + index;
+        point.roadS = static_cast<double>(index);
+        point.roadId = 1;
+        point.laneId = -1;
+        point.sectionIndex = 0;
+        globalPath.waypoints.push_back(point);
+    }
+    for (int index = 1; index <= 5; ++index) {
+        Waypoint point;
+        point.x = 20.0 + index;
+        point.y = -1.75;
+        point.yaw = 0.0;
+        point.s = 40.0 + index;
+        point.roadS = static_cast<double>(index);
+        point.roadId = 2;
+        point.laneId = -1;
+        point.sectionIndex = 0;
+        globalPath.waypoints.push_back(point);
+    }
+    for (int index = 1; index <= 60; ++index) {
+        Waypoint point;
+        point.x = 25.0 + index;
+        point.y = -1.75;
+        point.yaw = 0.0;
+        point.s = 45.0 + index;
+        point.roadS = static_cast<double>(index);
+        point.roadId = 3;
+        point.laneId = -1;
+        point.sectionIndex = 0;
+        globalPath.waypoints.push_back(point);
+    }
+
+    WorldState world;
+    world.ego.x = -15.0F;
+    world.ego.y = -1.75F;
+    world.ego.heading = 0.0F;
+    world.egoSpeed = 5.0;
+    world.egoLaneValid = true;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoRoadId = 550;
+    world.egoLaneId = -1;
+    world.egoSectionIndex = 0;
+    world.egoRoadS = 5.0;
+    world.egoPathS = 5.0;
+    world.frontBumperPathS = 8.8;
+    world.egoObb = makeObb2D(-13.6, -1.75, 0.0, 4.8, 1.9);
+
+    WorldObjectState obstacle;
+    obstacle.raw.id = 10;
+    obstacle.raw.x = 10.0F;
+    obstacle.raw.y = -1.75F;
+    obstacle.raw.length = 4.0F;
+    obstacle.raw.width = 2.0F;
+    obstacle.obb = makeObb2D(10.0, -1.75, 0.0, 4.0, 2.0);
+    obstacle.laneValid = true;
+    obstacle.roadId = 1;
+    obstacle.laneId = -1;
+    obstacle.sectionIndex = 0;
+    obstacle.roadS = 10.0;
+    obstacle.pathValid = true;
+    obstacle.pathS = 30.0;
+    obstacle.pathD = 0.0;
+    obstacle.relativeS = 25.0;
+    obstacle.isAhead = true;
+    obstacle.isOnEgoPath = true;
+    world.objects.push_back(obstacle);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    safetyConfig.collisionPredictionHorizon = 5.0;
+    assert(tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 5));
+    assert(laneChange.phase == LaneChangePhase::Prepare);
+    assert(laneChange.routeMode == LaneChangeRouteMode::ReturnToSource);
+}
+
+void testO01ObstacleRoadLaneMerge() {
+    PathGeneratorData map;
+    assert(loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr"));
+    PathPlannerData globalPath;
+    assert(loadWaypointsCsv(
+        globalPath.waypoints,
+        "scenario/obstacle/O01_front_obstacle/route.csv"));
+
+    WorldState world;
+    world.ego.x = 13.719388F;
+    world.ego.y = 34.4014091F;
+    world.ego.heading = 0.229751557F;
+    world.egoSpeed = 0.0123493145;
+    world.egoLaneValid = true;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoRoadId = 550;
+    world.egoLaneId = -1;
+    world.egoSectionIndex = 0;
+    world.egoRoadS = 22.93;
+    world.egoPathS = 62.1160052;
+    world.frontBumperPathS = 65.9160052;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    WorldObjectState obstacle;
+    obstacle.raw.id = 10;
+    obstacle.raw.x = 22.9734726F;
+    obstacle.raw.y = 36.4065552F;
+    obstacle.raw.heading = 0.0F;
+    obstacle.raw.speed = 0.0F;
+    obstacle.raw.length = 0.63F;
+    obstacle.raw.width = 0.58F;
+    obstacle.obb = makeObb2D(
+        obstacle.raw.x, obstacle.raw.y, obstacle.raw.heading,
+        obstacle.raw.length, obstacle.raw.width);
+    obstacle.laneValid = true;
+    obstacle.roadId = 72;
+    obstacle.laneId = -3;
+    obstacle.sectionIndex = 0;
+    obstacle.roadS = 6.42135802;
+    obstacle.pathValid = true;
+    obstacle.pathS = 71.60266294;
+    obstacle.pathD = -0.04;
+    obstacle.relativeS = obstacle.pathS - world.egoPathS;
+    obstacle.relativeD = -0.04;
+    obstacle.isAhead = true;
+    obstacle.isOnEgoPath = true;
+    world.objects.push_back(obstacle);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    const std::vector<int> persistentStoppedIds{10};
+    assert(tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 133,
+        &persistentStoppedIds));
+    assert(laneChange.phase == LaneChangePhase::Prepare);
+    assert(laneChange.routeMode == LaneChangeRouteMode::ReturnToSource);
+    assert(laneChange.targetLaneId == -2);
+}
+
+void testO04RouteSectionComesFromMapRoadS() {
+    PathGeneratorData map;
+    assert(loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr"));
+    PathPlannerData globalPath;
+    assert(loadWaypointsCsv(
+        globalPath.waypoints,
+        "scenario/obstacle/O04_lane_obstacle/route.csv"));
+
+    // Exact O04 state from the first avoidance-trigger frame.  route.csv has
+    // no section_index column: its waypoint's zero-initialized section must
+    // never overwrite the GT/map match (road 2626, section 7).
+    WorldState world;
+    world.ego.x = 1109.31445F;
+    world.ego.y = 33.0897446F;
+    world.ego.heading = 0.657545447F;
+    world.egoSpeed = 7.84728318;
+    world.egoLaneValid = true;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoRoadId = 2626;
+    world.egoLaneId = 2;
+    world.egoSectionIndex = 8;
+    world.egoRoadS = 249.63;
+    world.egoPathS = 16.4731802;
+    world.frontBumperPathS = world.egoPathS + 3.8;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    WorldObjectState obstacle;
+    obstacle.raw.id = 2;
+    obstacle.raw.x = 1144.37573F;
+    obstacle.raw.y = 60.792263F;
+    obstacle.raw.heading = 0.502082288F;
+    obstacle.raw.speed = 0.0F;
+    obstacle.raw.length = 0.15F;
+    obstacle.raw.width = 1.28999996F;
+    obstacle.obb = makeObb2D(
+        obstacle.raw.x, obstacle.raw.y, obstacle.raw.heading,
+        obstacle.raw.length, obstacle.raw.width);
+    obstacle.laneValid = true;
+    obstacle.roadId = 2626;
+    obstacle.laneId = 2;
+    obstacle.sectionIndex = 7;
+    obstacle.roadS = 204.98;
+    obstacle.pathValid = true;
+    obstacle.pathS = 61.1588;
+    obstacle.pathD = 0.167337;
+    obstacle.relativeS = obstacle.pathS - world.egoPathS;
+    obstacle.relativeD = 0.1595;
+    obstacle.isAhead = true;
+    obstacle.isOnEgoPath = true;
+    world.objects.push_back(obstacle);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    assert(tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 33));
+    assert(laneChange.phase == LaneChangePhase::Prepare);
+    assert(laneChange.obstacleId == 2);
+}
+
+void testO02RouteSectionComesFromMapRoadS() {
+    PathGeneratorData map;
+    assert(loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr"));
+    PathPlannerData globalPath;
+    assert(loadWaypointsCsv(
+        globalPath.waypoints,
+        "scenario/obstacle/O02_obstacle_ver2/route.csv"));
+
+    WorldState world;
+    world.ego.x = 344.229279F;
+    world.ego.y = -110.288513F;
+    world.ego.heading = 5.29004002F;
+    world.egoSpeed = 0.0;
+    world.egoLaneValid = true;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoRoadId = 418;
+    world.egoLaneId = 3;
+    world.egoSectionIndex = 2;
+    world.egoRoadS = 107.0;
+    world.egoPathS = 0.0;
+    world.frontBumperPathS = 3.8;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    WorldObjectState obstacle;
+    obstacle.raw.id = 5;
+    obstacle.raw.x = 358.513824F;
+    obstacle.raw.y = -133.437737F;
+    obstacle.raw.heading = 0.0F;
+    obstacle.raw.speed = 0.0F;
+    obstacle.raw.length = 0.6F;
+    obstacle.raw.width = 0.6F;
+    obstacle.obb = makeObb2D(
+        obstacle.raw.x, obstacle.raw.y, obstacle.raw.heading,
+        obstacle.raw.length, obstacle.raw.width);
+    obstacle.laneValid = true;
+    obstacle.roadId = 418;
+    obstacle.laneId = 4;
+    obstacle.sectionIndex = 1;
+    obstacle.roadS = 81.1;
+    obstacle.pathValid = true;
+    obstacle.pathS = 25.5688;
+    obstacle.pathD = -0.0717227;
+    obstacle.relativeS = 25.5688;
+    obstacle.relativeD = -1.70554;
+    obstacle.isAhead = true;
+    obstacle.isOnEgoPath = true;
+    world.objects.push_back(obstacle);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    assert(tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 0));
+    assert(laneChange.phase == LaneChangePhase::Prepare);
+    assert(laneChange.obstacleId == 5);
+}
+
+void testLaneChangeExecutionBlockingStops() {
+    StopManagerData stops;
+    stops.requests.push_back(
+        {StopReason::Obstacle, true, 20.0, 0.0, 5});
+    stops.requests.push_back(
+        {StopReason::Obstacle, true, 20.1, 0.0, 6});
+    stops.requests.push_back(
+        {StopReason::Obstacle, true, 20.2, 0.0, 7});
+
+    // The candidate path was checked against all objects, including every
+    // member of a multi-object static obstacle such as O02.
+    assert(!hasLaneChangeExecutionBlocker(stops, true));
+    assert(hasLaneChangeExecutionBlocker(stops, false));
+
+    StopDecision decision;
+    selectStopDecision(decision, stops, 0.0);
+    assert(decision.valid);
+    assert(decision.reason == StopReason::Obstacle);
+    selectStopDecision(decision, stops, 0.0, true);
+    assert(!decision.valid);
+
+    // A safe obstacle-avoidance path never overrides traffic-rule stops.
+    stops.requests.push_back(
+        {StopReason::RedLight, true, 30.0, 0.0, 11});
+    assert(hasLaneChangeExecutionBlocker(stops, true));
+    selectStopDecision(decision, stops, 0.0, true);
+    assert(decision.valid);
+    assert(decision.reason == StopReason::RedLight);
+    stops.requests.back().active = false;
+    stops.requests.push_back(
+        {StopReason::CrosswalkBlocked, true, 31.0, 0.0, 12});
+    assert(hasLaneChangeExecutionBlocker(stops, true));
 }
 
 void testKeepTargetLaneWhenItRejoinsNextRoad() {
@@ -455,6 +884,57 @@ void testNearbyAdjacentVehicleCapsSpeedBeforeCutIn() {
     assert(std::abs(output.targetSpeed - 50.0 / 3.6) < 1e-9);
 }
 
+void testSafeAvoidanceIgnoresStaticSiblingObstacles() {
+    PlanningBehaviorConfig config;
+    WorldState world;
+    world.egoSpeed = 5.0;
+    WorldObjectState staticSibling;
+    staticSibling.raw.id = 6;
+    staticSibling.raw.speed = 0.0F;
+    staticSibling.isAhead = true;
+    staticSibling.isOnEgoPath = true;
+    staticSibling.relativeS = 10.0;
+    staticSibling.ttc = 1.0;
+    world.objects.push_back(staticSibling);
+
+    BehaviorState state;
+    state.staticObstacleAvoidanceActive = true;
+    BehaviorDecision behavior;
+    ConstraintSet constraints;
+    constraints.speedLimit = 12.5;
+    StopDecision stop;
+    updateBehavior(state, behavior, constraints, stop, world,
+                   12.5, config, 0.05);
+    assert(behavior.longitudinal == LonMode::Cruise);
+    assert(std::abs(behavior.targetSpeed - 12.5) < 1e-9);
+
+    PathSafetyResult safety;
+    resetPathSafety(safety);
+    updateMinimumTTC(safety, world.objects, true);
+    assert(std::isinf(safety.minimumTTC));
+
+    // 움직이는 차량은 회피 중에도 추종/TTC 대상에서 제외하지 않는다.
+    world.objects.front().raw.speed = 1.0F;
+    state.safelyAvoidedObjectId = 6;
+    updateBehavior(state, behavior, constraints, stop, world,
+                   12.5, config, 0.05);
+    assert(behavior.longitudinal == LonMode::Cruise);
+    resetPathSafety(safety);
+    updateMinimumTTC(safety, world.objects, true, 6);
+    assert(std::isinf(safety.minimumTTC));
+
+    // 같은 ID가 움직여도 후보 경로가 안전할 때는 기동을 유지하지만,
+    // OBB 재검사에서 위험해지면 예외가 풀려 Follow/TTC가 즉시 복귀한다.
+    state.staticObstacleAvoidanceActive = false;
+    state.safelyAvoidedObjectId = -1;
+    updateBehavior(state, behavior, constraints, stop, world,
+                   12.5, config, 0.05);
+    assert(behavior.longitudinal == LonMode::Follow);
+    resetPathSafety(safety);
+    updateMinimumTTC(safety, world.objects, false);
+    assert(std::abs(safety.minimumTTC - 1.0) < 1e-9);
+}
+
 void testSharpCurveHasSeparateSpeed() {
     PathPlannerConfig config;
     config.curveThreshold = 0.02;
@@ -477,9 +957,16 @@ int main() {
     testStaticZoneRouteAlignment();
     testPredictedCollisionIsNotCurrentCollision();
     testObstacleLaneChange();
+    testLaneChangeWhenAdjacentLaneStartsAhead();
+    testO01ObstacleRoadLaneMerge();
+    testO02RouteSectionComesFromMapRoadS();
+    testO04RouteSectionComesFromMapRoadS();
+    testLaneChangeExecutionBlockingStops();
     testLaneChangeAcrossRenumberedLaneSection();
+    testLimitedLateralOffsetAvoidance();
     testKeepTargetLaneWhenItRejoinsNextRoad();
     testNearbyAdjacentVehicleCapsSpeedBeforeCutIn();
+    testSafeAvoidanceIgnoresStaticSiblingObstacles();
     testSharpCurveHasSeparateSpeed();
     std::cout << "controller_logic_tests: PASS\n";
     return 0;

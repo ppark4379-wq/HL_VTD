@@ -90,6 +90,8 @@ target_compile_features(controller_logic_tests PRIVATE cxx_std_17)
 target_include_directories(controller_logic_tests
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_test(NAME controller_logic_tests COMMAND controller_logic_tests)
+set_tests_properties(controller_logic_tests PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
 target_compile_features(extract_static_zones PRIVATE cxx_std_17)
 target_include_directories(extract_static_zones

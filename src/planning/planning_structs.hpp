@@ -28,6 +28,7 @@ struct PathPlannerConfig {
 };
 
 struct PlanningBehaviorConfig {
+    bool ignoreTrafficLights{};
     double comfortableDeceleration{2.5};
     double stopSafetyMargin{1.0};
     double stopHoldTime{1.0};
@@ -123,6 +124,11 @@ struct PlanningResult {
     std::uint8_t turnSignal{};
 };
 
+struct StationaryObjectState {
+    std::uint32_t id{};
+    double duration{};
+};
+
 struct PlanningProcessData {
     PathPlannerData pathPlanner;
     PlanningBehaviorConfig config;
@@ -130,6 +136,9 @@ struct PlanningProcessData {
     StopManagerData stopManager;
     LaneChangeData laneChange;
     LaneChangeConfig laneChangeConfig;
+    // 현재 프레임에도 같은 ID로 존재하는 객체만 유지한다. 객체가 사라지면
+    // 즉시 삭제하여 나중에 재사용된 ID에 과거 정지시간을 물려주지 않는다.
+    std::vector<StationaryObjectState> stationaryObjects;
     PlanningFrameData frame;
     PlanningResult result;
     // 객체 위험을 한 번이라도 확인한 횡단보도. 객체가 빠져나간 뒤에도
