@@ -209,10 +209,17 @@ void printMapReadiness(const StaticZoneData& zones) {
     std::cout << "[map] static features: stop_lines=" << zones.stopLines.size()
               << " crosswalks=" << zones.crosswalks.size()
               << " speed_zones=" << zones.speedZones.size()
+              << " school_zone_reference_points="
+              << zones.schoolZoneReferencePoints.size()
               << " flashing_red_ids="
               << zones.flashingRedControllerIds.size() << '\n';
     if (zones.speedZones.empty()) {
-        std::cout << "[config-warning] protection/speed zone polygons are not configured\n";
+        std::cout << "[config-warning] protection/speed zones are not configured";
+        if (!zones.schoolZoneReferencePoints.empty()) {
+            std::cout << " (" << zones.schoolZoneReferencePoints.size()
+                      << " reference points loaded but not activated)";
+        }
+        std::cout << '\n';
     }
     if (zones.flashingRedControllerIds.empty()) {
         std::cout << "[config-warning] no packet traffic-light ID is marked as flashing red\n";

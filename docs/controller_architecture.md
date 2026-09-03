@@ -61,6 +61,7 @@
 - `config/vehicle.yaml`: Ego 후륜축 기준 차량 제원을 둔다.
 - `config/maps/living_lab.generated.yaml`: XODR에서 자동 추출한 정지선·횡단보도 원본이다.
 - `config/maps/living_lab.yaml`: 운영측 값과 신호 점멸 색 등 사람이 확인해야 하는 값을 덧붙인다.
+- `config/maps/living_lab_school_zone_points.yaml`: VTD에서 측정한 보호구역 기준점 46개의 원본이다. `living_lab.yaml`이 이 파일을 로드하지만 시작·종료 관계가 확정되지 않은 기준점을 속도구역으로 임의 활성화하지는 않는다.
 - `tools/map_extraction/extract_static_zones.cpp`: XODR 정적 객체를 generated YAML로 다시 만든다.
 - `tools/path_generation/`: Scenario의 roadId+s 체크포인트를 월드 좌표 경로로 바꾸는 오프라인 도구다.
 - `tests/controller_logic_tests.cpp`: 지도 routeS 정렬, 현재/미래 충돌 분리, 차선변경 허용·차단을 검사한다.
@@ -160,7 +161,7 @@ ControlProcessData
 대회 값이 있어야 활성화되는 항목:
 
 - `traffic_lights`: 상태 6이 적색점멸인 VTD controller ID
-- `speed_zones`: 붉은 보호구역의 정확한 polygon과 제한속도
+- `speed_zones`: 46개 기준점에서 확정한 붉은 보호구역의 정확한 polygon 또는 전역경로 `route_s` 시작·종료와 제한속도
 - `finish`: 운영측 공식 종료점 x/y
 - `vehicle.yaml`: 운영측 차량의 정확한 앞·뒤 오버행
 - VTD 실차 시나리오 확인: controller/정지선 대응, 조향 부호, 방향지시등 값, 충돌 이벤트, 차선변경 튜닝

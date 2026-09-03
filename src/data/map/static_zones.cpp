@@ -9,6 +9,7 @@
 #include <fstream>
 #include <limits>
 #include <sstream>
+#include <unordered_set>
 
 namespace {
 
@@ -113,6 +114,104 @@ void appendZones(StaticZoneData& destination,
     if (source.finish.valid) destination.finish = source.finish;
 }
 
+bool loadSchoolZoneReferencePoints(StaticZoneData& zones,
+                                   const std::string& yamlPath) {
+    std::ifstream input(yamlPath);
+    if (!input) return false;
+
+    std::vector<SchoolZoneReferencePoint> points;
+    std::unordered_set<std::string> ids;
+    int declaredPointCount = -1;
+    double speedLimitKph = 0.0;
+    bool hasSpeedLimit = false;
+    bool inPointSection = false;
+    bool hasCurrentPoint = false;
+    bool hasId = false;
+    bool hasX = false;
+    bool hasY = false;
+    bool hasTrackId = false;
+    bool hasLaneId = false;
+    bool hasTrackS = false;
+
+    auto finishPoint = [&]() {
+        if (!hasCurrentPoint) return true;
+        if (!hasId || !hasX || !hasY || !hasTrackId ||
+            !hasLaneId || !hasTrackS) {
+            return false;
+        }
+        return ids.insert(points.back().id).second;
+    };
+
+    std::string rawLine;
+    while (std::getline(input, rawLine)) {
+        const std::size_t comment = rawLine.find('#');
+        std::string line = trim(comment == std::string::npos
+                                    ? rawLine
+                                    : rawLine.substr(0, comment));
+        if (line.empty()) continue;
+        if (line == "school_zone_reference_points:") {
+            inPointSection = true;
+            continue;
+        }
+
+        bool newPoint = false;
+        if (inPointSection && line.rfind("- ", 0) == 0) {
+            if (!finishPoint()) return false;
+            points.emplace_back();
+            hasCurrentPoint = true;
+            hasId = hasX = hasY = hasTrackId = hasLaneId = hasTrackS = false;
+            line = trim(line.substr(2));
+            newPoint = true;
+        }
+
+        const std::size_t colon = line.find(':');
+        if (colon == std::string::npos) return false;
+        const std::string key = trim(line.substr(0, colon));
+        const std::string value = cleanValue(line.substr(colon + 1));
+
+        if (!inPointSection) {
+            if (key == "speed_limit_kph") {
+                hasSpeedLimit = parseDouble(value, speedLimitKph) &&
+                                speedLimitKph > 0.0;
+                if (!hasSpeedLimit) return false;
+            } else if (key == "point_count") {
+                if (!parseInteger(value, declaredPointCount) ||
+                    declaredPointCount < 0) {
+                    return false;
+                }
+            }
+            continue;
+        }
+
+        if (!hasCurrentPoint) return false;
+        auto& point = points.back();
+        if (key == "id") {
+            point.id = value;
+            hasId = !point.id.empty();
+        } else if (key == "x") {
+            hasX = parseDouble(value, point.position.x);
+        } else if (key == "y") {
+            hasY = parseDouble(value, point.position.y);
+        } else if (key == "track_id") {
+            hasTrackId = parseInteger(value, point.trackId);
+        } else if (key == "lane_id") {
+            hasLaneId = parseInteger(value, point.laneId);
+        } else if (key == "s") {
+            hasTrackS = parseDouble(value, point.trackS);
+        } else if (!newPoint) {
+            return false;
+        }
+    }
+
+    if (!finishPoint() || !hasSpeedLimit || declaredPointCount < 0 ||
+        static_cast<std::size_t>(declaredPointCount) != points.size()) {
+        return false;
+    }
+    zones.schoolZoneReferenceSpeedLimit = speedLimitKph / 3.6;
+    zones.schoolZoneReferencePoints = std::move(points);
+    return true;
+}
+
 }  // namespace
 
 bool loadSingleMapRuntimeConfig(MapRuntimeConfig& config,
@@ -159,6 +258,9 @@ bool loadSingleMapRuntimeConfig(MapRuntimeConfig& config,
             config.xodrPath = value;
         } else if (section == "map" && key == "static_features") {
             config.staticFeaturesPath = value;
+        } else if (section == "map" &&
+                   key == "school_zone_reference_points") {
+            config.schoolZoneReferencePointsPath = value;
         } else if (section == "finish") {
             if (key == "x") parseDouble(value, config.zones.finish.referencePoint.x);
             else if (key == "y") parseDouble(value, config.zones.finish.referencePoint.y);
@@ -221,6 +323,11 @@ bool loadMapRuntimeConfig(MapRuntimeConfig& config,
     MapRuntimeConfig manual;
     if (!loadSingleMapRuntimeConfig(manual, yamlPath)) return false;
     if (manual.staticFeaturesPath.empty()) {
+        if (!manual.schoolZoneReferencePointsPath.empty() &&
+            !loadSchoolZoneReferencePoints(
+                manual.zones, manual.schoolZoneReferencePointsPath)) {
+            return false;
+        }
         config = std::move(manual);
         return true;
     }
@@ -229,7 +336,14 @@ bool loadMapRuntimeConfig(MapRuntimeConfig& config,
                                     manual.staticFeaturesPath)) return false;
     generated.xodrPath = manual.xodrPath;
     generated.staticFeaturesPath = manual.staticFeaturesPath;
+    generated.schoolZoneReferencePointsPath =
+        manual.schoolZoneReferencePointsPath;
     appendZones(generated.zones, manual.zones);
+    if (!generated.schoolZoneReferencePointsPath.empty() &&
+        !loadSchoolZoneReferencePoints(
+            generated.zones, generated.schoolZoneReferencePointsPath)) {
+        return false;
+    }
     config = std::move(generated);
     return true;
 }

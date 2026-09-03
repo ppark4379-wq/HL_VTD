@@ -2,6 +2,9 @@
 map:
   xodr: src/data/map/HL_FMA_VTD_LivingLab.xodr
   static_features: config/maps/living_lab.generated.yaml
+  # VTD에서 측정한 46개 원본 좌표. 구간 경계가 확정되기 전까지는
+  # speed_zones로 자동 활성화하지 않는다.
+  school_zone_reference_points: config/maps/living_lab_school_zone_points.yaml
 
 # 운영측 좌표를 받으면 채운다. 완료 지점은 정지점이 아니라 통과선이다.
 finish:

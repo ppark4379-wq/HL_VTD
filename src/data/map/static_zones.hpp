@@ -21,6 +21,17 @@ struct SpeedZone {
     bool hasRouteRange{};
 };
 
+// VTD Scenario Editor에서 측정한 보호구역 기준점 원본이다. 이 점들은
+// 진입/이탈 구간이 확정되기 전의 자료이므로 SpeedZone처럼 자동 적용하지 않는다.
+// trackId/trackS는 VTD가 표시한 값이며 OpenDRIVE roadId/roadS와 다를 수 있다.
+struct SchoolZoneReferencePoint {
+    std::string id;
+    Point2D position;
+    int trackId{-1};
+    int laneId{};
+    double trackS{};
+};
+
 struct StopLine {
     int id{-1};
     int controllerId{-1};
@@ -46,6 +57,8 @@ struct FinishLine {
 
 struct StaticZoneData {
     std::vector<SpeedZone> speedZones;
+    std::vector<SchoolZoneReferencePoint> schoolZoneReferencePoints;
+    double schoolZoneReferenceSpeedLimit{};
     std::vector<StopLine> stopLines;
     std::vector<Crosswalk> crosswalks;
     std::vector<int> flashingRedControllerIds;
@@ -55,6 +68,7 @@ struct StaticZoneData {
 struct MapRuntimeConfig {
     std::string xodrPath;
     std::string staticFeaturesPath;
+    std::string schoolZoneReferencePointsPath;
     StaticZoneData zones;
 };
 

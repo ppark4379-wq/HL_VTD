@@ -346,6 +346,23 @@ void testStaticZoneRouteAlignment() {
     assert(std::abs(zones.crosswalks.front().exitRouteS - 34.0) < 1e-6);
 }
 
+void testSchoolZoneReferencePointConfig() {
+    MapRuntimeConfig config;
+    assert(loadMapRuntimeConfig(config, "config/maps/living_lab.yaml"));
+    assert(config.schoolZoneReferencePointsPath ==
+           "config/maps/living_lab_school_zone_points.yaml");
+    assert(config.zones.schoolZoneReferencePoints.size() == 46);
+    assert(std::abs(config.zones.schoolZoneReferenceSpeedLimit -
+                    30.0 / 3.6) < 1e-9);
+    const auto& first = config.zones.schoolZoneReferencePoints.front();
+    assert(first.id == "SZP_01");
+    assert(std::abs(first.position.x - 359.584) < 1e-9);
+    assert(std::abs(first.position.y + 71.227) < 1e-9);
+    assert(first.trackId == 420);
+    assert(first.laneId == -1);
+    assert(std::abs(first.trackS - 0.084) < 1e-9);
+}
+
 void testPredictedCollisionIsNotCurrentCollision() {
     WorldState world = makeWorldWithObstacle();
     world.objects.front().raw.x = 20.0F;
@@ -955,6 +972,7 @@ void testSharpCurveHasSeparateSpeed() {
 int main() {
     testTrafficControllerParsing();
     testStaticZoneRouteAlignment();
+    testSchoolZoneReferencePointConfig();
     testPredictedCollisionIsNotCurrentCollision();
     testObstacleLaneChange();
     testLaneChangeWhenAdjacentLaneStartsAhead();

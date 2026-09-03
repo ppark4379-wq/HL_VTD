@@ -1,0 +1,288 @@
+# HL FMA VTD LivingLab 어린이보호구역 좌표 측정값
+# VTD OpenDRIVE Scenario Editor 하단 상태바에서 기록한 World/Lane 좌표.
+# 총 47개 캡처 중 동일 좌표 1개를 제거하여 46개 unique point를 저장함.
+# 주의: 아래 값은 '측정 포인트' 원본이다. 전역경로가 확정된 뒤
+#       실제 제어용 speed_zones(route_s_begin/end 또는 polygon)으로 변환해서 사용 권장.
+
+map: HL_FMA_VTD_LivingLab
+coordinate_frame: vtd_world
+speed_limit_kph: 30.0
+point_count: 46
+
+school_zone_reference_points:
+  - id: SZP_01
+    x: 359.584
+    y: -71.227
+    track_id: 420
+    lane_id: -1
+    s: 0.084
+  - id: SZP_02
+    x: 409.920
+    y: -38.474
+    track_id: 420
+    lane_id: -1
+    s: 60.307
+  - id: SZP_03
+    x: 441.811
+    y: -19.465
+    track_id: 797
+    lane_id: -1
+    s: 0.029
+  - id: SZP_04
+    x: 517.200
+    y: -140.672
+    track_id: 190
+    lane_id: 1
+    s: 0.449
+  - id: SZP_05
+    x: 595.507
+    y: -122.845
+    track_id: 174
+    lane_id: 1
+    s: 18.015
+  - id: SZP_06
+    x: 610.698
+    y: -115.612
+    track_id: 174
+    lane_id: 1
+    s: 1.209
+  - id: SZP_07
+    x: 630.436
+    y: -122.195
+    track_id: 4471
+    lane_id: -1
+    s: 23.829
+  - id: SZP_08
+    x: 699.466
+    y: -210.287
+    track_id: 146
+    lane_id: 1
+    s: 34.753
+  - id: SZP_09
+    x: 701.709
+    y: -207.314
+    track_id: 146
+    lane_id: -1
+    s: 35.605
+  - id: SZP_10
+    x: 633.099
+    y: -121.149
+    track_id: 146
+    lane_id: -1
+    s: 145.818
+  - id: SZP_11
+    x: 609.129
+    y: -110.528
+    track_id: 174
+    lane_id: -2
+    s: 0.583
+  - id: SZP_12
+    x: 561.620
+    y: -132.217
+    track_id: 174
+    lane_id: -2
+    s: 52.590
+  - id: SZP_13
+    x: 563.513
+    y: -134.778
+    track_id: 174
+    lane_id: -1
+    s: 52.057
+  - id: SZP_14
+    x: 610.070
+    y: -113.540
+    track_id: 174
+    lane_id: -1
+    s: 0.946
+  - id: SZP_15
+    x: 519.984
+    y: -139.962
+    track_id: 781
+    lane_id: -1
+    s: 49.056
+  - id: SZP_16
+    x: 415.336
+    y: -31.275
+    track_id: 420
+    lane_id: 1
+    s: 68.697
+  - id: SZP_17
+    x: 1149.436
+    y: -472.700
+    track_id: 2264
+    lane_id: -1
+    s: 0.254
+  - id: SZP_18
+    x: 372.391
+    y: -270.804
+    track_id: 211
+    lane_id: -1
+    s: 6.290
+  - id: SZP_19
+    x: 390.065
+    y: -256.076
+    track_id: 211
+    lane_id: -2
+    s: 29.234
+  - id: SZP_20
+    x: 381.575
+    y: -259.179
+    track_id: 211
+    lane_id: -1
+    s: 20.830
+  - id: SZP_21
+    x: 388.193
+    y: -252.982
+    track_id: 679
+    lane_id: -1
+    s: 0.299
+  - id: SZP_22
+    x: 463.900
+    y: -517.337
+    track_id: 1603
+    lane_id: -1
+    s: 21.168
+  - id: SZP_23
+    x: 491.003
+    y: -603.193
+    track_id: 1712
+    lane_id: -1
+    s: 19.881
+  - id: SZP_24
+    x: 490.192
+    y: -624.130
+    track_id: 1712
+    lane_id: -1
+    s: 40.975
+  - id: SZP_25
+    x: 491.837
+    y: -651.281
+    track_id: 1734
+    lane_id: -1
+    s: 0.208
+  - id: SZP_26
+    x: 500.151
+    y: -673.340
+    track_id: 1734
+    lane_id: -1
+    s: 23.536
+  - id: SZP_27
+    x: 559.392
+    y: -753.136
+    track_id: 1769
+    lane_id: -1
+    s: 25.805
+  - id: SZP_28
+    x: 647.695
+    y: -850.227
+    track_id: 1777
+    lane_id: -1
+    s: 67.560
+  - id: SZP_29
+    x: 505.658
+    y: -671.833
+    track_id: 1734
+    lane_id: 2
+    s: 24.318
+  - id: SZP_30
+    x: 677.356
+    y: -857.349
+    track_id: 1818
+    lane_id: 2
+    s: 0.102
+  - id: SZP_31
+    x: 702.797
+    y: -871.034
+    track_id: 1818
+    lane_id: 1
+    s: 28.703
+  - id: SZP_32
+    x: 676.604
+    y: -860.357
+    track_id: 1818
+    lane_id: 1
+    s: 0.619
+  - id: SZP_33
+    x: 621.182
+    y: -822.558
+    track_id: 1777
+    lane_id: 3
+    s: 29.019
+  - id: SZP_34
+    x: 649.112
+    y: -735.431
+    track_id: 1778
+    lane_id: -1
+    s: 0.344
+  - id: SZP_35
+    x: 599.484
+    y: -773.741
+    track_id: 1778
+    lane_id: -2
+    s: 63.051
+  - id: SZP_36
+    x: 625.152
+    y: -757.892
+    track_id: 1778
+    lane_id: -1
+    s: 33.075
+  - id: SZP_37
+    x: 601.364
+    y: -777.412
+    track_id: 1811
+    lane_id: -1
+    s: 0.505
+  - id: SZP_38
+    x: 538.684
+    y: -720.103
+    track_id: 1750
+    lane_id: 2
+    s: 28.787
+  - id: SZP_39
+    x: 521.111
+    y: -698.611
+    track_id: 1750
+    lane_id: 2
+    s: 1.032
+  - id: SZP_40
+    x: 535.829
+    y: -722.481
+    track_id: 1750
+    lane_id: 1
+    s: 28.896
+  - id: SZP_41
+    x: 519.005
+    y: -699.495
+    track_id: 1750
+    lane_id: 1
+    s: 0.427
+  - id: SZP_42
+    x: 498.660
+    y: -650.116
+    track_id: 1734
+    lane_id: 2
+    s: 0.770
+  - id: SZP_43
+    x: 502.574
+    y: -673.283
+    track_id: 1734
+    lane_id: 1
+    s: 24.438
+  - id: SZP_44
+    x: 495.306
+    y: -650.341
+    track_id: 1734
+    lane_id: 1
+    s: 0.160
+  - id: SZP_45
+    x: 1117.602
+    y: -431.995
+    track_id: 2313
+    lane_id: -2
+    s: 26.890
+  - id: SZP_46
+    x: 1205.114
+    y: -542.109
+    track_id: 2264
+    lane_id: -1
+    s: 89.231
