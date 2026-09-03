@@ -29,6 +29,70 @@ stop_lines:
     end: [-1.814, 24.869]
     route_s: 43.067
     # route lateral 1.498 m
+  - id: 3
+    controller_id: -1
+    road_id: 62
+    lane_ids: [1]
+    begin: [368.198, -226.454]
+    end: [368.198, -226.454]
+    route_s: 804.767
+    # route lateral 61.746 m
+  - id: 5
+    controller_id: -1
+    road_id: 62
+    lane_ids: [-1]
+    begin: [349.721, -238.882]
+    end: [349.721, -238.882]
+    route_s: 803.036
+    # route lateral 39.546 m
+  - id: 6
+    controller_id: 1
+    road_id: 72
+    lane_ids: [2]
+    begin: [14.888, 44.467]
+    end: [14.888, 44.467]
+    route_s: 65.495
+    # route lateral 9.503 m
+  - id: 7
+    controller_id: 1
+    road_id: 72
+    lane_ids: [3]
+    begin: [14.267, 47.300]
+    end: [14.267, 47.300]
+    route_s: 65.519
+    # route lateral 12.403 m
+  - id: 8
+    controller_id: 1
+    road_id: 72
+    lane_ids: [4]
+    begin: [13.646, 50.133]
+    end: [13.646, 50.133]
+    route_s: 65.543
+    # route lateral 15.303 m
+  - id: 9
+    controller_id: 1
+    road_id: 72
+    lane_ids: [4]
+    begin: [13.604, 50.328]
+    end: [13.604, 50.328]
+    route_s: 65.545
+    # route lateral 15.503 m
+  - id: 95
+    controller_id: 5
+    road_id: 72
+    lane_ids: [-2]
+    begin: [207.237, 164.116]
+    end: [207.237, 164.116]
+    route_s: 298.965
+    # route lateral 6.300 m
+  - id: 96
+    controller_id: 5
+    road_id: 72
+    lane_ids: [-1]
+    begin: [205.298, 166.273]
+    end: [205.298, 166.273]
+    route_s: 298.965
+    # route lateral 9.200 m
   - id: 97
     controller_id: 5
     road_id: 72
@@ -48,15 +112,567 @@ stop_lines:
   - id: 99
     controller_id: 5
     road_id: 72
-    lane_ids: [-2]
+    lane_ids: [-3]
     begin: [209.109, 162.033]
     end: [209.109, 162.033]
     route_s: 298.965
     # route lateral 3.500 m
+  - id: 114
+    controller_id: 4
+    road_id: 76
+    lane_ids: [-1]
+    begin: [-21.849, 36.217]
+    end: [-21.849, 36.217]
+    route_s: 46.470
+    # route lateral 22.991 m
+  - id: 115
+    controller_id: 4
+    road_id: 76
+    lane_ids: [-3]
+    begin: [-21.564, 31.113]
+    end: [-21.564, 31.113]
+    route_s: 45.604
+    # route lateral 21.407 m
+  - id: 116
+    controller_id: 4
+    road_id: 76
+    lane_ids: [-3]
+    begin: [-21.515, 30.226]
+    end: [-21.515, 30.226]
+    route_s: 45.351
+    # route lateral 21.227 m
+  - id: 117
+    controller_id: 4
+    road_id: 76
+    lane_ids: [-2]
+    begin: [-21.692, 33.403]
+    end: [-21.692, 33.403]
+    route_s: 45.891
+    # route lateral 22.009 m
+  - id: 119
+    controller_id: -1
+    road_id: 100
+    lane_ids: [1]
+    begin: [393.405, -347.505]
+    end: [393.405, -347.505]
+    route_s: 816.049
+    # route lateral 99.441 m
+  - id: 120
+    controller_id: -1
+    road_id: 100
+    lane_ids: [2]
+    begin: [391.142, -349.318]
+    end: [391.142, -349.318]
+    route_s: 816.049
+    # route lateral 99.314 m
+  - id: 138
+    controller_id: -1
+    road_id: 100
+    lane_ids: [-1]
+    begin: [365.695, -308.130]
+    end: [365.695, -308.130]
+    route_s: 816.049
+    # route lateral 51.966 m
+  - id: 139
+    controller_id: -1
+    road_id: 116
+    lane_ids: [1]
+    begin: [430.734, -470.551]
+    end: [430.734, -470.551]
+    route_s: 816.049
+    # route lateral 222.639 m
+  - id: 140
+    controller_id: -1
+    road_id: 116
+    lane_ids: [2]
+    begin: [428.217, -472.108]
+    end: [428.217, -472.108]
+    route_s: 816.049
+    # route lateral 222.861 m
+  - id: 141
+    controller_id: -1
+    road_id: 116
+    lane_ids: [2]
+    begin: [427.928, -472.288]
+    end: [427.928, -472.288]
+    route_s: 816.049
+    # route lateral 222.889 m
+  - id: 181
+    controller_id: -1
+    road_id: 116
+    lane_ids: [-1]
+    begin: [406.408, -368.093]
+    end: [406.408, -368.093]
+    route_s: 816.049
+    # route lateral 123.508 m
+  - id: 182
+    controller_id: 41
+    road_id: 126
+    lane_ids: [2]
+    begin: [717.100, -267.381]
+    end: [717.100, -267.381]
+    route_s: 816.049
+    # route lateral 390.339 m
+  - id: 183
+    controller_id: 41
+    road_id: 126
+    lane_ids: [3]
+    begin: [718.846, -269.591]
+    end: [718.846, -269.591]
+    route_s: 816.049
+    # route lateral 392.056 m
+  - id: 184
+    controller_id: 41
+    road_id: 126
+    lane_ids: [4]
+    begin: [720.577, -271.780]
+    end: [720.577, -271.780]
+    route_s: 816.049
+    # route lateral 393.770 m
+  - id: 185
+    controller_id: 41
+    road_id: 126
+    lane_ids: [5]
+    begin: [722.104, -273.712]
+    end: [722.104, -273.712]
+    route_s: 816.049
+    # route lateral 395.293 m
+  - id: 186
+    controller_id: 41
+    road_id: 126
+    lane_ids: [5]
+    begin: [722.681, -274.442]
+    end: [722.681, -274.442]
+    route_s: 816.049
+    # route lateral 395.871 m
+  - id: 248
+    controller_id: 36
+    road_id: 126
+    lane_ids: [-3]
+    begin: [589.605, -359.493]
+    end: [589.605, -359.493]
+    route_s: 816.049
+    # route lateral 276.457 m
+  - id: 249
+    controller_id: 36
+    road_id: 126
+    lane_ids: [-2]
+    begin: [591.403, -361.768]
+    end: [591.403, -361.768]
+    route_s: 816.049
+    # route lateral 278.877 m
+  - id: 250
+    controller_id: 36
+    road_id: 126
+    lane_ids: [-1]
+    begin: [593.201, -364.043]
+    end: [593.201, -364.043]
+    route_s: 816.049
+    # route lateral 281.307 m
+  - id: 251
+    controller_id: 36
+    road_id: 126
+    lane_ids: [-4]
+    begin: [588.116, -357.610]
+    end: [588.116, -357.610]
+    route_s: 816.049
+    # route lateral 274.461 m
+  - id: 255
+    controller_id: -1
+    road_id: 128
+    lane_ids: [1]
+    begin: [550.144, -362.759]
+    end: [550.144, -362.759]
+    route_s: 816.049
+    # route lateral 240.451 m
+  - id: 256
+    controller_id: 30
+    road_id: 128
+    lane_ids: [2]
+    begin: [547.778, -364.603]
+    end: [547.778, -364.603]
+    route_s: 816.049
+    # route lateral 238.952 m
+  - id: 257
+    controller_id: 30
+    road_id: 128
+    lane_ids: [3]
+    begin: [545.491, -366.386]
+    end: [545.491, -366.386]
+    route_s: 816.049
+    # route lateral 237.529 m
+  - id: 258
+    controller_id: 30
+    road_id: 128
+    lane_ids: [4]
+    begin: [543.125, -368.231]
+    end: [543.125, -368.231]
+    route_s: 816.049
+    # route lateral 236.085 m
+  - id: 259
+    controller_id: 30
+    road_id: 128
+    lane_ids: [5]
+    begin: [541.053, -369.847]
+    end: [541.053, -369.847]
+    route_s: 816.049
+    # route lateral 234.845 m
+  - id: 260
+    controller_id: 30
+    road_id: 128
+    lane_ids: [5]
+    begin: [540.207, -370.506]
+    end: [540.207, -370.506]
+    route_s: 816.049
+    # route lateral 234.346 m
+  - id: 350
+    controller_id: 23
+    road_id: 128
+    lane_ids: [-6]
+    begin: [457.173, -222.409]
+    end: [457.173, -222.409]
+    route_s: 816.049
+    # route lateral 140.073 m
+  - id: 351
+    controller_id: 23
+    road_id: 128
+    lane_ids: [-6]
+    begin: [456.297, -223.094]
+    end: [456.297, -223.094]
+    route_s: 816.049
+    # route lateral 139.007 m
+  - id: 352
+    controller_id: 23
+    road_id: 128
+    lane_ids: [-5]
+    begin: [454.179, -224.749]
+    end: [454.179, -224.749]
+    route_s: 816.049
+    # route lateral 136.434 m
+  - id: 353
+    controller_id: 23
+    road_id: 128
+    lane_ids: [-4]
+    begin: [451.894, -226.535]
+    end: [451.894, -226.535]
+    route_s: 816.049
+    # route lateral 133.664 m
+  - id: 354
+    controller_id: 23
+    road_id: 128
+    lane_ids: [-3]
+    begin: [449.609, -228.321]
+    end: [449.609, -228.321]
+    route_s: 816.049
+    # route lateral 130.899 m
+  - id: 355
+    controller_id: 23
+    road_id: 128
+    lane_ids: [-2]
+    begin: [447.324, -230.106]
+    end: [447.324, -230.106]
+    route_s: 816.049
+    # route lateral 128.140 m
+  - id: 359
+    controller_id: 39
+    road_id: 146
+    lane_ids: [1]
+    begin: [721.953, -236.586]
+    end: [721.953, -236.586]
+    route_s: 816.049
+    # route lateral 396.876 m
+  - id: 360
+    controller_id: 39
+    road_id: 146
+    lane_ids: [2]
+    begin: [720.106, -238.108]
+    end: [720.106, -238.108]
+    route_s: 816.049
+    # route lateral 394.898 m
+  - id: 372
+    controller_id: 39
+    road_id: 146
+    lane_ids: [1]
+    begin: [698.773, -209.045]
+    end: [698.773, -209.045]
+    route_s: 816.049
+    # route lateral 377.531 m
+  - id: 399
+    controller_id: 137
+    road_id: 146
+    lane_ids: [-1]
+    begin: [650.526, -142.738]
+    end: [650.526, -142.738]
+    route_s: 580.236
+    # route lateral 335.181 m
+  - id: 400
+    controller_id: 137
+    road_id: 146
+    lane_ids: [-1]
+    begin: [650.210, -142.983]
+    end: [650.210, -142.983]
+    route_s: 580.236
+    # route lateral 334.913 m
+  - id: 409
+    controller_id: 138
+    road_id: 146
+    lane_ids: [1]
+    begin: [632.328, -125.157]
+    end: [632.328, -125.157]
+    route_s: 579.803
+    # route lateral 314.463 m
+  - id: 410
+    controller_id: 138
+    road_id: 146
+    lane_ids: [1]
+    begin: [632.013, -125.404]
+    end: [632.013, -125.404]
+    route_s: 579.803
+    # route lateral 314.185 m
+  - id: 411
+    controller_id: 137
+    road_id: 146
+    lane_ids: [-1]
+    begin: [633.213, -120.756]
+    end: [633.213, -120.756]
+    route_s: 579.699
+    # route lateral 314.783 m
+  - id: 412
+    controller_id: 137
+    road_id: 146
+    lane_ids: [-1]
+    begin: [632.896, -121.000]
+    end: [632.896, -121.000]
+    route_s: 579.803
+    # route lateral 314.497 m
+  - id: 415
+    controller_id: 139
+    road_id: 173
+    lane_ids: [1]
+    begin: [657.228, -98.584]
+    end: [657.228, -98.584]
+    route_s: 578.938
+    # route lateral 336.842 m
+  - id: 416
+    controller_id: 139
+    road_id: 173
+    lane_ids: [2]
+    begin: [656.683, -96.284]
+    end: [656.683, -96.284]
+    route_s: 578.938
+    # route lateral 336.193 m
+  - id: 417
+    controller_id: 139
+    road_id: 173
+    lane_ids: [2]
+    begin: [656.535, -95.665]
+    end: [656.535, -95.665]
+    route_s: 578.604
+    # route lateral 336.020 m
+  - id: 464
+    controller_id: -1
+    road_id: 173
+    lane_ids: [-1]
+    begin: [781.990, -90.051]
+    end: [781.990, -90.051]
+    route_s: 578.505
+    # route lateral 461.261 m
+  - id: 472
+    controller_id: -1
+    road_id: 173
+    lane_ids: [1]
+    begin: [794.488, -84.402]
+    end: [794.488, -84.402]
+    route_s: 578.505
+    # route lateral 473.691 m
+  - id: 473
+    controller_id: -1
+    road_id: 173
+    lane_ids: [2]
+    begin: [793.585, -81.541]
+    end: [793.585, -81.541]
+    route_s: 578.072
+    # route lateral 472.780 m
+  - id: 501
+    controller_id: -1
+    road_id: 173
+    lane_ids: [-1]
+    begin: [854.932, -14.318]
+    end: [854.932, -14.318]
+    route_s: 576.772
+    # route lateral 538.252 m
+  - id: 507
+    controller_id: -1
+    road_id: 173
+    lane_ids: [1]
+    begin: [854.156, -4.972]
+    end: [854.156, -4.972]
+    route_s: 576.772
+    # route lateral 538.703 m
+  - id: 508
+    controller_id: -1
+    road_id: 173
+    lane_ids: [2]
+    begin: [851.241, -4.265]
+    end: [851.241, -4.265]
+    route_s: 576.772
+    # route lateral 535.916 m
+  - id: 545
+    controller_id: -1
+    road_id: 173
+    lane_ids: [-1]
+    begin: [856.529, 109.526]
+    end: [856.529, 109.526]
+    route_s: 574.603
+    # route lateral 568.139 m
+  - id: 555
+    controller_id: 143
+    road_id: 173
+    lane_ids: [2]
+    begin: [852.881, 131.447]
+    end: [852.881, 131.447]
+    route_s: 548.268
+    # route lateral 571.747 m
+  - id: 556
+    controller_id: 143
+    road_id: 173
+    lane_ids: [1]
+    begin: [855.765, 130.623]
+    end: [855.765, 130.623]
+    route_s: 548.268
+    # route lateral 574.213 m
+  - id: 585
+    controller_id: 143
+    road_id: 173
+    lane_ids: [-2]
+    begin: [903.998, 188.933]
+    end: [903.998, 188.933]
+    route_s: 547.782
+    # route lateral 639.808 m
+  - id: 586
+    controller_id: 143
+    road_id: 173
+    lane_ids: [-1]
+    begin: [902.212, 191.089]
+    end: [902.212, 191.089]
+    route_s: 547.782
+    # route lateral 638.974 m
+  - id: 590
+    controller_id: 136
+    road_id: 174
+    lane_ids: [1]
+    begin: [612.115, -116.186]
+    end: [612.115, -116.186]
+    route_s: 579.371
+    # route lateral 293.293 m
+  - id: 618
+    controller_id: 29
+    road_id: 174
+    lane_ids: [-1]
+    begin: [562.559, -135.482]
+    end: [562.559, -135.482]
+    route_s: 580.669
+    # route lateral 247.455 m
+  - id: 619
+    controller_id: 29
+    road_id: 174
+    lane_ids: [-2]
+    begin: [561.286, -132.988]
+    end: [561.286, -132.988]
+    route_s: 580.669
+    # route lateral 245.700 m
+  - id: 622
+    controller_id: -1
+    road_id: 190
+    lane_ids: [1]
+    begin: [517.788, -140.696]
+    end: [517.788, -140.696]
+    route_s: 581.101
+    # route lateral 205.246 m
+  - id: 623
+    controller_id: -1
+    road_id: 190
+    lane_ids: [1]
+    begin: [517.700, -140.744]
+    end: [517.700, -140.744]
+    route_s: 581.101
+    # route lateral 205.175 m
+  - id: 662
+    controller_id: -1
+    road_id: 190
+    lane_ids: [-1]
+    begin: [462.573, -31.871]
+    end: [462.573, -31.871]
+    route_s: 575.038
+    # route lateral 149.632 m
+  - id: 663
+    controller_id: -1
+    road_id: 190
+    lane_ids: [-1]
+    begin: [462.662, -31.824]
+    end: [462.662, -31.824]
+    route_s: 575.038
+    # route lateral 149.731 m
+  - id: 668
+    controller_id: 21
+    road_id: 208
+    lane_ids: [-2]
+    begin: [413.474, -235.003]
+    end: [413.474, -235.003]
+    route_s: 816.049
+    # route lateral 94.891 m
+  - id: 669
+    controller_id: 21
+    road_id: 208
+    lane_ids: [-1]
+    begin: [411.608, -232.884]
+    end: [411.608, -232.884]
+    route_s: 816.049
+    # route lateral 94.089 m
+  - id: 671
+    controller_id: -1
+    road_id: 209
+    lane_ids: [1]
+    begin: [388.298, -237.079]
+    end: [388.298, -237.079]
+    route_s: 816.049
+    # route lateral 71.543 m
+  - id: 674
+    controller_id: -1
+    road_id: 209
+    lane_ids: [-1]
+    begin: [383.577, -226.444]
+    end: [383.577, -226.444]
+    route_s: 814.228
+    # route lateral 73.809 m
+  - id: 675
+    controller_id: -1
+    road_id: 211
+    lane_ids: [2]
+    begin: [363.824, -270.252]
+    end: [363.824, -270.252]
+    route_s: 816.049
+    # route lateral 37.169 m
+  - id: 676
+    controller_id: -1
+    road_id: 211
+    lane_ids: [1]
+    begin: [366.038, -272.833]
+    end: [366.038, -272.833]
+    route_s: 816.049
+    # route lateral 39.236 m
+  - id: 677
+    controller_id: -1
+    road_id: 211
+    lane_ids: [2]
+    begin: [364.469, -271.004]
+    end: [364.469, -271.004]
+    route_s: 816.049
+    # route lateral 37.751 m
   - id: 688
     controller_id: -1
     road_id: 310
-    lane_ids: [-1]
+    lane_ids: [1]
     begin: [326.605, -272.990]
     end: [326.605, -272.990]
     route_s: 815.399
@@ -64,11 +680,27 @@ stop_lines:
   - id: 689
     controller_id: -1
     road_id: 310
-    lane_ids: [-1]
+    lane_ids: [1]
     begin: [326.213, -273.300]
     end: [326.213, -273.300]
     route_s: 815.399
     # route lateral 0.250 m
+  - id: 735
+    controller_id: -1
+    road_id: 310
+    lane_ids: [-2]
+    begin: [287.986, -117.101]
+    end: [287.986, -117.101]
+    route_s: 628.715
+    # route lateral 6.301 m
+  - id: 736
+    controller_id: -1
+    road_id: 310
+    lane_ids: [-2]
+    begin: [287.612, -116.769]
+    end: [287.612, -116.769]
+    route_s: 628.718
+    # route lateral 5.801 m
   - id: 737
     controller_id: -1
     road_id: 310
@@ -77,10 +709,74 @@ stop_lines:
     end: [285.519, -114.910]
     route_s: 628.734
     # route lateral 3.001 m
+  - id: 738
+    controller_id: -1
+    road_id: 338
+    lane_ids: [1]
+    begin: [337.590, -240.228]
+    end: [337.590, -240.228]
+    route_s: 796.566
+    # route lateral 29.205 m
+  - id: 741
+    controller_id: -1
+    road_id: 338
+    lane_ids: [-1]
+    begin: [302.132, -140.692]
+    end: [302.132, -140.692]
+    route_s: 637.336
+    # route lateral 32.561 m
+  - id: 742
+    controller_id: -1
+    road_id: 346
+    lane_ids: [1]
+    begin: [365.668, -208.736]
+    end: [365.668, -208.736]
+    route_s: 789.363
+    # route lateral 70.776 m
+  - id: 753
+    controller_id: -1
+    road_id: 346
+    lane_ids: [-1]
+    begin: [320.303, -139.856]
+    end: [320.303, -139.856]
+    route_s: 611.393
+    # route lateral 44.234 m
+  - id: 754
+    controller_id: -1
+    road_id: 368
+    lane_ids: [1]
+    begin: [307.418, -124.495]
+    end: [307.418, -124.495]
+    route_s: 614.202
+    # route lateral 24.379 m
+  - id: 755
+    controller_id: -1
+    road_id: 368
+    lane_ids: [1]
+    begin: [307.161, -124.650]
+    end: [307.161, -124.650]
+    route_s: 614.501
+    # route lateral 24.375 m
+  - id: 757
+    controller_id: -1
+    road_id: 368
+    lane_ids: [-1]
+    begin: [304.471, -113.789]
+    end: [304.471, -113.789]
+    route_s: 611.020
+    # route lateral 13.738 m
+  - id: 758
+    controller_id: -1
+    road_id: 368
+    lane_ids: [-1]
+    begin: [305.927, -112.912]
+    end: [305.927, -112.912]
+    route_s: 609.307
+    # route lateral 13.764 m
   - id: 759
     controller_id: -1
     road_id: 396
-    lane_ids: [-1]
+    lane_ids: [1]
     begin: [306.362, -96.716]
     end: [306.362, -96.716]
     route_s: 600.375
@@ -88,11 +784,19 @@ stop_lines:
   - id: 760
     controller_id: -1
     road_id: 396
-    lane_ids: [-1]
+    lane_ids: [1]
     begin: [306.134, -96.340]
     end: [306.134, -96.340]
     route_s: 600.375
     # route lateral 0.233 m
+  - id: 765
+    controller_id: -1
+    road_id: 396
+    lane_ids: [-2]
+    begin: [316.483, -97.108]
+    end: [316.483, -97.108]
+    route_s: 591.930
+    # route lateral 5.807 m
   - id: 766
     controller_id: -1
     road_id: 396
@@ -101,10 +805,202 @@ stop_lines:
     end: [315.131, -94.888]
     route_s: 591.933
     # route lateral 3.207 m
+  - id: 767
+    controller_id: 19
+    road_id: 418
+    lane_ids: [1]
+    begin: [416.385, -192.217]
+    end: [416.385, -192.217]
+    route_s: 807.831
+    # route lateral 120.777 m
+  - id: 768
+    controller_id: 19
+    road_id: 418
+    lane_ids: [2]
+    begin: [414.098, -194.000]
+    end: [414.098, -194.000]
+    route_s: 807.809
+    # route lateral 117.877 m
+  - id: 769
+    controller_id: 19
+    road_id: 418
+    lane_ids: [3]
+    begin: [411.779, -195.809]
+    end: [411.779, -195.809]
+    route_s: 807.787
+    # route lateral 114.935 m
+  - id: 770
+    controller_id: 19
+    road_id: 418
+    lane_ids: [4]
+    begin: [409.446, -197.628]
+    end: [409.446, -197.628]
+    route_s: 807.764
+    # route lateral 111.977 m
+  - id: 771
+    controller_id: 19
+    road_id: 418
+    lane_ids: [4]
+    begin: [407.597, -199.069]
+    end: [407.597, -199.069]
+    route_s: 807.746
+    # route lateral 109.633 m
+  - id: 772
+    controller_id: 19
+    road_id: 418
+    lane_ids: [5]
+    begin: [406.528, -199.903]
+    end: [406.528, -199.903]
+    route_s: 807.735
+    # route lateral 108.277 m
+  - id: 849
+    controller_id: 15
+    road_id: 418
+    lane_ids: [-1]
+    begin: [350.371, -102.255]
+    end: [350.371, -102.255]
+    route_s: 583.332
+    # route lateral 34.577 m
+  - id: 850
+    controller_id: 15
+    road_id: 418
+    lane_ids: [-4]
+    begin: [359.135, -96.472]
+    end: [359.135, -96.472]
+    route_s: 581.534
+    # route lateral 40.555 m
+  - id: 851
+    controller_id: 15
+    road_id: 418
+    lane_ids: [-3]
+    begin: [357.302, -97.681]
+    end: [357.302, -97.681]
+    route_s: 581.966
+    # route lateral 39.181 m
+  - id: 852
+    controller_id: 15
+    road_id: 418
+    lane_ids: [-3]
+    begin: [355.211, -99.059]
+    end: [355.211, -99.059]
+    route_s: 582.398
+    # route lateral 37.688 m
+  - id: 853
+    controller_id: 15
+    road_id: 418
+    lane_ids: [-2]
+    begin: [352.790, -100.655]
+    end: [352.790, -100.655]
+    route_s: 582.830
+    # route lateral 36.066 m
+  - id: 856
+    controller_id: 17
+    road_id: 420
+    lane_ids: [2]
+    begin: [356.159, -65.844]
+    end: [356.159, -65.844]
+    route_s: 574.603
+    # route lateral 37.930 m
+  - id: 857
+    controller_id: 17
+    road_id: 420
+    lane_ids: [1]
+    begin: [358.176, -68.946]
+    end: [358.176, -68.946]
+    route_s: 575.472
+    # route lateral 38.975 m
+  - id: 858
+    controller_id: 17
+    road_id: 420
+    lane_ids: [2]
+    begin: [356.914, -67.007]
+    end: [356.914, -67.007]
+    route_s: 575.038
+    # route lateral 38.290 m
+  - id: 881
+    controller_id: 17
+    road_id: 420
+    lane_ids: [-1]
+    begin: [406.841, -40.694]
+    end: [406.841, -40.694]
+    route_s: 573.705
+    # route lateral 94.266 m
+  - id: 882
+    controller_id: 17
+    road_id: 420
+    lane_ids: [-1]
+    begin: [406.791, -40.608]
+    end: [406.791, -40.608]
+    route_s: 573.705
+    # route lateral 94.253 m
+  - id: 886
+    controller_id: 17
+    road_id: 420
+    lane_ids: [1]
+    begin: [414.791, -31.456]
+    end: [414.791, -31.456]
+    route_s: 549.250
+    # route lateral 105.211 m
+  - id: 887
+    controller_id: 17
+    road_id: 420
+    lane_ids: [1]
+    begin: [415.112, -31.963]
+    end: [415.112, -31.963]
+    route_s: 572.768
+    # route lateral 105.358 m
+  - id: 898
+    controller_id: -1
+    road_id: 420
+    lane_ids: [-1]
+    begin: [442.010, -20.034]
+    end: [442.010, -20.034]
+    route_s: 549.250
+    # route lateral 134.359 m
+  - id: 899
+    controller_id: -1
+    road_id: 420
+    lane_ids: [-1]
+    begin: [441.794, -19.698]
+    end: [441.794, -19.698]
+    route_s: 549.250
+    # route lateral 134.236 m
+  - id: 901
+    controller_id: 11
+    road_id: 429
+    lane_ids: [2]
+    begin: [325.188, -58.319]
+    end: [325.188, -58.319]
+    route_s: 554.288
+    # route lateral 12.591 m
+  - id: 902
+    controller_id: 11
+    road_id: 429
+    lane_ids: [3]
+    begin: [322.576, -59.589]
+    end: [322.576, -59.589]
+    route_s: 556.042
+    # route lateral 9.872 m
+  - id: 903
+    controller_id: 11
+    road_id: 429
+    lane_ids: [4]
+    begin: [319.972, -60.854]
+    end: [319.972, -60.854]
+    route_s: 558.080
+    # route lateral 7.077 m
+  - id: 904
+    controller_id: 11
+    road_id: 429
+    lane_ids: [5]
+    begin: [317.362, -62.119]
+    end: [317.362, -62.119]
+    route_s: 559.025
+    # route lateral 4.192 m
   - id: 905
     controller_id: 11
     road_id: 429
-    lane_ids: [-1]
+    lane_ids: [6]
     begin: [314.808, -63.360]
     end: [314.808, -63.360]
     route_s: 559.121
@@ -112,58 +1008,5747 @@ stop_lines:
   - id: 906
     controller_id: 11
     road_id: 429
-    lane_ids: [-1]
+    lane_ids: [6]
     begin: [313.514, -63.990]
     end: [313.514, -63.990]
     route_s: 559.170
     # route lateral 0.084 m
+  - id: 1007
+    controller_id: 8
+    road_id: 429
+    lane_ids: [-3]
+    begin: [248.751, 149.094]
+    end: [248.751, 149.094]
+    route_s: 335.960
+    # route lateral 12.827 m
+  - id: 1008
+    controller_id: 7
+    road_id: 429
+    lane_ids: [-2]
+    begin: [246.070, 148.183]
+    end: [246.070, 148.183]
+    route_s: 335.978
+    # route lateral 9.995 m
+  - id: 1009
+    controller_id: 8
+    road_id: 429
+    lane_ids: [-5]
+    begin: [255.821, 151.499]
+    end: [255.821, 151.499]
+    route_s: 335.922
+    # route lateral 20.295 m
+  - id: 1010
+    controller_id: 8
+    road_id: 429
+    lane_ids: [-5]
+    begin: [254.212, 150.952]
+    end: [254.212, 150.952]
+    route_s: 335.924
+    # route lateral 18.595 m
+  - id: 1011
+    controller_id: 8
+    road_id: 429
+    lane_ids: [-4]
+    begin: [251.466, 150.018]
+    end: [251.466, 150.018]
+    route_s: 335.942
+    # route lateral 15.695 m
+  - id: 1014
+    controller_id: 25
+    road_id: 465
+    lane_ids: [1]
+    begin: [455.446, -197.361]
+    end: [455.446, -197.361]
+    route_s: 816.049
+    # route lateral 149.558 m
+  - id: 1015
+    controller_id: 25
+    road_id: 465
+    lane_ids: [2]
+    begin: [453.945, -194.938]
+    end: [453.945, -194.938]
+    route_s: 816.049
+    # route lateral 149.530 m
+  - id: 1043
+    controller_id: 27
+    road_id: 465
+    lane_ids: [-1]
+    begin: [512.933, -165.922]
+    end: [512.933, -165.922]
+    route_s: 582.398
+    # route lateral 208.979 m
+  - id: 1091
+    controller_id: 34
+    road_id: 940
+    lane_ids: [1]
+    begin: [586.568, -408.346]
+    end: [586.568, -408.346]
+    route_s: 816.049
+    # route lateral 292.601 m
+  - id: 1092
+    controller_id: 34
+    road_id: 940
+    lane_ids: [2]
+    begin: [588.849, -406.555]
+    end: [588.849, -406.555]
+    route_s: 816.049
+    # route lateral 293.814 m
+  - id: 1093
+    controller_id: 34
+    road_id: 940
+    lane_ids: [3]
+    begin: [591.212, -404.706]
+    end: [591.212, -404.706]
+    route_s: 816.049
+    # route lateral 295.097 m
+  - id: 1094
+    controller_id: 34
+    road_id: 940
+    lane_ids: [4]
+    begin: [593.261, -403.098]
+    end: [593.261, -403.098]
+    route_s: 816.049
+    # route lateral 296.228 m
+  - id: 1095
+    controller_id: 34
+    road_id: 940
+    lane_ids: [5]
+    begin: [595.539, -401.311]
+    end: [595.539, -401.311]
+    route_s: 816.049
+    # route lateral 297.507 m
+  - id: 1096
+    controller_id: 34
+    road_id: 940
+    lane_ids: [5]
+    begin: [596.797, -400.323]
+    end: [596.797, -400.323]
+    route_s: 816.049
+    # route lateral 298.223 m
+  - id: 1184
+    controller_id: 38
+    road_id: 940
+    lane_ids: [-3]
+    begin: [668.575, -528.738]
+    end: [668.575, -528.738]
+    route_s: 816.049
+    # route lateral 426.462 m
+  - id: 1185
+    controller_id: 38
+    road_id: 940
+    lane_ids: [-2]
+    begin: [670.873, -526.970]
+    end: [670.873, -526.970]
+    route_s: 816.049
+    # route lateral 427.255 m
+  - id: 1186
+    controller_id: 38
+    road_id: 940
+    lane_ids: [-1]
+    begin: [673.964, -524.591]
+    end: [673.964, -524.591]
+    route_s: 816.049
+    # route lateral 428.350 m
+  - id: 1187
+    controller_id: 38
+    road_id: 940
+    lane_ids: [-1]
+    begin: [673.171, -525.201]
+    end: [673.171, -525.201]
+    route_s: 816.049
+    # route lateral 428.066 m
+  - id: 1191
+    controller_id: 43
+    road_id: 1043
+    lane_ids: [1]
+    begin: [748.700, -269.861]
+    end: [748.700, -269.861]
+    route_s: 816.049
+    # route lateral 421.906 m
+  - id: 1192
+    controller_id: 43
+    road_id: 1043
+    lane_ids: [2]
+    begin: [750.980, -268.069]
+    end: [750.980, -268.069]
+    route_s: 816.049
+    # route lateral 424.205 m
+  - id: 1193
+    controller_id: 43
+    road_id: 1043
+    lane_ids: [2]
+    begin: [751.059, -268.007]
+    end: [751.059, -268.007]
+    route_s: 816.049
+    # route lateral 424.285 m
+  - id: 1224
+    controller_id: 9
+    road_id: 1183
+    lane_ids: [1]
+    begin: [256.592, 209.711]
+    end: [256.592, 209.711]
+    route_s: 316.614
+    # route lateral 56.094 m
+  - id: 1225
+    controller_id: 9
+    road_id: 1183
+    lane_ids: [2]
+    begin: [254.571, 211.798]
+    end: [254.571, 211.798]
+    route_s: 316.168
+    # route lateral 56.898 m
+  - id: 1226
+    controller_id: 9
+    road_id: 1183
+    lane_ids: [3]
+    begin: [252.766, 213.662]
+    end: [252.766, 213.662]
+    route_s: 315.723
+    # route lateral 57.710 m
+  - id: 1227
+    controller_id: 9
+    road_id: 1183
+    lane_ids: [1]
+    begin: [256.940, 209.352]
+    end: [256.940, 209.352]
+    route_s: 316.614
+    # route lateral 55.968 m
+  - id: 1256
+    controller_id: -1
+    road_id: 1184
+    lane_ids: [1]
+    begin: [223.041, 221.471]
+    end: [223.041, 221.471]
+    route_s: 309.927
+    # route lateral 58.008 m
+  - id: 1274
+    controller_id: 147
+    road_id: 1222
+    lane_ids: [1]
+    begin: [941.576, 221.561]
+    end: [941.576, 221.561]
+    route_s: 547.782
+    # route lateral 687.115 m
+  - id: 1275
+    controller_id: 147
+    road_id: 1222
+    lane_ids: [2]
+    begin: [939.837, 223.756]
+    end: [939.837, 223.756]
+    route_s: 547.782
+    # route lateral 686.402 m
+  - id: 1294
+    controller_id: -1
+    road_id: 1222
+    lane_ids: [-1]
+    begin: [990.664, 256.600]
+    end: [990.664, 256.600]
+    route_s: 547.782
+    # route lateral 746.216 m
+  - id: 1298
+    controller_id: 147
+    road_id: 1222
+    lane_ids: [1]
+    begin: [997.228, 265.644]
+    end: [997.228, 265.644]
+    route_s: 547.298
+    # route lateral 755.958 m
+  - id: 1299
+    controller_id: 147
+    road_id: 1222
+    lane_ids: [2]
+    begin: [995.486, 267.836]
+    end: [995.486, 267.836]
+    route_s: 547.298
+    # route lateral 755.304 m
+  - id: 1329
+    controller_id: -1
+    road_id: 1222
+    lane_ids: [-1]
+    begin: [1085.007, 335.374]
+    end: [1085.007, 335.374]
+    route_s: 439.942
+    # route lateral 864.406 m
+  - id: 1330
+    controller_id: -1
+    road_id: 1222
+    lane_ids: [-2]
+    begin: [1087.223, 333.352]
+    end: [1087.223, 333.352]
+    route_s: 440.926
+    # route lateral 865.821 m
+  - id: 1336
+    controller_id: -1
+    road_id: 1447
+    lane_ids: [2]
+    begin: [1421.978, 429.739]
+    end: [1421.978, 429.739]
+    route_s: 547.782
+    # route lateral 1210.683 m
+  - id: 1337
+    controller_id: -1
+    road_id: 1447
+    lane_ids: [3]
+    begin: [1421.868, 432.737]
+    end: [1421.868, 432.737]
+    route_s: 547.782
+    # route lateral 1211.780 m
+  - id: 1347
+    controller_id: -1
+    road_id: 1447
+    lane_ids: [-1]
+    begin: [1448.153, 427.201]
+    end: [1448.153, 427.201]
+    route_s: 547.782
+    # route lateral 1233.744 m
+  - id: 1348
+    controller_id: -1
+    road_id: 1462
+    lane_ids: [1]
+    begin: [409.142, -251.567]
+    end: [409.142, -251.567]
+    route_s: 816.049
+    # route lateral 85.242 m
+  - id: 1349
+    controller_id: -1
+    road_id: 1462
+    lane_ids: [1]
+    begin: [408.906, -251.753]
+    end: [408.906, -251.753]
+    route_s: 816.049
+    # route lateral 84.966 m
+  - id: 1368
+    controller_id: -1
+    road_id: 1462
+    lane_ids: [-1]
+    begin: [451.135, -310.560]
+    end: [451.135, -310.560]
+    route_s: 816.049
+    # route lateral 129.685 m
+  - id: 1369
+    controller_id: -1
+    road_id: 1462
+    lane_ids: [-1]
+    begin: [451.292, -310.436]
+    end: [451.292, -310.436]
+    route_s: 816.049
+    # route lateral 129.801 m
+  - id: 1371
+    controller_id: -1
+    road_id: 1476
+    lane_ids: [1]
+    begin: [462.798, -326.065]
+    end: [462.798, -326.065]
+    route_s: 816.049
+    # route lateral 145.737 m
+  - id: 1374
+    controller_id: -1
+    road_id: 1492
+    lane_ids: [1]
+    begin: [409.927, -347.645]
+    end: [409.927, -347.645]
+    route_s: 816.049
+    # route lateral 111.278 m
+  - id: 1376
+    controller_id: -1
+    road_id: 1492
+    lane_ids: [-1]
+    begin: [418.518, -347.185]
+    end: [418.518, -347.185]
+    route_s: 816.049
+    # route lateral 117.544 m
+  - id: 1377
+    controller_id: -1
+    road_id: 1493
+    lane_ids: [1]
+    begin: [433.857, -364.064]
+    end: [433.857, -364.064]
+    route_s: 816.049
+    # route lateral 140.116 m
+  - id: 1379
+    controller_id: -1
+    road_id: 1493
+    lane_ids: [-1]
+    begin: [435.045, -351.335]
+    end: [435.045, -351.335]
+    route_s: 816.049
+    # route lateral 133.225 m
+  - id: 1383
+    controller_id: -1
+    road_id: 1529
+    lane_ids: [1]
+    begin: [447.769, -367.245]
+    end: [447.769, -367.245]
+    route_s: 816.049
+    # route lateral 152.937 m
+  - id: 1386
+    controller_id: -1
+    road_id: 1529
+    lane_ids: [-1]
+    begin: [469.855, -357.402]
+    end: [469.855, -357.402]
+    route_s: 816.049
+    # route lateral 165.756 m
+  - id: 1389
+    controller_id: -1
+    road_id: 1530
+    lane_ids: [-1]
+    begin: [494.585, -371.403]
+    end: [494.585, -371.403]
+    route_s: 816.049
+    # route lateral 194.172 m
+  - id: 1391
+    controller_id: -1
+    road_id: 1543
+    lane_ids: [1]
+    begin: [439.754, -383.217]
+    end: [439.754, -383.217]
+    route_s: 816.049
+    # route lateral 157.353 m
+  - id: 1393
+    controller_id: -1
+    road_id: 1543
+    lane_ids: [-1]
+    begin: [440.985, -412.588]
+    end: [440.985, -412.588]
+    route_s: 816.049
+    # route lateral 179.828 m
+  - id: 1394
+    controller_id: -1
+    road_id: 1562
+    lane_ids: [1]
+    begin: [512.738, -389.503]
+    end: [512.738, -389.503]
+    route_s: 816.049
+    # route lateral 219.065 m
+  - id: 1397
+    controller_id: -1
+    road_id: 1562
+    lane_ids: [-1]
+    begin: [516.449, -399.056]
+    end: [516.449, -399.056]
+    route_s: 816.049
+    # route lateral 227.350 m
+  - id: 1398
+    controller_id: -1
+    road_id: 1563
+    lane_ids: [1]
+    begin: [454.845, -417.981]
+    end: [454.845, -417.981]
+    route_s: 816.049
+    # route lateral 192.931 m
+  - id: 1405
+    controller_id: -1
+    road_id: 1563
+    lane_ids: [-1]
+    begin: [495.681, -389.660]
+    end: [495.681, -389.660]
+    route_s: 816.049
+    # route lateral 204.876 m
+  - id: 1444
+    controller_id: -1
+    road_id: 1602
+    lane_ids: [-2]
+    begin: [455.898, -469.831]
+    end: [455.898, -469.831]
+    route_s: 816.049
+    # route lateral 234.838 m
+  - id: 1445
+    controller_id: -1
+    road_id: 1602
+    lane_ids: [-3]
+    begin: [454.166, -467.631]
+    end: [454.166, -467.631]
+    route_s: 816.049
+    # route lateral 232.048 m
+  - id: 1446
+    controller_id: -1
+    road_id: 1602
+    lane_ids: [-3]
+    begin: [454.043, -467.474]
+    end: [454.043, -467.474]
+    route_s: 816.049
+    # route lateral 231.849 m
+  - id: 1449
+    controller_id: -1
+    road_id: 1603
+    lane_ids: [1]
+    begin: [453.332, -499.051]
+    end: [453.332, -499.051]
+    route_s: 816.049
+    # route lateral 258.478 m
+  - id: 1450
+    controller_id: -1
+    road_id: 1603
+    lane_ids: [2]
+    begin: [455.596, -497.404]
+    end: [455.596, -497.404]
+    route_s: 816.049
+    # route lateral 258.165 m
+  - id: 1482
+    controller_id: 32
+    road_id: 1648
+    lane_ids: [1]
+    begin: [544.840, -403.874]
+    end: [544.840, -403.874]
+    route_s: 816.049
+    # route lateral 253.955 m
+  - id: 1483
+    controller_id: 32
+    road_id: 1648
+    lane_ids: [3]
+    begin: [548.527, -408.607]
+    end: [548.527, -408.607]
+    route_s: 816.049
+    # route lateral 259.557 m
+  - id: 1484
+    controller_id: 32
+    road_id: 1648
+    lane_ids: [2]
+    begin: [546.683, -406.241]
+    end: [546.683, -406.241]
+    route_s: 816.049
+    # route lateral 256.754 m
+  - id: 1495
+    controller_id: -1
+    road_id: 1712
+    lane_ids: [2]
+    begin: [495.258, -583.306]
+    end: [495.258, -583.306]
+    route_s: 816.049
+    # route lateral 352.502 m
+  - id: 1496
+    controller_id: -1
+    road_id: 1712
+    lane_ids: [1]
+    begin: [492.762, -583.452]
+    end: [492.762, -583.452]
+    route_s: 816.049
+    # route lateral 351.445 m
+  - id: 1520
+    controller_id: -1
+    road_id: 1712
+    lane_ids: [-1]
+    begin: [490.491, -624.060]
+    end: [490.491, -624.060]
+    route_s: 816.049
+    # route lateral 386.749 m
+  - id: 1523
+    controller_id: 47
+    road_id: 1734
+    lane_ids: [1]
+    begin: [495.605, -650.252]
+    end: [495.605, -650.252]
+    route_s: 816.049
+    # route lateral 412.694 m
+  - id: 1524
+    controller_id: 47
+    road_id: 1734
+    lane_ids: [2]
+    begin: [498.027, -649.630]
+    end: [498.027, -649.630]
+    route_s: 816.049
+    # route lateral 413.125 m
+  - id: 1544
+    controller_id: 47
+    road_id: 1734
+    lane_ids: [-1]
+    begin: [500.482, -674.286]
+    end: [500.482, -674.286]
+    route_s: 816.049
+    # route lateral 436.654 m
+  - id: 1549
+    controller_id: 48
+    road_id: 1750
+    lane_ids: [1]
+    begin: [518.718, -699.368]
+    end: [518.718, -699.368]
+    route_s: 816.049
+    # route lateral 466.969 m
+  - id: 1550
+    controller_id: 48
+    road_id: 1750
+    lane_ids: [2]
+    begin: [520.685, -697.825]
+    end: [520.685, -697.825]
+    route_s: 816.049
+    # route lateral 466.376 m
+  - id: 1565
+    controller_id: -1
+    road_id: 1750
+    lane_ids: [-1]
+    begin: [534.382, -723.865]
+    end: [534.382, -723.865]
+    route_s: 816.049
+    # route lateral 495.756 m
+  - id: 1581
+    controller_id: 50
+    road_id: 1769
+    lane_ids: [2]
+    begin: [546.504, -730.643]
+    end: [546.504, -730.643]
+    route_s: 816.049
+    # route lateral 507.054 m
+  - id: 1582
+    controller_id: 50
+    road_id: 1769
+    lane_ids: [1]
+    begin: [544.537, -732.186]
+    end: [544.537, -732.186]
+    route_s: 816.049
+    # route lateral 507.597 m
+  - id: 1607
+    controller_id: 49
+    road_id: 1769
+    lane_ids: [-2]
+    begin: [575.747, -776.041]
+    end: [575.747, -776.041]
+    route_s: 816.049
+    # route lateral 560.679 m
+  - id: 1608
+    controller_id: 50
+    road_id: 1769
+    lane_ids: [-1]
+    begin: [577.882, -774.389]
+    end: [577.882, -774.389]
+    route_s: 816.049
+    # route lateral 560.153 m
+  - id: 1614
+    controller_id: 51
+    road_id: 1776
+    lane_ids: [-2]
+    begin: [579.332, -799.310]
+    end: [579.332, -799.310]
+    route_s: 816.049
+    # route lateral 583.163 m
+  - id: 1615
+    controller_id: 51
+    road_id: 1776
+    lane_ids: [-1]
+    begin: [577.946, -797.601]
+    end: [577.946, -797.601]
+    route_s: 816.049
+    # route lateral 581.023 m
+  - id: 1616
+    controller_id: 51
+    road_id: 1776
+    lane_ids: [-1]
+    begin: [577.316, -796.824]
+    end: [577.316, -796.824]
+    route_s: 816.049
+    # route lateral 580.051 m
+  - id: 1619
+    controller_id: 53
+    road_id: 1777
+    lane_ids: [2]
+    begin: [602.063, -801.479]
+    end: [602.063, -801.479]
+    route_s: 816.049
+    # route lateral 595.283 m
+  - id: 1620
+    controller_id: 53
+    road_id: 1777
+    lane_ids: [1]
+    begin: [600.143, -803.079]
+    end: [600.143, -803.079]
+    route_s: 816.049
+    # route lateral 595.819 m
+  - id: 1657
+    controller_id: 57
+    road_id: 1777
+    lane_ids: [-1]
+    begin: [647.756, -851.949]
+    end: [647.756, -851.949]
+    route_s: 816.049
+    # route lateral 661.384 m
+  - id: 1658
+    controller_id: 57
+    road_id: 1777
+    lane_ids: [-2]
+    begin: [646.755, -853.681]
+    end: [646.755, -853.681]
+    route_s: 816.049
+    # route lateral 662.415 m
+  - id: 1659
+    controller_id: 57
+    road_id: 1777
+    lane_ids: [-1]
+    begin: [648.258, -851.084]
+    end: [648.258, -851.084]
+    route_s: 816.049
+    # route lateral 660.873 m
+  - id: 1662
+    controller_id: 225
+    road_id: 1778
+    lane_ids: [3]
+    begin: [653.810, -741.037]
+    end: [653.810, -741.037]
+    route_s: 816.049
+    # route lateral 570.416 m
+  - id: 1663
+    controller_id: 225
+    road_id: 1778
+    lane_ids: [2]
+    begin: [651.945, -738.688]
+    end: [651.945, -738.688]
+    route_s: 816.049
+    # route lateral 567.422 m
+  - id: 1687
+    controller_id: 55
+    road_id: 1778
+    lane_ids: [-2]
+    begin: [600.528, -775.292]
+    end: [600.528, -775.292]
+    route_s: 816.049
+    # route lateral 571.454 m
+  - id: 1688
+    controller_id: 55
+    road_id: 1778
+    lane_ids: [-2]
+    begin: [600.281, -774.977]
+    end: [600.281, -774.977]
+    route_s: 816.049
+    # route lateral 571.060 m
+  - id: 1689
+    controller_id: 55
+    road_id: 1778
+    lane_ids: [-2]
+    begin: [600.405, -775.134]
+    end: [600.405, -775.134]
+    route_s: 816.049
+    # route lateral 571.257 m
+  - id: 1696
+    controller_id: 58
+    road_id: 1818
+    lane_ids: [2]
+    begin: [677.084, -858.094]
+    end: [677.084, -858.094]
+    route_s: 816.049
+    # route lateral 681.366 m
+  - id: 1697
+    controller_id: 58
+    road_id: 1818
+    lane_ids: [1]
+    begin: [676.086, -860.386]
+    end: [676.086, -860.386]
+    route_s: 816.049
+    # route lateral 682.822 m
+  - id: 1742
+    controller_id: 59
+    road_id: 1818
+    lane_ids: [-2]
+    begin: [756.078, -912.434]
+    end: [756.078, -912.434]
+    route_s: 816.049
+    # route lateral 769.616 m
+  - id: 1743
+    controller_id: 59
+    road_id: 1818
+    lane_ids: [-1]
+    begin: [758.272, -910.105]
+    end: [758.272, -910.105]
+    route_s: 816.049
+    # route lateral 768.913 m
+  - id: 1744
+    controller_id: 59
+    road_id: 1818
+    lane_ids: [-1]
+    begin: [757.587, -910.833]
+    end: [757.587, -910.833]
+    route_s: 816.049
+    # route lateral 769.132 m
+  - id: 1755
+    controller_id: 62
+    road_id: 1825
+    lane_ids: [1]
+    begin: [781.006, -911.596]
+    end: [781.006, -911.596]
+    route_s: 816.049
+    # route lateral 783.110 m
+  - id: 1756
+    controller_id: 62
+    road_id: 1825
+    lane_ids: [2]
+    begin: [779.153, -909.237]
+    end: [779.153, -909.237]
+    route_s: 816.049
+    # route lateral 780.114 m
+  - id: 1757
+    controller_id: 62
+    road_id: 1825
+    lane_ids: [2]
+    begin: [779.092, -909.158]
+    end: [779.092, -909.158]
+    route_s: 816.049
+    # route lateral 780.014 m
+  - id: 1771
+    controller_id: 63
+    road_id: 1825
+    lane_ids: [-2]
+    begin: [829.869, -877.668]
+    end: [829.869, -877.668]
+    route_s: 816.049
+    # route lateral 786.066 m
+  - id: 1772
+    controller_id: 63
+    road_id: 1825
+    lane_ids: [-2]
+    begin: [829.622, -877.354]
+    end: [829.622, -877.354]
+    route_s: 816.049
+    # route lateral 785.666 m
+  - id: 1774
+    controller_id: 61
+    road_id: 1826
+    lane_ids: [1]
+    begin: [782.906, -931.562]
+    end: [782.906, -931.562]
+    route_s: 816.049
+    # route lateral 800.539 m
+  - id: 1792
+    controller_id: 61
+    road_id: 1826
+    lane_ids: [-2]
+    begin: [807.252, -971.715]
+    end: [807.252, -971.715]
+    route_s: 816.049
+    # route lateral 847.414 m
+  - id: 1793
+    controller_id: 61
+    road_id: 1826
+    lane_ids: [-1]
+    begin: [808.727, -970.517]
+    end: [808.727, -970.517]
+    route_s: 816.049
+    # route lateral 847.265 m
+  - id: 1794
+    controller_id: 61
+    road_id: 1826
+    lane_ids: [-1]
+    begin: [809.658, -969.760]
+    end: [809.658, -969.760]
+    route_s: 816.049
+    # route lateral 847.174 m
+  - id: 1813
+    controller_id: -1
+    road_id: 1845
+    lane_ids: [-2]
+    begin: [830.370, -972.873]
+    end: [830.370, -972.873]
+    route_s: 816.049
+    # route lateral 861.671 m
+  - id: 1814
+    controller_id: -1
+    road_id: 1845
+    lane_ids: [-3]
+    begin: [828.685, -970.764]
+    end: [828.685, -970.764]
+    route_s: 816.049
+    # route lateral 858.974 m
+  - id: 1815
+    controller_id: -1
+    road_id: 1845
+    lane_ids: [-3]
+    begin: [828.248, -970.217]
+    end: [828.248, -970.217]
+    route_s: 816.049
+    # route lateral 858.275 m
+  - id: 1816
+    controller_id: -1
+    road_id: 1846
+    lane_ids: [1]
+    begin: [830.209, -991.372]
+    end: [830.209, -991.372]
+    route_s: 816.049
+    # route lateral 876.657 m
+  - id: 1827
+    controller_id: 64
+    road_id: 1846
+    lane_ids: [-2]
+    begin: [839.689, -1012.751]
+    end: [839.689, -1012.751]
+    route_s: 816.049
+    # route lateral 899.614 m
+  - id: 1828
+    controller_id: 64
+    road_id: 1846
+    lane_ids: [-1]
+    begin: [841.106, -1011.642]
+    end: [841.106, -1011.642]
+    route_s: 816.049
+    # route lateral 899.513 m
+  - id: 1829
+    controller_id: 64
+    road_id: 1846
+    lane_ids: [-1]
+    begin: [842.051, -1010.902]
+    end: [842.051, -1010.902]
+    route_s: 816.049
+    # route lateral 899.448 m
+  - id: 1836
+    controller_id: 66
+    road_id: 1868
+    lane_ids: [2]
+    begin: [874.716, -1051.897]
+    end: [874.716, -1051.897]
+    route_s: 816.049
+    # route lateral 951.767 m
+  - id: 1837
+    controller_id: 66
+    road_id: 1868
+    lane_ids: [3]
+    begin: [876.993, -1050.101]
+    end: [876.993, -1050.101]
+    route_s: 816.049
+    # route lateral 951.613 m
+  - id: 1864
+    controller_id: 70
+    road_id: 1868
+    lane_ids: [-1]
+    begin: [907.091, -1098.102]
+    end: [907.091, -1098.102]
+    route_s: 816.049
+    # route lateral 1008.185 m
+  - id: 1865
+    controller_id: 70
+    road_id: 1868
+    lane_ids: [-2]
+    begin: [904.578, -1100.084]
+    end: [904.578, -1100.084]
+    route_s: 816.049
+    # route lateral 1008.365 m
+  - id: 1866
+    controller_id: 70
+    road_id: 1868
+    lane_ids: [-1]
+    begin: [906.149, -1098.846]
+    end: [906.149, -1098.846]
+    route_s: 816.049
+    # route lateral 1008.252 m
+  - id: 1871
+    controller_id: 69
+    road_id: 1869
+    lane_ids: [1]
+    begin: [876.033, -1017.840]
+    end: [876.033, -1017.840]
+    route_s: 816.049
+    # route lateral 924.909 m
+  - id: 1872
+    controller_id: 69
+    road_id: 1869
+    lane_ids: [1]
+    begin: [875.603, -1017.288]
+    end: [875.603, -1017.288]
+    route_s: 816.049
+    # route lateral 924.209 m
+  - id: 1873
+    controller_id: 68
+    road_id: 1869
+    lane_ids: [3]
+    begin: [872.463, -1013.269]
+    end: [872.463, -1013.269]
+    route_s: 816.049
+    # route lateral 919.111 m
+  - id: 1874
+    controller_id: 68
+    road_id: 1869
+    lane_ids: [4]
+    begin: [870.001, -1010.116]
+    end: [870.001, -1010.116]
+    route_s: 816.049
+    # route lateral 915.112 m
+  - id: 1875
+    controller_id: 68
+    road_id: 1869
+    lane_ids: [2]
+    begin: [873.818, -1015.003]
+    end: [873.818, -1015.003]
+    route_s: 816.049
+    # route lateral 921.310 m
+  - id: 1876
+    controller_id: 68
+    road_id: 1869
+    lane_ids: [4]
+    begin: [871.171, -1011.614]
+    end: [871.171, -1011.614]
+    route_s: 816.049
+    # route lateral 917.012 m
+  - id: 1935
+    controller_id: 227
+    road_id: 1869
+    lane_ids: [-2]
+    begin: [967.976, -946.540]
+    end: [967.976, -946.540]
+    route_s: 816.049
+    # route lateral 929.444 m
+  - id: 1936
+    controller_id: 227
+    road_id: 1869
+    lane_ids: [-6]
+    begin: [975.836, -956.515]
+    end: [975.836, -956.515]
+    route_s: 816.049
+    # route lateral 942.089 m
+  - id: 1937
+    controller_id: 227
+    road_id: 1869
+    lane_ids: [-6]
+    begin: [975.093, -955.572]
+    end: [975.093, -955.572]
+    route_s: 816.049
+    # route lateral 940.894 m
+  - id: 1938
+    controller_id: 227
+    road_id: 1869
+    lane_ids: [-5]
+    begin: [973.237, -953.216]
+    end: [973.237, -953.216]
+    route_s: 816.049
+    # route lateral 937.907 m
+  - id: 1939
+    controller_id: 227
+    road_id: 1869
+    lane_ids: [-4]
+    begin: [971.380, -950.860]
+    end: [971.380, -950.860]
+    route_s: 816.049
+    # route lateral 934.920 m
+  - id: 1940
+    controller_id: 227
+    road_id: 1869
+    lane_ids: [-3]
+    begin: [969.523, -948.504]
+    end: [969.523, -948.504]
+    route_s: 816.049
+    # route lateral 931.933 m
+  - id: 1951
+    controller_id: 71
+    road_id: 1909
+    lane_ids: [2]
+    begin: [934.556, -1128.126]
+    end: [934.556, -1128.126]
+    route_s: 816.049
+    # route lateral 1048.558 m
+  - id: 1952
+    controller_id: 71
+    road_id: 1909
+    lane_ids: [3]
+    begin: [936.428, -1126.624]
+    end: [936.428, -1126.624]
+    route_s: 816.049
+    # route lateral 1048.422 m
+  - id: 1953
+    controller_id: 71
+    road_id: 1909
+    lane_ids: [2]
+    begin: [934.712, -1128.001]
+    end: [934.712, -1128.001]
+    route_s: 816.049
+    # route lateral 1048.546 m
+  - id: 1954
+    controller_id: 71
+    road_id: 1909
+    lane_ids: [3]
+    begin: [936.896, -1126.249]
+    end: [936.896, -1126.249]
+    route_s: 816.049
+    # route lateral 1048.390 m
+  - id: 2006
+    controller_id: -1
+    road_id: 1909
+    lane_ids: [-1]
+    begin: [1079.934, -1147.954]
+    end: [1079.934, -1147.954]
+    route_s: 816.049
+    # route lateral 1153.946 m
+  - id: 2007
+    controller_id: -1
+    road_id: 1909
+    lane_ids: [-2]
+    begin: [1081.760, -1149.943]
+    end: [1081.760, -1149.943]
+    route_s: 816.049
+    # route lateral 1156.645 m
+  - id: 2010
+    controller_id: 73
+    road_id: 1910
+    lane_ids: [2]
+    begin: [1092.028, -1133.525]
+    end: [1092.028, -1133.525]
+    route_s: 816.049
+    # route lateral 1151.057 m
+  - id: 2011
+    controller_id: 73
+    road_id: 1910
+    lane_ids: [3]
+    begin: [1090.561, -1131.753]
+    end: [1090.561, -1131.753]
+    route_s: 816.049
+    # route lateral 1148.758 m
+  - id: 2012
+    controller_id: 73
+    road_id: 1910
+    lane_ids: [2]
+    begin: [1091.964, -1133.448]
+    end: [1091.964, -1133.448]
+    route_s: 816.049
+    # route lateral 1150.957 m
+  - id: 2013
+    controller_id: 73
+    road_id: 1910
+    lane_ids: [3]
+    begin: [1090.179, -1131.291]
+    end: [1090.179, -1131.291]
+    route_s: 816.049
+    # route lateral 1148.159 m
+  - id: 2026
+    controller_id: 73
+    road_id: 1910
+    lane_ids: [-2]
+    begin: [1113.508, -1123.663]
+    end: [1113.508, -1123.663]
+    route_s: 816.049
+    # route lateral 1158.190 m
+  - id: 2027
+    controller_id: 73
+    road_id: 1910
+    lane_ids: [-1]
+    begin: [1111.786, -1121.583]
+    end: [1111.786, -1121.583]
+    route_s: 816.049
+    # route lateral 1155.495 m
+  - id: 2038
+    controller_id: 76
+    road_id: 1926
+    lane_ids: [6]
+    begin: [1022.665, -941.112]
+    end: [1022.665, -941.112]
+    route_s: 816.049
+    # route lateral 964.215 m
+  - id: 2039
+    controller_id: 76
+    road_id: 1926
+    lane_ids: [6]
+    begin: [1022.979, -940.864]
+    end: [1022.979, -940.864]
+    route_s: 816.049
+    # route lateral 964.270 m
+  - id: 2040
+    controller_id: 76
+    road_id: 1926
+    lane_ids: [3]
+    begin: [1014.423, -947.617]
+    end: [1014.423, -947.617]
+    route_s: 816.049
+    # route lateral 962.826 m
+  - id: 2041
+    controller_id: 76
+    road_id: 1926
+    lane_ids: [4]
+    begin: [1018.348, -944.519]
+    end: [1018.348, -944.519]
+    route_s: 816.049
+    # route lateral 963.474 m
+  - id: 2042
+    controller_id: 76
+    road_id: 1926
+    lane_ids: [2]
+    begin: [1012.696, -948.980]
+    end: [1012.696, -948.980]
+    route_s: 816.049
+    # route lateral 962.549 m
+  - id: 2043
+    controller_id: 76
+    road_id: 1926
+    lane_ids: [5]
+    begin: [1020.410, -942.891]
+    end: [1020.410, -942.891]
+    route_s: 816.049
+    # route lateral 963.824 m
+  - id: 2044
+    controller_id: 76
+    road_id: 1926
+    lane_ids: [3]
+    begin: [1016.071, -946.316]
+    end: [1016.071, -946.316]
+    route_s: 816.049
+    # route lateral 963.095 m
+  - id: 2137
+    controller_id: 72
+    road_id: 1926
+    lane_ids: [-5]
+    begin: [1107.654, -1090.112]
+    end: [1107.654, -1090.112]
+    route_s: 816.049
+    # route lateral 1129.742 m
+  - id: 2138
+    controller_id: 72
+    road_id: 1926
+    lane_ids: [-5]
+    begin: [1107.968, -1089.864]
+    end: [1107.968, -1089.864]
+    route_s: 816.049
+    # route lateral 1129.779 m
+  - id: 2139
+    controller_id: 72
+    road_id: 1926
+    lane_ids: [-2]
+    begin: [1115.031, -1084.287]
+    end: [1115.031, -1084.287]
+    route_s: 816.049
+    # route lateral 1130.670 m
+  - id: 2140
+    controller_id: 72
+    road_id: 1926
+    lane_ids: [-4]
+    begin: [1110.322, -1088.005]
+    end: [1110.322, -1088.005]
+    route_s: 816.049
+    # route lateral 1130.068 m
+  - id: 2141
+    controller_id: 72
+    road_id: 1926
+    lane_ids: [-3]
+    begin: [1112.677, -1086.146]
+    end: [1112.677, -1086.146]
+    route_s: 816.049
+    # route lateral 1130.365 m
+  - id: 2142
+    controller_id: 72
+    road_id: 1926
+    lane_ids: [-2]
+    begin: [1115.031, -1084.287]
+    end: [1115.031, -1084.287]
+    route_s: 816.049
+    # route lateral 1130.670 m
+  - id: 2145
+    controller_id: 94
+    road_id: 1927
+    lane_ids: [5]
+    begin: [1148.806, -816.314]
+    end: [1148.806, -816.314]
+    route_s: 816.049
+    # route lateral 984.964 m
+  - id: 2146
+    controller_id: 94
+    road_id: 1927
+    lane_ids: [2]
+    begin: [1142.724, -808.758]
+    end: [1142.724, -808.758]
+    route_s: 816.049
+    # route lateral 975.730 m
+  - id: 2147
+    controller_id: 94
+    road_id: 1927
+    lane_ids: [3]
+    begin: [1145.483, -812.185]
+    end: [1145.483, -812.185]
+    route_s: 816.049
+    # route lateral 979.917 m
+  - id: 2148
+    controller_id: 94
+    road_id: 1927
+    lane_ids: [4]
+    begin: [1147.131, -814.233]
+    end: [1147.131, -814.233]
+    route_s: 816.049
+    # route lateral 982.419 m
+  - id: 2149
+    controller_id: 94
+    road_id: 1927
+    lane_ids: [2]
+    begin: [1143.665, -809.926]
+    end: [1143.665, -809.926]
+    route_s: 816.049
+    # route lateral 977.157 m
+  - id: 2231
+    controller_id: 79
+    road_id: 1927
+    lane_ids: [-2]
+    begin: [1015.036, -903.436]
+    end: [1015.036, -903.436]
+    route_s: 816.049
+    # route lateral 932.887 m
+  - id: 2232
+    controller_id: 79
+    road_id: 1927
+    lane_ids: [-2]
+    begin: [1015.036, -903.436]
+    end: [1015.036, -903.436]
+    route_s: 816.049
+    # route lateral 932.887 m
+  - id: 2233
+    controller_id: 79
+    road_id: 1927
+    lane_ids: [-5]
+    begin: [1009.380, -896.436]
+    end: [1009.380, -896.436]
+    route_s: 816.049
+    # route lateral 923.989 m
+  - id: 2234
+    controller_id: 79
+    road_id: 1927
+    lane_ids: [-5]
+    begin: [1009.003, -895.969]
+    end: [1009.003, -895.969]
+    route_s: 816.049
+    # route lateral 923.396 m
+  - id: 2235
+    controller_id: 79
+    road_id: 1927
+    lane_ids: [-4]
+    begin: [1011.265, -898.769]
+    end: [1011.265, -898.769]
+    route_s: 816.049
+    # route lateral 926.954 m
+  - id: 2236
+    controller_id: 79
+    road_id: 1927
+    lane_ids: [-3]
+    begin: [1013.150, -901.103]
+    end: [1013.150, -901.103]
+    route_s: 816.049
+    # route lateral 929.920 m
+  - id: 2301
+    controller_id: 74
+    road_id: 1928
+    lane_ids: [-5]
+    begin: [964.508, -908.954]
+    end: [964.508, -908.954]
+    route_s: 816.049
+    # route lateral 900.145 m
+  - id: 2302
+    controller_id: 74
+    road_id: 1928
+    lane_ids: [-5]
+    begin: [964.917, -908.666]
+    end: [964.917, -908.666]
+    route_s: 816.049
+    # route lateral 900.232 m
+  - id: 2303
+    controller_id: 74
+    road_id: 1928
+    lane_ids: [-3]
+    begin: [969.634, -904.957]
+    end: [969.634, -904.957]
+    route_s: 816.049
+    # route lateral 900.979 m
+  - id: 2304
+    controller_id: 74
+    road_id: 1928
+    lane_ids: [-4]
+    begin: [967.276, -906.812]
+    end: [967.276, -906.812]
+    route_s: 816.049
+    # route lateral 900.601 m
+  - id: 2305
+    controller_id: 74
+    road_id: 1928
+    lane_ids: [-2]
+    begin: [971.993, -903.103]
+    end: [971.993, -903.103]
+    route_s: 816.049
+    # route lateral 901.368 m
+  - id: 2306
+    controller_id: 74
+    road_id: 1928
+    lane_ids: [-2]
+    begin: [971.993, -903.103]
+    end: [971.993, -903.103]
+    route_s: 816.049
+    # route lateral 901.368 m
+  - id: 2321
+    controller_id: -1
+    road_id: 1977
+    lane_ids: [2]
+    begin: [849.754, -878.547]
+    end: [849.754, -878.547]
+    route_s: 816.049
+    # route lateral 799.603 m
+  - id: 2322
+    controller_id: -1
+    road_id: 1977
+    lane_ids: [3]
+    begin: [851.799, -876.941]
+    end: [851.799, -876.941]
+    route_s: 816.049
+    # route lateral 799.729 m
+  - id: 2323
+    controller_id: -1
+    road_id: 1977
+    lane_ids: [3]
+    begin: [852.349, -876.509]
+    end: [852.349, -876.509]
+    route_s: 816.049
+    # route lateral 799.764 m
+  - id: 2333
+    controller_id: -1
+    road_id: 1977
+    lane_ids: [-1]
+    begin: [865.189, -903.375]
+    end: [865.189, -903.375]
+    route_s: 816.049
+    # route lateral 828.491 m
+  - id: 2334
+    controller_id: -1
+    road_id: 1977
+    lane_ids: [-1]
+    begin: [864.953, -903.561]
+    end: [864.953, -903.561]
+    route_s: 816.049
+    # route lateral 828.479 m
+  - id: 2335
+    controller_id: -1
+    road_id: 1978
+    lane_ids: [3]
+    begin: [848.209, -854.664]
+    end: [848.209, -854.664]
+    route_s: 816.049
+    # route lateral 780.658 m
+  - id: 2336
+    controller_id: -1
+    road_id: 1978
+    lane_ids: [3]
+    begin: [848.332, -854.822]
+    end: [848.332, -854.822]
+    route_s: 816.049
+    # route lateral 780.857 m
+  - id: 2337
+    controller_id: -1
+    road_id: 1978
+    lane_ids: [2]
+    begin: [850.181, -857.184]
+    end: [850.181, -857.184]
+    route_s: 816.049
+    # route lateral 783.851 m
+  - id: 2351
+    controller_id: -1
+    road_id: 1978
+    lane_ids: [-1]
+    begin: [888.460, -831.286]
+    end: [888.460, -831.286]
+    route_s: 816.049
+    # route lateral 791.456 m
+  - id: 2352
+    controller_id: -1
+    road_id: 1978
+    lane_ids: [-1]
+    begin: [888.707, -831.601]
+    end: [888.707, -831.601]
+    route_s: 816.049
+    # route lateral 791.853 m
+  - id: 2360
+    controller_id: -1
+    road_id: 1999
+    lane_ids: [-3]
+    begin: [878.913, -911.618]
+    end: [878.913, -911.618]
+    route_s: 816.049
+    # route lateral 843.690 m
+  - id: 2361
+    controller_id: -1
+    road_id: 1999
+    lane_ids: [-2]
+    begin: [876.789, -913.286]
+    end: [876.789, -913.286]
+    route_s: 816.049
+    # route lateral 843.566 m
+  - id: 2362
+    controller_id: -1
+    road_id: 1999
+    lane_ids: [-3]
+    begin: [878.598, -911.865]
+    end: [878.598, -911.865]
+    route_s: 816.049
+    # route lateral 843.671 m
+  - id: 2368
+    controller_id: -1
+    road_id: 2003
+    lane_ids: [6]
+    begin: [798.453, -656.472]
+    end: [798.453, -656.472]
+    route_s: 816.049
+    # route lateral 607.450 m
+  - id: 2369
+    controller_id: -1
+    road_id: 2003
+    lane_ids: [4]
+    begin: [794.133, -659.876]
+    end: [794.133, -659.876]
+    route_s: 816.049
+    # route lateral 606.264 m
+  - id: 2370
+    controller_id: -1
+    road_id: 2003
+    lane_ids: [3]
+    begin: [790.206, -662.971]
+    end: [790.206, -662.971]
+    route_s: 816.049
+    # route lateral 605.228 m
+  - id: 2371
+    controller_id: -1
+    road_id: 2003
+    lane_ids: [2]
+    begin: [788.478, -664.332]
+    end: [788.478, -664.332]
+    route_s: 816.049
+    # route lateral 604.785 m
+  - id: 2372
+    controller_id: -1
+    road_id: 2003
+    lane_ids: [5]
+    begin: [796.198, -658.250]
+    end: [796.198, -658.250]
+    route_s: 816.049
+    # route lateral 606.825 m
+  - id: 2373
+    controller_id: -1
+    road_id: 2003
+    lane_ids: [3]
+    begin: [791.855, -661.671]
+    end: [791.855, -661.671]
+    route_s: 816.049
+    # route lateral 605.659 m
+  - id: 2468
+    controller_id: 90
+    road_id: 2003
+    lane_ids: [-3]
+    begin: [885.944, -804.354]
+    end: [885.944, -804.354]
+    route_s: 816.049
+    # route lateral 770.890 m
+  - id: 2469
+    controller_id: 90
+    road_id: 2003
+    lane_ids: [-2]
+    begin: [888.772, -802.126]
+    end: [888.772, -802.126]
+    route_s: 816.049
+    # route lateral 771.415 m
+  - id: 2470
+    controller_id: 90
+    road_id: 2003
+    lane_ids: [-3]
+    begin: [886.415, -803.982]
+    end: [886.415, -803.982]
+    route_s: 816.049
+    # route lateral 770.976 m
+  - id: 2471
+    controller_id: 90
+    road_id: 2003
+    lane_ids: [-1]
+    begin: [891.128, -800.269]
+    end: [891.128, -800.269]
+    route_s: 816.049
+    # route lateral 771.865 m
+  - id: 2473
+    controller_id: -1
+    road_id: 2004
+    lane_ids: [3]
+    begin: [752.463, -663.410]
+    end: [752.463, -663.410]
+    route_s: 816.049
+    # route lateral 577.138 m
+  - id: 2474
+    controller_id: -1
+    road_id: 2004
+    lane_ids: [2]
+    begin: [750.603, -661.056]
+    end: [750.603, -661.056]
+    route_s: 816.049
+    # route lateral 574.177 m
+  - id: 2499
+    controller_id: -1
+    road_id: 2004
+    lane_ids: [-2]
+    begin: [681.711, -710.764]
+    end: [681.711, -710.764]
+    route_s: 816.049
+    # route lateral 563.043 m
+  - id: 2500
+    controller_id: -1
+    road_id: 2004
+    lane_ids: [-2]
+    begin: [681.835, -710.920]
+    end: [681.835, -710.920]
+    route_s: 816.049
+    # route lateral 563.243 m
+  - id: 2501
+    controller_id: -1
+    road_id: 2004
+    lane_ids: [-2]
+    begin: [681.959, -711.077]
+    end: [681.959, -711.077]
+    route_s: 816.049
+    # route lateral 563.443 m
+  - id: 2514
+    controller_id: 88
+    road_id: 2011
+    lane_ids: [2]
+    begin: [689.326, -533.577]
+    end: [689.326, -533.577]
+    route_s: 816.049
+    # route lateral 446.068 m
+  - id: 2515
+    controller_id: 88
+    road_id: 2011
+    lane_ids: [3]
+    begin: [691.213, -532.093]
+    end: [691.213, -532.093]
+    route_s: 816.049
+    # route lateral 446.742 m
+  - id: 2516
+    controller_id: 88
+    road_id: 2011
+    lane_ids: [3]
+    begin: [693.260, -530.483]
+    end: [693.260, -530.483]
+    route_s: 816.049
+    # route lateral 447.488 m
+  - id: 2517
+    controller_id: 88
+    road_id: 2011
+    lane_ids: [4]
+    begin: [694.828, -529.250]
+    end: [694.828, -529.250]
+    route_s: 816.049
+    # route lateral 448.068 m
+  - id: 2587
+    controller_id: -1
+    road_id: 2011
+    lane_ids: [-5]
+    begin: [745.957, -630.651]
+    end: [745.957, -630.651]
+    route_s: 816.049
+    # route lateral 550.572 m
+  - id: 2588
+    controller_id: -1
+    road_id: 2011
+    lane_ids: [-2]
+    begin: [753.041, -625.099]
+    end: [753.041, -625.099]
+    route_s: 816.049
+    # route lateral 552.435 m
+  - id: 2589
+    controller_id: -1
+    road_id: 2011
+    lane_ids: [-2]
+    begin: [753.041, -625.099]
+    end: [753.041, -625.099]
+    route_s: 816.049
+    # route lateral 552.435 m
+  - id: 2590
+    controller_id: -1
+    road_id: 2011
+    lane_ids: [-3]
+    begin: [750.680, -626.950]
+    end: [750.680, -626.950]
+    route_s: 816.049
+    # route lateral 551.798 m
+  - id: 2591
+    controller_id: -1
+    road_id: 2011
+    lane_ids: [-4]
+    begin: [748.319, -628.800]
+    end: [748.319, -628.800]
+    route_s: 816.049
+    # route lateral 551.177 m
+  - id: 2592
+    controller_id: -1
+    road_id: 2011
+    lane_ids: [-5]
+    begin: [745.564, -630.959]
+    end: [745.564, -630.959]
+    route_s: 816.049
+    # route lateral 550.472 m
+  - id: 2594
+    controller_id: -1
+    road_id: 2012
+    lane_ids: [3]
+    begin: [792.079, -623.279]
+    end: [792.079, -623.279]
+    route_s: 816.049
+    # route lateral 581.988 m
+  - id: 2595
+    controller_id: -1
+    road_id: 2012
+    lane_ids: [3]
+    begin: [791.770, -622.885]
+    end: [791.770, -622.885]
+    route_s: 816.049
+    # route lateral 581.505 m
+  - id: 2596
+    controller_id: -1
+    road_id: 2012
+    lane_ids: [2]
+    begin: [793.622, -625.246]
+    end: [793.622, -625.246]
+    route_s: 816.049
+    # route lateral 584.404 m
+  - id: 2656
+    controller_id: 98
+    road_id: 2012
+    lane_ids: [-3]
+    begin: [929.039, -531.325]
+    end: [929.039, -531.325]
+    route_s: 816.049
+    # route lateral 655.036 m
+  - id: 2657
+    controller_id: 98
+    road_id: 2012
+    lane_ids: [-3]
+    begin: [928.915, -531.167]
+    end: [928.915, -531.167]
+    route_s: 816.049
+    # route lateral 654.860 m
+  - id: 2658
+    controller_id: 98
+    road_id: 2012
+    lane_ids: [-2]
+    begin: [927.064, -528.807]
+    end: [927.064, -528.807]
+    route_s: 816.049
+    # route lateral 652.231 m
+  - id: 2659
+    controller_id: 98
+    road_id: 2012
+    lane_ids: [-1]
+    begin: [925.212, -526.447]
+    end: [925.212, -526.447]
+    route_s: 816.049
+    # route lateral 649.605 m
+  - id: 2667
+    controller_id: 196
+    road_id: 2076
+    lane_ids: [6]
+    begin: [1562.420, -195.003]
+    end: [1562.420, -195.003]
+    route_s: 816.049
+    # route lateral 1238.109 m
+  - id: 2668
+    controller_id: 196
+    road_id: 2076
+    lane_ids: [2]
+    begin: [1551.496, -196.293]
+    end: [1551.496, -196.293]
+    route_s: 816.049
+    # route lateral 1227.126 m
+  - id: 2669
+    controller_id: 196
+    road_id: 2076
+    lane_ids: [2]
+    begin: [1550.006, -196.469]
+    end: [1550.006, -196.469]
+    route_s: 816.049
+    # route lateral 1225.628 m
+  - id: 2670
+    controller_id: 196
+    road_id: 2076
+    lane_ids: [4]
+    begin: [1557.157, -195.625]
+    end: [1557.157, -195.625]
+    route_s: 816.049
+    # route lateral 1232.817 m
+  - id: 2671
+    controller_id: 196
+    road_id: 2076
+    lane_ids: [5]
+    begin: [1559.767, -195.317]
+    end: [1559.767, -195.317]
+    route_s: 816.049
+    # route lateral 1235.441 m
+  - id: 2672
+    controller_id: 196
+    road_id: 2076
+    lane_ids: [3]
+    begin: [1554.277, -195.965]
+    end: [1554.277, -195.965]
+    route_s: 816.049
+    # route lateral 1229.921 m
+  - id: 2895
+    controller_id: 91
+    road_id: 2076
+    lane_ids: [-2]
+    begin: [1177.617, -768.955]
+    end: [1177.617, -768.955]
+    route_s: 816.049
+    # route lateral 984.476 m
+  - id: 2896
+    controller_id: 91
+    road_id: 2076
+    lane_ids: [-1]
+    begin: [1179.513, -771.280]
+    end: [1179.513, -771.280]
+    route_s: 816.049
+    # route lateral 987.285 m
+  - id: 2897
+    controller_id: 91
+    road_id: 2076
+    lane_ids: [-3]
+    begin: [1175.721, -766.630]
+    end: [1175.721, -766.630]
+    route_s: 816.049
+    # route lateral 981.668 m
+  - id: 2898
+    controller_id: 91
+    road_id: 2076
+    lane_ids: [-4]
+    begin: [1173.826, -764.305]
+    end: [1173.826, -764.305]
+    route_s: 816.049
+    # route lateral 978.862 m
+  - id: 2899
+    controller_id: 91
+    road_id: 2076
+    lane_ids: [-4]
+    begin: [1173.194, -763.530]
+    end: [1173.194, -763.530]
+    route_s: 816.049
+    # route lateral 977.927 m
+  - id: 2902
+    controller_id: 93
+    road_id: 2077
+    lane_ids: [1]
+    begin: [1134.113, -753.892]
+    end: [1134.113, -753.892]
+    route_s: 816.049
+    # route lateral 939.342 m
+  - id: 2913
+    controller_id: 93
+    road_id: 2077
+    lane_ids: [1]
+    begin: [1148.286, -742.484]
+    end: [1148.286, -742.484]
+    route_s: 816.049
+    # route lateral 945.844 m
+  - id: 2914
+    controller_id: 92
+    road_id: 2077
+    lane_ids: [-2]
+    begin: [1117.045, -767.204]
+    end: [1117.045, -767.204]
+    route_s: 816.049
+    # route lateral 931.698 m
+  - id: 2925
+    controller_id: -1
+    road_id: 2096
+    lane_ids: [2]
+    begin: [1097.311, -707.149]
+    end: [1097.311, -707.149]
+    route_s: 816.049
+    # route lateral 884.074 m
+  - id: 2926
+    controller_id: -1
+    road_id: 2096
+    lane_ids: [1]
+    begin: [1095.034, -708.945]
+    end: [1095.034, -708.945]
+    route_s: 816.049
+    # route lateral 882.974 m
+  - id: 2935
+    controller_id: -1
+    road_id: 2096
+    lane_ids: [1]
+    begin: [1108.247, -725.705]
+    end: [1108.247, -725.705]
+    route_s: 816.049
+    # route lateral 902.769 m
+  - id: 2937
+    controller_id: -1
+    road_id: 2096
+    lane_ids: [2]
+    begin: [1115.266, -729.924]
+    end: [1115.266, -729.924]
+    route_s: 816.049
+    # route lateral 910.956 m
+  - id: 2938
+    controller_id: -1
+    road_id: 2096
+    lane_ids: [1]
+    begin: [1112.988, -731.719]
+    end: [1112.988, -731.719]
+    route_s: 816.049
+    # route lateral 909.888 m
+  - id: 2948
+    controller_id: -1
+    road_id: 2096
+    lane_ids: [2]
+    begin: [1130.291, -680.957]
+    end: [1130.291, -680.957]
+    route_s: 816.049
+    # route lateral 900.819 m
+  - id: 2949
+    controller_id: 105
+    road_id: 2097
+    lane_ids: [2]
+    begin: [1076.167, -680.523]
+    end: [1076.167, -680.523]
+    route_s: 816.049
+    # route lateral 852.687 m
+  - id: 2950
+    controller_id: 105
+    road_id: 2097
+    lane_ids: [1]
+    begin: [1073.906, -682.338]
+    end: [1073.906, -682.338]
+    route_s: 816.049
+    # route lateral 851.570 m
+  - id: 2960
+    controller_id: 105
+    road_id: 2097
+    lane_ids: [2]
+    begin: [1085.831, -672.574]
+    end: [1085.831, -672.574]
+    route_s: 816.049
+    # route lateral 857.465 m
+  - id: 2964
+    controller_id: 106
+    road_id: 2115
+    lane_ids: [2]
+    begin: [1138.112, -620.313]
+    end: [1138.112, -620.313]
+    route_s: 816.049
+    # route lateral 882.258 m
+  - id: 2965
+    controller_id: 106
+    road_id: 2115
+    lane_ids: [1]
+    begin: [1136.386, -618.108]
+    end: [1136.386, -618.108]
+    route_s: 816.049
+    # route lateral 879.806 m
+  - id: 2993
+    controller_id: 104
+    road_id: 2116
+    lane_ids: [2]
+    begin: [1051.718, -649.259]
+    end: [1051.718, -649.259]
+    route_s: 816.049
+    # route lateral 816.437 m
+  - id: 2994
+    controller_id: 104
+    road_id: 2116
+    lane_ids: [1]
+    begin: [1049.445, -651.060]
+    end: [1049.445, -651.060]
+    route_s: 816.049
+    # route lateral 815.250 m
+  - id: 3000
+    controller_id: 104
+    road_id: 2116
+    lane_ids: [2]
+    begin: [1058.926, -643.358]
+    end: [1058.926, -643.358]
+    route_s: 816.049
+    # route lateral 820.166 m
+  - id: 3007
+    controller_id: -1
+    road_id: 2139
+    lane_ids: [2]
+    begin: [1017.151, -605.269]
+    end: [1017.151, -605.269]
+    route_s: 816.049
+    # route lateral 765.856 m
+  - id: 3008
+    controller_id: -1
+    road_id: 2139
+    lane_ids: [1]
+    begin: [1014.875, -607.067]
+    end: [1014.875, -607.067]
+    route_s: 816.049
+    # route lateral 764.588 m
+  - id: 3022
+    controller_id: -1
+    road_id: 2139
+    lane_ids: [2]
+    begin: [1043.317, -584.408]
+    end: [1043.317, -584.408]
+    route_s: 816.049
+    # route lateral 780.991 m
+  - id: 3032
+    controller_id: -1
+    road_id: 2152
+    lane_ids: [2]
+    begin: [979.947, -559.197]
+    end: [979.947, -559.197]
+    route_s: 816.049
+    # route lateral 712.825 m
+  - id: 3033
+    controller_id: -1
+    road_id: 2152
+    lane_ids: [1]
+    begin: [977.750, -560.933]
+    end: [977.750, -560.933]
+    route_s: 816.049
+    # route lateral 711.512 m
+  - id: 3042
+    controller_id: -1
+    road_id: 2152
+    lane_ids: [2]
+    begin: [998.287, -544.513]
+    end: [998.287, -544.513]
+    route_s: 816.049
+    # route lateral 724.047 m
+  - id: 3052
+    controller_id: 100
+    road_id: 2172
+    lane_ids: [2]
+    begin: [954.716, -527.038]
+    end: [954.716, -527.038]
+    route_s: 816.049
+    # route lateral 677.102 m
+  - id: 3053
+    controller_id: 100
+    road_id: 2172
+    lane_ids: [1]
+    begin: [952.528, -528.785]
+    end: [952.528, -528.785]
+    route_s: 816.049
+    # route lateral 675.731 m
+  - id: 3062
+    controller_id: 100
+    road_id: 2172
+    lane_ids: [2]
+    begin: [964.187, -519.286]
+    end: [964.187, -519.286]
+    route_s: 816.049
+    # route lateral 683.068 m
+  - id: 3070
+    controller_id: 102
+    road_id: 2192
+    lane_ids: [2]
+    begin: [952.585, -500.859]
+    end: [952.585, -500.859]
+    route_s: 816.049
+    # route lateral 665.743 m
+  - id: 3071
+    controller_id: 102
+    road_id: 2192
+    lane_ids: [3]
+    begin: [950.923, -498.362]
+    end: [950.923, -498.362]
+    route_s: 816.049
+    # route lateral 663.331 m
+  - id: 3072
+    controller_id: 102
+    road_id: 2192
+    lane_ids: [4]
+    begin: [949.259, -495.866]
+    end: [949.259, -495.866]
+    route_s: 816.049
+    # route lateral 660.922 m
+  - id: 3153
+    controller_id: 112
+    road_id: 2192
+    lane_ids: [-1]
+    begin: [1117.058, -458.844]
+    end: [1117.058, -458.844]
+    route_s: 816.049
+    # route lateral 811.656 m
+  - id: 3154
+    controller_id: 112
+    road_id: 2192
+    lane_ids: [-3]
+    begin: [1118.350, -464.703]
+    end: [1118.350, -464.703]
+    route_s: 816.049
+    # route lateral 814.269 m
+  - id: 3155
+    controller_id: 112
+    road_id: 2192
+    lane_ids: [-2]
+    begin: [1117.706, -461.773]
+    end: [1117.706, -461.773]
+    route_s: 816.049
+    # route lateral 812.959 m
+  - id: 3159
+    controller_id: -1
+    road_id: 2195
+    lane_ids: [2]
+    begin: [861.211, -408.026]
+    end: [861.211, -408.026]
+    route_s: 816.049
+    # route lateral 551.034 m
+  - id: 3160
+    controller_id: -1
+    road_id: 2195
+    lane_ids: [2]
+    begin: [861.133, -408.088]
+    end: [861.133, -408.088]
+    route_s: 816.049
+    # route lateral 550.973 m
+  - id: 3161
+    controller_id: -1
+    road_id: 2195
+    lane_ids: [1]
+    begin: [858.856, -409.885]
+    end: [858.856, -409.885]
+    route_s: 816.049
+    # route lateral 549.209 m
+  - id: 3216
+    controller_id: -1
+    road_id: 2241
+    lane_ids: [1]
+    begin: [799.001, -333.837]
+    end: [799.001, -333.837]
+    route_s: 816.049
+    # route lateral 476.009 m
+  - id: 3217
+    controller_id: -1
+    road_id: 2241
+    lane_ids: [2]
+    begin: [801.279, -332.043]
+    end: [801.279, -332.043]
+    route_s: 816.049
+    # route lateral 478.047 m
+  - id: 3218
+    controller_id: -1
+    road_id: 2241
+    lane_ids: [2]
+    begin: [801.358, -331.981]
+    end: [801.358, -331.981]
+    route_s: 816.049
+    # route lateral 478.117 m
+  - id: 3260
+    controller_id: 107
+    road_id: 2257
+    lane_ids: [1]
+    begin: [1204.718, -564.349]
+    end: [1204.718, -564.349]
+    route_s: 816.049
+    # route lateral 924.782 m
+  - id: 3261
+    controller_id: 107
+    road_id: 2257
+    lane_ids: [2]
+    begin: [1206.387, -566.471]
+    end: [1206.387, -566.471]
+    route_s: 816.049
+    # route lateral 927.036 m
+  - id: 3285
+    controller_id: -1
+    road_id: 2257
+    lane_ids: [-1]
+    begin: [1152.021, -602.002]
+    end: [1152.021, -602.002]
+    route_s: 816.049
+    # route lateral 888.134 m
+  - id: 3294
+    controller_id: 114
+    road_id: 2264
+    lane_ids: [1]
+    begin: [1152.216, -470.378]
+    end: [1152.216, -470.378]
+    route_s: 816.049
+    # route lateral 848.523 m
+  - id: 3295
+    controller_id: 114
+    road_id: 2264
+    lane_ids: [2]
+    begin: [1154.337, -468.708]
+    end: [1154.337, -468.708]
+    route_s: 816.049
+    # route lateral 850.203 m
+  - id: 3325
+    controller_id: 108
+    road_id: 2264
+    lane_ids: [-1]
+    begin: [1205.187, -542.512]
+    end: [1205.187, -542.512]
+    route_s: 816.049
+    # route lateral 918.601 m
+  - id: 3328
+    controller_id: -1
+    road_id: 2265
+    lane_ids: [2]
+    begin: [1331.242, -468.412]
+    end: [1331.242, -468.412]
+    route_s: 816.049
+    # route lateral 1023.138 m
+  - id: 3329
+    controller_id: -1
+    road_id: 2265
+    lane_ids: [2]
+    begin: [1331.242, -468.412]
+    end: [1331.242, -468.412]
+    route_s: 816.049
+    # route lateral 1023.138 m
+  - id: 3372
+    controller_id: 109
+    road_id: 2265
+    lane_ids: [-1]
+    begin: [1230.479, -543.603]
+    end: [1230.479, -543.603]
+    route_s: 816.049
+    # route lateral 943.126 m
+  - id: 3373
+    controller_id: 109
+    road_id: 2265
+    lane_ids: [-2]
+    begin: [1228.753, -541.398]
+    end: [1228.753, -541.398]
+    route_s: 816.049
+    # route lateral 940.843 m
+  - id: 3382
+    controller_id: 202
+    road_id: 2305
+    lane_ids: [2]
+    begin: [1398.019, -208.219]
+    end: [1398.019, -208.219]
+    route_s: 816.049
+    # route lateral 1073.205 m
+  - id: 3383
+    controller_id: 202
+    road_id: 2305
+    lane_ids: [2]
+    begin: [1398.019, -208.219]
+    end: [1398.019, -208.219]
+    route_s: 816.049
+    # route lateral 1073.205 m
+  - id: 3418
+    controller_id: -1
+    road_id: 2305
+    lane_ids: [-2]
+    begin: [1402.380, -303.592]
+    end: [1402.380, -303.592]
+    route_s: 816.049
+    # route lateral 1075.985 m
+  - id: 3424
+    controller_id: -1
+    road_id: 2305
+    lane_ids: [1]
+    begin: [1407.833, -312.891]
+    end: [1407.833, -312.891]
+    route_s: 816.049
+    # route lateral 1081.733 m
+  - id: 3437
+    controller_id: -1
+    road_id: 2305
+    lane_ids: [-1]
+    begin: [1399.115, -353.711]
+    end: [1399.115, -353.711]
+    route_s: 816.049
+    # route lateral 1075.288 m
+  - id: 3438
+    controller_id: -1
+    road_id: 2305
+    lane_ids: [-2]
+    begin: [1396.586, -353.106]
+    end: [1396.586, -353.106]
+    route_s: 816.049
+    # route lateral 1072.721 m
+  - id: 3445
+    controller_id: -1
+    road_id: 2305
+    lane_ids: [1]
+    begin: [1398.051, -369.272]
+    end: [1398.051, -369.272]
+    route_s: 816.049
+    # route lateral 1075.499 m
+  - id: 3484
+    controller_id: -1
+    road_id: 2305
+    lane_ids: [-2]
+    begin: [1346.912, -445.988]
+    end: [1346.912, -445.988]
+    route_s: 816.049
+    # route lateral 1034.555 m
+  - id: 3485
+    controller_id: -1
+    road_id: 2305
+    lane_ids: [-1]
+    begin: [1348.935, -447.621]
+    end: [1348.935, -447.621]
+    route_s: 816.049
+    # route lateral 1036.823 m
+  - id: 3491
+    controller_id: 116
+    road_id: 2312
+    lane_ids: [2]
+    begin: [1152.108, -440.959]
+    end: [1152.108, -440.959]
+    route_s: 816.049
+    # route lateral 842.084 m
+  - id: 3492
+    controller_id: 116
+    road_id: 2312
+    lane_ids: [3]
+    begin: [1150.563, -438.387]
+    end: [1150.563, -438.387]
+    route_s: 816.049
+    # route lateral 840.061 m
+  - id: 3493
+    controller_id: 116
+    road_id: 2312
+    lane_ids: [4]
+    begin: [1149.021, -435.814]
+    end: [1149.021, -435.814]
+    route_s: 816.049
+    # route lateral 838.048 m
+  - id: 3595
+    controller_id: -1
+    road_id: 2312
+    lane_ids: [-1]
+    begin: [1303.234, -215.806]
+    end: [1303.234, -215.806]
+    route_s: 816.049
+    # route lateral 978.135 m
+  - id: 3596
+    controller_id: -1
+    road_id: 2312
+    lane_ids: [-3]
+    begin: [1309.176, -214.975]
+    end: [1309.176, -214.975]
+    route_s: 816.049
+    # route lateral 984.116 m
+  - id: 3597
+    controller_id: -1
+    road_id: 2312
+    lane_ids: [-2]
+    begin: [1306.205, -215.388]
+    end: [1306.205, -215.388]
+    route_s: 816.049
+    # route lateral 981.125 m
+  - id: 3600
+    controller_id: 118
+    road_id: 2313
+    lane_ids: [1]
+    begin: [1106.016, -407.059]
+    end: [1106.016, -407.059]
+    route_s: 816.049
+    # route lateral 790.542 m
+  - id: 3618
+    controller_id: 111
+    road_id: 2313
+    lane_ids: [-2]
+    begin: [1118.093, -431.982]
+    end: [1118.093, -431.982]
+    route_s: 816.049
+    # route lateral 806.966 m
+  - id: 3619
+    controller_id: 111
+    road_id: 2313
+    lane_ids: [-1]
+    begin: [1120.446, -430.120]
+    end: [1120.446, -430.120]
+    route_s: 816.049
+    # route lateral 808.911 m
+  - id: 3628
+    controller_id: 121
+    road_id: 2386
+    lane_ids: [1]
+    begin: [1009.465, -289.006]
+    end: [1009.465, -289.006]
+    route_s: 816.049
+    # route lateral 682.826 m
+  - id: 3629
+    controller_id: 121
+    road_id: 2386
+    lane_ids: [2]
+    begin: [1011.587, -287.337]
+    end: [1011.587, -287.337]
+    route_s: 816.049
+    # route lateral 684.913 m
+  - id: 3652
+    controller_id: 119
+    road_id: 2386
+    lane_ids: [-1]
+    begin: [1039.072, -331.498]
+    end: [1039.072, -331.498]
+    route_s: 816.049
+    # route lateral 714.605 m
+  - id: 3657
+    controller_id: 119
+    road_id: 2386
+    lane_ids: [2]
+    begin: [1056.102, -343.928]
+    end: [1056.102, -343.928]
+    route_s: 816.049
+    # route lateral 732.669 m
+  - id: 3658
+    controller_id: 119
+    road_id: 2386
+    lane_ids: [1]
+    begin: [1053.980, -345.598]
+    end: [1053.980, -345.598]
+    route_s: 816.049
+    # route lateral 730.719 m
+  - id: 3663
+    controller_id: 119
+    road_id: 2386
+    lane_ids: [-1]
+    begin: [1061.329, -359.793]
+    end: [1061.329, -359.793]
+    route_s: 816.049
+    # route lateral 739.551 m
+  - id: 3667
+    controller_id: 119
+    road_id: 2386
+    lane_ids: [2]
+    begin: [1071.559, -363.579]
+    end: [1071.559, -363.579]
+    route_s: 816.049
+    # route lateral 750.157 m
+  - id: 3668
+    controller_id: 119
+    road_id: 2386
+    lane_ids: [1]
+    begin: [1069.437, -365.248]
+    end: [1069.437, -365.248]
+    route_s: 816.049
+    # route lateral 748.252 m
+  - id: 3684
+    controller_id: 119
+    road_id: 2386
+    lane_ids: [-1]
+    begin: [1085.684, -390.755]
+    end: [1085.684, -390.755]
+    route_s: 816.049
+    # route lateral 767.854 m
+  - id: 3696
+    controller_id: 122
+    road_id: 2396
+    lane_ids: [1]
+    begin: [965.572, -193.334]
+    end: [965.572, -193.334]
+    route_s: 816.049
+    # route lateral 643.791 m
+  - id: 3697
+    controller_id: 122
+    road_id: 2396
+    lane_ids: [2]
+    begin: [968.572, -193.368]
+    end: [968.572, -193.368]
+    route_s: 816.049
+    # route lateral 646.763 m
+  - id: 3727
+    controller_id: -1
+    road_id: 2396
+    lane_ids: [-2]
+    begin: [991.951, -271.598]
+    end: [991.951, -271.598]
+    route_s: 816.049
+    # route lateral 665.143 m
+  - id: 3728
+    controller_id: -1
+    road_id: 2396
+    lane_ids: [-2]
+    begin: [991.951, -271.598]
+    end: [991.951, -271.598]
+    route_s: 816.049
+    # route lateral 665.143 m
+  - id: 3738
+    controller_id: 123
+    road_id: 2403
+    lane_ids: [1]
+    begin: [979.966, -140.754]
+    end: [979.966, -140.754]
+    route_s: 579.371
+    # route lateral 661.775 m
+  - id: 3739
+    controller_id: 123
+    road_id: 2403
+    lane_ids: [2]
+    begin: [982.573, -142.239]
+    end: [982.573, -142.239]
+    route_s: 579.371
+    # route lateral 664.504 m
+  - id: 3752
+    controller_id: 123
+    road_id: 2403
+    lane_ids: [-1]
+    begin: [965.853, -168.714]
+    end: [965.853, -168.714]
+    route_s: 816.049
+    # route lateral 647.601 m
+  - id: 3759
+    controller_id: -1
+    road_id: 2410
+    lane_ids: [2]
+    begin: [1094.380, -44.488]
+    end: [1094.380, -44.488]
+    route_s: 577.639
+    # route lateral 774.447 m
+  - id: 3792
+    controller_id: -1
+    road_id: 2410
+    lane_ids: [-2]
+    begin: [999.665, -111.192]
+    end: [999.665, -111.192]
+    route_s: 578.938
+    # route lateral 679.499 m
+  - id: 3793
+    controller_id: -1
+    road_id: 2410
+    lane_ids: [-2]
+    begin: [999.665, -111.192]
+    end: [999.665, -111.192]
+    route_s: 578.938
+    # route lateral 679.499 m
+  - id: 3802
+    controller_id: 45
+    road_id: 2423
+    lane_ids: [2]
+    begin: [752.526, -238.861]
+    end: [752.526, -238.861]
+    route_s: 816.049
+    # route lateral 427.134 m
+  - id: 3803
+    controller_id: 45
+    road_id: 2423
+    lane_ids: [3]
+    begin: [750.787, -236.645]
+    end: [750.787, -236.645]
+    route_s: 816.049
+    # route lateral 425.588 m
+  - id: 3804
+    controller_id: 45
+    road_id: 2423
+    lane_ids: [4]
+    begin: [749.065, -234.450]
+    end: [749.065, -234.450]
+    route_s: 816.049
+    # route lateral 424.069 m
+  - id: 3805
+    controller_id: 45
+    road_id: 2423
+    lane_ids: [5]
+    begin: [747.544, -232.512]
+    end: [747.544, -232.512]
+    route_s: 816.049
+    # route lateral 422.740 m
+  - id: 3806
+    controller_id: 45
+    road_id: 2423
+    lane_ids: [5]
+    begin: [747.155, -232.016]
+    end: [747.155, -232.016]
+    route_s: 816.049
+    # route lateral 422.401 m
+  - id: 3899
+    controller_id: 124
+    road_id: 2423
+    lane_ids: [-2]
+    begin: [961.303, -83.309]
+    end: [961.303, -83.309]
+    route_s: 578.505
+    # route lateral 640.501 m
+  - id: 3900
+    controller_id: 124
+    road_id: 2423
+    lane_ids: [-1]
+    begin: [959.452, -80.948]
+    end: [959.452, -80.948]
+    route_s: 578.072
+    # route lateral 638.647 m
+  - id: 3905
+    controller_id: 125
+    road_id: 2445
+    lane_ids: [2]
+    begin: [967.246, -66.751]
+    end: [967.246, -66.751]
+    route_s: 578.072
+    # route lateral 646.605 m
+  - id: 3906
+    controller_id: 125
+    road_id: 2445
+    lane_ids: [3]
+    begin: [965.522, -64.556]
+    end: [965.522, -64.556]
+    route_s: 578.072
+    # route lateral 644.935 m
+  - id: 3953
+    controller_id: 129
+    road_id: 2445
+    lane_ids: [-4]
+    begin: [1056.422, -12.395]
+    end: [1056.422, -12.395]
+    route_s: 577.206
+    # route lateral 738.807 m
+  - id: 3954
+    controller_id: 129
+    road_id: 2445
+    lane_ids: [-3]
+    begin: [1054.566, -10.038]
+    end: [1054.566, -10.038]
+    route_s: 577.206
+    # route lateral 737.180 m
+  - id: 3955
+    controller_id: 129
+    road_id: 2445
+    lane_ids: [-2]
+    begin: [1052.710, -7.681]
+    end: [1052.710, -7.681]
+    route_s: 577.206
+    # route lateral 735.562 m
+  - id: 3956
+    controller_id: 129
+    road_id: 2445
+    lane_ids: [-2]
+    begin: [1052.710, -7.681]
+    end: [1052.710, -7.681]
+    route_s: 577.206
+    # route lateral 735.562 m
+  - id: 3961
+    controller_id: 204
+    road_id: 2467
+    lane_ids: [1]
+    begin: [1410.482, -191.932]
+    end: [1410.482, -191.932]
+    route_s: 816.049
+    # route lateral 1086.747 m
+  - id: 3962
+    controller_id: 204
+    road_id: 2467
+    lane_ids: [2]
+    begin: [1410.165, -189.251]
+    end: [1410.165, -189.251]
+    route_s: 816.049
+    # route lateral 1086.636 m
+  - id: 3999
+    controller_id: 194
+    road_id: 2467
+    lane_ids: [-2]
+    begin: [1520.551, -181.937]
+    end: [1520.551, -181.937]
+    route_s: 816.049
+    # route lateral 1197.258 m
+  - id: 4000
+    controller_id: 194
+    road_id: 2467
+    lane_ids: [-1]
+    begin: [1520.222, -179.156]
+    end: [1520.222, -179.156]
+    route_s: 816.049
+    # route lateral 1197.146 m
+  - id: 4004
+    controller_id: 212
+    road_id: 2468
+    lane_ids: [1]
+    begin: [1386.133, -111.474]
+    end: [1386.133, -111.474]
+    route_s: 578.505
+    # route lateral 1065.744 m
+  - id: 4005
+    controller_id: 212
+    road_id: 2468
+    lane_ids: [2]
+    begin: [1388.812, -111.140]
+    end: [1388.812, -111.140]
+    route_s: 578.505
+    # route lateral 1068.413 m
+  - id: 4030
+    controller_id: 198
+    road_id: 2468
+    lane_ids: [-2]
+    begin: [1388.851, -180.143]
+    end: [1388.851, -180.143]
+    route_s: 816.049
+    # route lateral 1066.148 m
+  - id: 4031
+    controller_id: 198
+    road_id: 2468
+    lane_ids: [-1]
+    begin: [1391.629, -179.796]
+    end: [1391.629, -179.796]
+    route_s: 816.049
+    # route lateral 1068.946 m
+  - id: 4035
+    controller_id: 200
+    road_id: 2469
+    lane_ids: [1]
+    begin: [1319.319, -202.581]
+    end: [1319.319, -202.581]
+    route_s: 816.049
+    # route lateral 995.050 m
+  - id: 4036
+    controller_id: 200
+    road_id: 2469
+    lane_ids: [2]
+    begin: [1319.004, -199.899]
+    end: [1319.004, -199.899]
+    route_s: 816.049
+    # route lateral 994.930 m
+  - id: 4056
+    controller_id: 200
+    road_id: 2469
+    lane_ids: [-1]
+    begin: [1376.933, -196.005]
+    end: [1376.933, -196.005]
+    route_s: 816.049
+    # route lateral 1052.989 m
+  - id: 4057
+    controller_id: 200
+    road_id: 2469
+    lane_ids: [-2]
+    begin: [1377.269, -198.784]
+    end: [1377.269, -198.784]
+    route_s: 816.049
+    # route lateral 1053.122 m
+  - id: 4134
+    controller_id: -1
+    road_id: 2470
+    lane_ids: [-3]
+    begin: [1289.182, -188.398]
+    end: [1289.182, -188.398]
+    route_s: 816.049
+    # route lateral 966.140 m
+  - id: 4135
+    controller_id: -1
+    road_id: 2470
+    lane_ids: [-2]
+    begin: [1291.903, -187.396]
+    end: [1291.903, -187.396]
+    route_s: 816.049
+    # route lateral 968.939 m
+  - id: 4136
+    controller_id: -1
+    road_id: 2470
+    lane_ids: [-3]
+    begin: [1289.745, -188.191]
+    end: [1289.745, -188.191]
+    route_s: 816.049
+    # route lateral 966.719 m
+  - id: 4145
+    controller_id: 191
+    road_id: 2533
+    lane_ids: [3]
+    begin: [1498.228, 178.399]
+    end: [1498.228, 178.399]
+    route_s: 575.905
+    # route lateral 1205.510 m
+  - id: 4146
+    controller_id: 191
+    road_id: 2533
+    lane_ids: [5]
+    begin: [1506.128, 179.659]
+    end: [1506.128, 179.659]
+    route_s: 575.905
+    # route lateral 1213.497 m
+  - id: 4147
+    controller_id: 191
+    road_id: 2533
+    lane_ids: [6]
+    begin: [1508.581, 180.051]
+    end: [1508.581, 180.051]
+    route_s: 575.905
+    # route lateral 1215.977 m
+  - id: 4148
+    controller_id: 191
+    road_id: 2533
+    lane_ids: [5]
+    begin: [1503.841, 179.295]
+    end: [1503.841, 179.295]
+    route_s: 575.905
+    # route lateral 1211.185 m
+  - id: 4149
+    controller_id: 191
+    road_id: 2533
+    lane_ids: [2]
+    begin: [1495.546, 177.971]
+    end: [1495.546, 177.971]
+    route_s: 575.905
+    # route lateral 1202.799 m
+  - id: 4150
+    controller_id: 191
+    road_id: 2533
+    lane_ids: [4]
+    begin: [1500.983, 178.839]
+    end: [1500.983, 178.839]
+    route_s: 575.905
+    # route lateral 1208.296 m
+  - id: 4286
+    controller_id: 193
+    road_id: 2533
+    lane_ids: [-3]
+    begin: [1539.046, -157.512]
+    end: [1539.046, -157.512]
+    route_s: 816.049
+    # route lateral 1217.786 m
+  - id: 4287
+    controller_id: 193
+    road_id: 2533
+    lane_ids: [-2]
+    begin: [1542.022, -157.133]
+    end: [1542.022, -157.133]
+    route_s: 816.049
+    # route lateral 1220.784 m
+  - id: 4288
+    controller_id: 193
+    road_id: 2533
+    lane_ids: [-2]
+    begin: [1542.022, -157.133]
+    end: [1542.022, -157.133]
+    route_s: 816.049
+    # route lateral 1220.784 m
+  - id: 4289
+    controller_id: 193
+    road_id: 2533
+    lane_ids: [-5]
+    begin: [1533.094, -158.269]
+    end: [1533.094, -158.269]
+    route_s: 816.049
+    # route lateral 1211.789 m
+  - id: 4290
+    controller_id: 193
+    road_id: 2533
+    lane_ids: [-5]
+    begin: [1532.300, -158.369]
+    end: [1532.300, -158.369]
+    route_s: 816.049
+    # route lateral 1210.989 m
+  - id: 4291
+    controller_id: 193
+    road_id: 2533
+    lane_ids: [-4]
+    begin: [1536.070, -157.890]
+    end: [1536.070, -157.890]
+    route_s: 816.049
+    # route lateral 1214.787 m
+  - id: 4300
+    controller_id: 214
+    road_id: 2564
+    lane_ids: [1]
+    begin: [1355.517, 92.018]
+    end: [1355.517, 92.018]
+    route_s: 576.339
+    # route lateral 1049.011 m
+  - id: 4301
+    controller_id: 214
+    road_id: 2564
+    lane_ids: [2]
+    begin: [1358.181, 92.454]
+    end: [1358.181, 92.454]
+    route_s: 576.339
+    # route lateral 1051.711 m
+  - id: 4340
+    controller_id: 211
+    road_id: 2564
+    lane_ids: [-1]
+    begin: [1366.291, -15.452]
+    end: [1366.291, -15.452]
+    route_s: 577.639
+    # route lateral 1047.547 m
+  - id: 4344
+    controller_id: 211
+    road_id: 2564
+    lane_ids: [2]
+    begin: [1375.061, -34.483]
+    end: [1375.061, -34.483]
+    route_s: 577.639
+    # route lateral 1055.293 m
+  - id: 4345
+    controller_id: 211
+    road_id: 2564
+    lane_ids: [1]
+    begin: [1372.197, -34.936]
+    end: [1372.197, -34.936]
+    route_s: 577.639
+    # route lateral 1052.412 m
+  - id: 4366
+    controller_id: 211
+    road_id: 2564
+    lane_ids: [-1]
+    begin: [1377.591, -71.355]
+    end: [1377.591, -71.355]
+    route_s: 578.072
+    # route lateral 1056.833 m
+  - id: 4367
+    controller_id: 211
+    road_id: 2564
+    lane_ids: [-2]
+    begin: [1374.819, -71.748]
+    end: [1374.819, -71.748]
+    route_s: 578.072
+    # route lateral 1054.057 m
+  - id: 4381
+    controller_id: -1
+    road_id: 2574
+    lane_ids: [1]
+    begin: [1129.547, -12.797]
+    end: [1129.547, -12.797]
+    route_s: 577.206
+    # route lateral 811.616 m
+  - id: 4382
+    controller_id: -1
+    road_id: 2574
+    lane_ids: [2]
+    begin: [1127.886, -10.668]
+    end: [1127.886, -10.668]
+    route_s: 577.206
+    # route lateral 810.141 m
+  - id: 4416
+    controller_id: -1
+    road_id: 2574
+    lane_ids: [-1]
+    begin: [1208.917, 45.564]
+    end: [1208.917, 45.564]
+    route_s: 576.772
+    # route lateral 897.046 m
+  - id: 4427
+    controller_id: -1
+    road_id: 2574
+    lane_ids: [2]
+    begin: [1229.192, 67.982]
+    end: [1229.192, 67.982]
+    route_s: 576.339
+    # route lateral 920.460 m
+  - id: 4428
+    controller_id: -1
+    road_id: 2574
+    lane_ids: [1]
+    begin: [1230.719, 65.756]
+    end: [1230.719, 65.756]
+    route_s: 576.339
+    # route lateral 921.614 m
+  - id: 4465
+    controller_id: -1
+    road_id: 2574
+    lane_ids: [-2]
+    begin: [1333.850, 112.990]
+    end: [1333.850, 112.990]
+    route_s: 576.339
+    # route lateral 1031.351 m
+  - id: 4466
+    controller_id: 183
+    road_id: 2575
+    lane_ids: [1]
+    begin: [1346.243, 150.410]
+    end: [1346.243, 150.410]
+    route_s: 575.905
+    # route lateral 1051.067 m
+  - id: 4467
+    controller_id: 183
+    road_id: 2575
+    lane_ids: [2]
+    begin: [1348.910, 150.826]
+    end: [1348.910, 150.826]
+    route_s: 575.905
+    # route lateral 1053.761 m
+  - id: 4488
+    controller_id: -1
+    road_id: 2584
+    lane_ids: [-1]
+    begin: [1348.108, 117.437]
+    end: [1348.108, 117.437]
+    route_s: 576.339
+    # route lateral 1046.190 m
+  - id: 4489
+    controller_id: -1
+    road_id: 2584
+    lane_ids: [-2]
+    begin: [1345.351, 116.949]
+    end: [1345.351, 116.949]
+    route_s: 576.339
+    # route lateral 1043.390 m
+  - id: 4491
+    controller_id: 130
+    road_id: 2588
+    lane_ids: [2]
+    begin: [1091.705, -6.526]
+    end: [1091.705, -6.526]
+    route_s: 577.206
+    # route lateral 774.485 m
+  - id: 4492
+    controller_id: 130
+    road_id: 2588
+    lane_ids: [3]
+    begin: [1093.794, -4.373]
+    end: [1093.794, -4.373]
+    route_s: 577.206
+    # route lateral 776.773 m
+  - id: 4493
+    controller_id: 130
+    road_id: 2588
+    lane_ids: [1]
+    begin: [1089.616, -8.679]
+    end: [1089.616, -8.679]
+    route_s: 577.206
+    # route lateral 772.202 m
+  - id: 4507
+    controller_id: 135
+    road_id: 2625
+    lane_ids: [2]
+    begin: [1010.823, 92.109]
+    end: [1010.823, 92.109]
+    route_s: 575.472
+    # route lateral 711.198 m
+  - id: 4508
+    controller_id: 135
+    road_id: 2625
+    lane_ids: [2]
+    begin: [1010.823, 92.109]
+    end: [1010.823, 92.109]
+    route_s: 575.472
+    # route lateral 711.198 m
+  - id: 4509
+    controller_id: 135
+    road_id: 2625
+    lane_ids: [3]
+    begin: [1013.178, 93.967]
+    end: [1013.178, 93.967]
+    route_s: 575.472
+    # route lateral 713.932 m
+  - id: 4510
+    controller_id: 135
+    road_id: 2625
+    lane_ids: [4]
+    begin: [1015.534, 95.826]
+    end: [1015.534, 95.826]
+    route_s: 575.472
+    # route lateral 716.667 m
+  - id: 4543
+    controller_id: 127
+    road_id: 2625
+    lane_ids: [-4]
+    begin: [1051.522, 25.521]
+    end: [1051.522, 25.521]
+    route_s: 576.772
+    # route lateral 738.398 m
+  - id: 4544
+    controller_id: 127
+    road_id: 2625
+    lane_ids: [-2]
+    begin: [1056.096, 29.087]
+    end: [1056.096, 29.087]
+    route_s: 576.772
+    # route lateral 743.440 m
+  - id: 4545
+    controller_id: 127
+    road_id: 2625
+    lane_ids: [-3]
+    begin: [1053.729, 27.244]
+    end: [1053.729, 27.244]
+    route_s: 576.772
+    # route lateral 740.830 m
+  - id: 4550
+    controller_id: 181
+    road_id: 2626
+    lane_ids: [3]
+    begin: [1319.310, 161.549]
+    end: [1319.310, 161.549]
+    route_s: 575.905
+    # route lateral 1027.354 m
+  - id: 4551
+    controller_id: -1
+    road_id: 2626
+    lane_ids: [1]
+    begin: [1317.236, 167.179]
+    end: [1317.236, 167.179]
+    route_s: 575.472
+    # route lateral 1026.671 m
+  - id: 4552
+    controller_id: 181
+    road_id: 2626
+    lane_ids: [2]
+    begin: [1318.158, 164.658]
+    end: [1318.158, 164.658]
+    route_s: 575.472
+    # route lateral 1026.966 m
+  - id: 4553
+    controller_id: 181
+    road_id: 2626
+    lane_ids: [2]
+    begin: [1318.271, 164.363]
+    end: [1318.271, 164.363]
+    route_s: 575.472
+    # route lateral 1027.006 m
+  - id: 4554
+    controller_id: 181
+    road_id: 2626
+    lane_ids: [4]
+    begin: [1320.273, 158.930]
+    end: [1320.273, 158.930]
+    route_s: 575.905
+    # route lateral 1027.680 m
+  - id: 4663
+    controller_id: 132
+    road_id: 2626
+    lane_ids: [-2]
+    begin: [1090.646, 26.259]
+    end: [1090.646, 26.259]
+    route_s: 576.772
+    # route lateral 777.241 m
+  - id: 4664
+    controller_id: 132
+    road_id: 2626
+    lane_ids: [-5]
+    begin: [1085.141, 32.995]
+    end: [1085.141, 32.995]
+    route_s: 576.772
+    # route lateral 772.744 m
+  - id: 4665
+    controller_id: 132
+    road_id: 2626
+    lane_ids: [-5]
+    begin: [1084.824, 33.382]
+    end: [1084.824, 33.382]
+    route_s: 576.772
+    # route lateral 772.488 m
+  - id: 4666
+    controller_id: 132
+    road_id: 2626
+    lane_ids: [-4]
+    begin: [1087.041, 30.674]
+    end: [1087.041, 30.674]
+    route_s: 576.772
+    # route lateral 774.289 m
+  - id: 4667
+    controller_id: 132
+    road_id: 2626
+    lane_ids: [-3]
+    begin: [1088.939, 28.350]
+    end: [1088.939, 28.350]
+    route_s: 576.772
+    # route lateral 775.839 m
+  - id: 4676
+    controller_id: 145
+    road_id: 2674
+    lane_ids: [2]
+    begin: [935.849, 193.073]
+    end: [935.849, 193.073]
+    route_s: 547.782
+    # route lateral 670.913 m
+  - id: 4677
+    controller_id: 145
+    road_id: 2674
+    lane_ids: [2]
+    begin: [935.849, 193.073]
+    end: [935.849, 193.073]
+    route_s: 547.782
+    # route lateral 670.913 m
+  - id: 4678
+    controller_id: 145
+    road_id: 2674
+    lane_ids: [3]
+    begin: [938.398, 194.656]
+    end: [938.398, 194.656]
+    route_s: 547.782
+    # route lateral 673.864 m
+  - id: 4713
+    controller_id: 134
+    road_id: 2674
+    lane_ids: [-4]
+    begin: [978.993, 117.689]
+    end: [978.993, 117.689]
+    route_s: 575.038
+    # route lateral 687.206 m
+  - id: 4714
+    controller_id: 134
+    road_id: 2674
+    lane_ids: [-3]
+    begin: [981.196, 119.417]
+    end: [981.196, 119.417]
+    route_s: 575.038
+    # route lateral 689.811 m
+  - id: 4715
+    controller_id: 134
+    road_id: 2674
+    lane_ids: [-2]
+    begin: [983.556, 121.269]
+    end: [983.556, 121.269]
+    route_s: 575.038
+    # route lateral 692.604 m
+  - id: 4716
+    controller_id: 134
+    road_id: 2674
+    lane_ids: [-2]
+    begin: [983.635, 121.331]
+    end: [983.635, 121.331]
+    route_s: 575.038
+    # route lateral 692.697 m
+  - id: 4721
+    controller_id: 141
+    road_id: 2675
+    lane_ids: [2]
+    begin: [912.423, 228.296]
+    end: [912.423, 228.296]
+    route_s: 547.298
+    # route lateral 663.313 m
+  - id: 4722
+    controller_id: 141
+    road_id: 2675
+    lane_ids: [4]
+    begin: [907.146, 225.659]
+    end: [907.146, 225.659]
+    route_s: 547.298
+    # route lateral 657.415 m
+  - id: 4723
+    controller_id: 141
+    road_id: 2675
+    lane_ids: [3]
+    begin: [909.740, 226.953]
+    end: [909.740, 226.953]
+    route_s: 547.298
+    # route lateral 660.314 m
+  - id: 4801
+    controller_id: -1
+    road_id: 2675
+    lane_ids: [-1]
+    begin: [816.745, 454.139]
+    end: [816.745, 454.139]
+    route_s: 324.048
+    # route lateral 655.653 m
+  - id: 4802
+    controller_id: -1
+    road_id: 2675
+    lane_ids: [-3]
+    begin: [821.844, 456.686]
+    end: [821.844, 456.686]
+    route_s: 324.096
+    # route lateral 661.353 m
+  - id: 4803
+    controller_id: -1
+    road_id: 2675
+    lane_ids: [-2]
+    begin: [819.339, 455.435]
+    end: [819.339, 455.435]
+    route_s: 324.072
+    # route lateral 658.553 m
+  - id: 4815
+    controller_id: 185
+    road_id: 2718
+    lane_ids: [3]
+    begin: [1361.650, 182.067]
+    end: [1361.650, 182.067]
+    route_s: 575.472
+    # route lateral 1073.366 m
+  - id: 4816
+    controller_id: 185
+    road_id: 2718
+    lane_ids: [5]
+    begin: [1360.694, 187.991]
+    end: [1360.694, 187.991]
+    route_s: 575.472
+    # route lateral 1073.895 m
+  - id: 4817
+    controller_id: 185
+    road_id: 2718
+    lane_ids: [5]
+    begin: [1360.745, 187.679]
+    end: [1360.745, 187.679]
+    route_s: 575.472
+    # route lateral 1073.866 m
+  - id: 4818
+    controller_id: 185
+    road_id: 2718
+    lane_ids: [2]
+    begin: [1362.128, 179.106]
+    end: [1362.128, 179.106]
+    route_s: 575.472
+    # route lateral 1073.115 m
+  - id: 4819
+    controller_id: 185
+    road_id: 2718
+    lane_ids: [4]
+    begin: [1361.206, 184.822]
+    end: [1361.206, 184.822]
+    route_s: 575.472
+    # route lateral 1073.608 m
+  - id: 4863
+    controller_id: 189
+    road_id: 2718
+    lane_ids: [-3]
+    begin: [1467.296, 189.680]
+    end: [1467.296, 189.680]
+    route_s: 575.905
+    # route lateral 1177.835 m
+  - id: 4864
+    controller_id: 189
+    road_id: 2718
+    lane_ids: [-4]
+    begin: [1467.770, 186.718]
+    end: [1467.770, 186.718]
+    route_s: 575.905
+    # route lateral 1177.624 m
+  - id: 4865
+    controller_id: 189
+    road_id: 2718
+    lane_ids: [-2]
+    begin: [1466.822, 192.642]
+    end: [1466.822, 192.642]
+    route_s: 575.905
+    # route lateral 1178.053 m
+  - id: 4866
+    controller_id: 189
+    road_id: 2718
+    lane_ids: [-2]
+    begin: [1466.869, 192.346]
+    end: [1466.869, 192.346]
+    route_s: 575.905
+    # route lateral 1178.031 m
+  - id: 4867
+    controller_id: 189
+    road_id: 2718
+    lane_ids: [-1]
+    begin: [1466.427, 195.111]
+    end: [1466.427, 195.111]
+    route_s: 575.905
+    # route lateral 1178.241 m
+  - id: 4870
+    controller_id: 179
+    road_id: 2719
+    lane_ids: [1]
+    begin: [1326.931, 261.374]
+    end: [1326.931, 261.374]
+    route_s: 574.603
+    # route lateral 1062.366 m
+  - id: 4871
+    controller_id: 179
+    road_id: 2719
+    lane_ids: [2]
+    begin: [1329.894, 261.844]
+    end: [1329.894, 261.844]
+    route_s: 574.603
+    # route lateral 1065.324 m
+  - id: 4872
+    controller_id: 179
+    road_id: 2719
+    lane_ids: [2]
+    begin: [1330.388, 261.922]
+    end: [1330.388, 261.922]
+    route_s: 574.603
+    # route lateral 1065.817 m
+  - id: 4902
+    controller_id: 179
+    road_id: 2719
+    lane_ids: [-3]
+    begin: [1330.712, 196.016]
+    end: [1330.712, 196.016]
+    route_s: 575.472
+    # route lateral 1046.956 m
+  - id: 4903
+    controller_id: 179
+    road_id: 2719
+    lane_ids: [-3]
+    begin: [1330.021, 195.906]
+    end: [1330.021, 195.906]
+    route_s: 575.472
+    # route lateral 1046.260 m
+  - id: 4904
+    controller_id: 179
+    road_id: 2719
+    lane_ids: [-2]
+    begin: [1333.675, 196.485]
+    end: [1333.675, 196.485]
+    route_s: 575.472
+    # route lateral 1049.938 m
+  - id: 4911
+    controller_id: 216
+    road_id: 2756
+    lane_ids: [2]
+    begin: [1478.982, 406.873]
+    end: [1478.982, 406.873]
+    route_s: 547.782
+    # route lateral 1254.611 m
+  - id: 4912
+    controller_id: 216
+    road_id: 2756
+    lane_ids: [4]
+    begin: [1486.691, 407.211]
+    end: [1486.691, 407.211]
+    route_s: 547.782
+    # route lateral 1261.910 m
+  - id: 4913
+    controller_id: 216
+    road_id: 2756
+    lane_ids: [5]
+    begin: [1488.473, 407.290]
+    end: [1488.473, 407.290]
+    route_s: 547.782
+    # route lateral 1263.599 m
+  - id: 4914
+    controller_id: 216
+    road_id: 2756
+    lane_ids: [4]
+    begin: [1484.377, 407.110]
+    end: [1484.377, 407.110]
+    route_s: 547.782
+    # route lateral 1259.719 m
+  - id: 4915
+    controller_id: 216
+    road_id: 2756
+    lane_ids: [3]
+    begin: [1481.487, 406.983]
+    end: [1481.487, 406.983]
+    route_s: 547.782
+    # route lateral 1256.982 m
+  - id: 4999
+    controller_id: 187
+    road_id: 2756
+    lane_ids: [-5]
+    begin: [1475.479, 220.015]
+    end: [1475.479, 220.015]
+    route_s: 575.472
+    # route lateral 1193.040 m
+  - id: 5000
+    controller_id: 187
+    road_id: 2756
+    lane_ids: [-1]
+    begin: [1488.076, 221.634]
+    end: [1488.076, 221.634]
+    route_s: 575.472
+    # route lateral 1205.641 m
+  - id: 5001
+    controller_id: 187
+    road_id: 2756
+    lane_ids: [-2]
+    begin: [1485.398, 221.290]
+    end: [1485.398, 221.290]
+    route_s: 575.472
+    # route lateral 1202.962 m
+  - id: 5002
+    controller_id: 187
+    road_id: 2756
+    lane_ids: [-3]
+    begin: [1482.422, 220.907]
+    end: [1482.422, 220.907]
+    route_s: 575.472
+    # route lateral 1199.985 m
+  - id: 5003
+    controller_id: 187
+    road_id: 2756
+    lane_ids: [-4]
+    begin: [1479.447, 220.524]
+    end: [1479.447, 220.524]
+    route_s: 575.472
+    # route lateral 1197.008 m
+  - id: 5004
+    controller_id: 187
+    road_id: 2756
+    lane_ids: [-5]
+    begin: [1476.471, 220.142]
+    end: [1476.471, 220.142]
+    route_s: 575.472
+    # route lateral 1194.032 m
+  - id: 5016
+    controller_id: 175
+    road_id: 2790
+    lane_ids: [1]
+    begin: [1309.971, 406.234]
+    end: [1309.971, 406.234]
+    route_s: 547.782
+    # route lateral 1098.832 m
+  - id: 5017
+    controller_id: 175
+    road_id: 2790
+    lane_ids: [2]
+    begin: [1312.963, 406.456]
+    end: [1312.963, 406.456]
+    route_s: 547.782
+    # route lateral 1101.643 m
+  - id: 5018
+    controller_id: 175
+    road_id: 2790
+    lane_ids: [2]
+    begin: [1313.462, 406.493]
+    end: [1313.462, 406.493]
+    route_s: 547.782
+    # route lateral 1102.112 m
+  - id: 5040
+    controller_id: -1
+    road_id: 2790
+    lane_ids: [-3]
+    begin: [1306.927, 342.188]
+    end: [1306.927, 342.188]
+    route_s: 547.782
+    # route lateral 1070.825 m
+  - id: 5041
+    controller_id: -1
+    road_id: 2790
+    lane_ids: [-2]
+    begin: [1310.591, 342.707]
+    end: [1310.591, 342.707]
+    route_s: 547.782
+    # route lateral 1074.421 m
+  - id: 5042
+    controller_id: -1
+    road_id: 2790
+    lane_ids: [-3]
+    begin: [1307.621, 342.286]
+    end: [1307.621, 342.286]
+    route_s: 547.782
+    # route lateral 1071.505 m
+  - id: 5048
+    controller_id: 175
+    road_id: 2790
+    lane_ids: [1]
+    begin: [1315.962, 331.685]
+    end: [1315.962, 331.685]
+    route_s: 548.268
+    # route lateral 1075.426 m
+  - id: 5049
+    controller_id: 175
+    road_id: 2790
+    lane_ids: [2]
+    begin: [1319.413, 332.266]
+    end: [1319.413, 332.266]
+    route_s: 548.268
+    # route lateral 1078.857 m
+  - id: 5050
+    controller_id: 175
+    road_id: 2790
+    lane_ids: [2]
+    begin: [1318.920, 332.183]
+    end: [1318.920, 332.183]
+    route_s: 548.268
+    # route lateral 1078.367 m
+  - id: 5061
+    controller_id: -1
+    road_id: 2790
+    lane_ids: [-3]
+    begin: [1315.075, 294.736]
+    end: [1315.075, 294.736]
+    route_s: 548.268
+    # route lateral 1061.923 m
+  - id: 5062
+    controller_id: -1
+    road_id: 2790
+    lane_ids: [-2]
+    begin: [1318.032, 295.241]
+    end: [1318.032, 295.241]
+    route_s: 548.268
+    # route lateral 1064.883 m
+  - id: 5063
+    controller_id: -1
+    road_id: 2790
+    lane_ids: [-3]
+    begin: [1314.385, 294.618]
+    end: [1314.385, 294.618]
+    route_s: 548.268
+    # route lateral 1061.233 m
+  - id: 5076
+    controller_id: -1
+    road_id: 2800
+    lane_ids: [1]
+    begin: [1117.415, 400.555]
+    end: [1117.415, 400.555]
+    route_s: 376.257
+    # route lateral 916.172 m
+  - id: 5077
+    controller_id: -1
+    road_id: 2800
+    lane_ids: [2]
+    begin: [1120.288, 399.694]
+    end: [1120.288, 399.694]
+    route_s: 377.963
+    # route lateral 918.617 m
+  - id: 5089
+    controller_id: -1
+    road_id: 2800
+    lane_ids: [-1]
+    begin: [1107.268, 378.162]
+    end: [1107.268, 378.162]
+    route_s: 394.922
+    # route lateral 899.380 m
+  - id: 5090
+    controller_id: -1
+    road_id: 2800
+    lane_ids: [-2]
+    begin: [1104.548, 379.427]
+    end: [1104.548, 379.427]
+    route_s: 392.631
+    # route lateral 897.210 m
+  - id: 5091
+    controller_id: -1
+    road_id: 2800
+    lane_ids: [-1]
+    begin: [1107.268, 378.162]
+    end: [1107.268, 378.162]
+    route_s: 394.922
+    # route lateral 899.380 m
+  - id: 5092
+    controller_id: -1
+    road_id: 2801
+    lane_ids: [2]
+    begin: [1133.579, 417.615]
+    end: [1133.579, 417.615]
+    route_s: 365.820
+    # route lateral 936.954 m
+  - id: 5093
+    controller_id: -1
+    road_id: 2801
+    lane_ids: [3]
+    begin: [1133.478, 420.614]
+    end: [1133.478, 420.614]
+    route_s: 363.237
+    # route lateral 937.821 m
+  - id: 5094
+    controller_id: -1
+    road_id: 2801
+    lane_ids: [3]
+    begin: [1133.471, 420.814]
+    end: [1133.471, 420.814]
+    route_s: 363.045
+    # route lateral 937.879 m
+  - id: 5108
+    controller_id: -1
+    road_id: 2801
+    lane_ids: [-2]
+    begin: [1175.910, 415.725]
+    end: [1175.910, 415.725]
+    route_s: 380.600
+    # route lateral 976.443 m
+  - id: 5109
+    controller_id: -1
+    road_id: 2801
+    lane_ids: [-1]
+    begin: [1175.781, 418.923]
+    end: [1175.781, 418.923]
+    route_s: 377.539
+    # route lateral 977.345 m
+  - id: 5110
+    controller_id: -1
+    road_id: 2801
+    lane_ids: [-2]
+    begin: [1175.910, 415.725]
+    end: [1175.910, 415.725]
+    route_s: 380.600
+    # route lateral 976.443 m
+  - id: 5117
+    controller_id: -1
+    road_id: 2801
+    lane_ids: [2]
+    begin: [1197.385, 423.301]
+    end: [1197.385, 423.301]
+    route_s: 380.306
+    # route lateral 999.213 m
+  - id: 5148
+    controller_id: 173
+    road_id: 2801
+    lane_ids: [-2]
+    begin: [1287.739, 420.257]
+    end: [1287.739, 420.257]
+    route_s: 417.511
+    # route lateral 1083.777 m
+  - id: 5149
+    controller_id: 173
+    road_id: 2801
+    lane_ids: [-2]
+    begin: [1287.739, 420.257]
+    end: [1287.739, 420.257]
+    route_s: 417.510
+    # route lateral 1083.777 m
+  - id: 5150
+    controller_id: 173
+    road_id: 2801
+    lane_ids: [-1]
+    begin: [1287.604, 423.454]
+    end: [1287.604, 423.454]
+    route_s: 413.247
+    # route lateral 1084.687 m
+  - id: 5153
+    controller_id: -1
+    road_id: 2802
+    lane_ids: [-1]
+    begin: [1116.918, 474.043]
+    end: [1116.918, 474.043]
+    route_s: 325.511
+    # route lateral 939.532 m
+  - id: 5159
+    controller_id: -1
+    road_id: 2802
+    lane_ids: [-1]
+    begin: [1117.553, 458.236]
+    end: [1117.553, 458.236]
+    route_s: 325.965
+    # route lateral 934.880 m
+  - id: 5160
+    controller_id: -1
+    road_id: 2802
+    lane_ids: [-2]
+    begin: [1114.556, 458.117]
+    end: [1114.556, 458.117]
+    route_s: 325.965
+    # route lateral 932.007 m
+  - id: 5161
+    controller_id: -1
+    road_id: 2802
+    lane_ids: [-1]
+    begin: [1117.910, 449.246]
+    end: [1117.910, 449.246]
+    route_s: 329.266
+    # route lateral 932.332 m
+  - id: 5167
+    controller_id: -1
+    road_id: 2802
+    lane_ids: [-1]
+    begin: [1118.386, 437.253]
+    end: [1118.386, 437.253]
+    route_s: 345.435
+    # route lateral 928.906 m
+  - id: 5168
+    controller_id: -1
+    road_id: 2802
+    lane_ids: [-2]
+    begin: [1115.389, 437.134]
+    end: [1115.389, 437.134]
+    route_s: 344.795
+    # route lateral 926.031 m
+  - id: 5169
+    controller_id: 177
+    road_id: 2803
+    lane_ids: [2]
+    begin: [1326.769, 425.722]
+    end: [1326.769, 425.722]
+    route_s: 547.298
+    # route lateral 1122.281 m
+  - id: 5170
+    controller_id: 177
+    road_id: 2803
+    lane_ids: [3]
+    begin: [1326.642, 428.720]
+    end: [1326.642, 428.720]
+    route_s: 424.222
+    # route lateral 1123.313 m
+  - id: 5178
+    controller_id: -1
+    road_id: 2803
+    lane_ids: [-1]
+    begin: [1348.716, 423.058]
+    end: [1348.716, 423.058]
+    route_s: 547.782
+    # route lateral 1141.062 m
+  - id: 5180
+    controller_id: 177
+    road_id: 2803
+    lane_ids: [2]
+    begin: [1355.989, 430.125]
+    end: [1355.989, 430.125]
+    route_s: 547.298
+    # route lateral 1150.624 m
+  - id: 5192
+    controller_id: -1
+    road_id: 2803
+    lane_ids: [-2]
+    begin: [1387.637, 424.789]
+    end: [1387.637, 424.789]
+    route_s: 547.782
+    # route lateral 1177.250 m
+  - id: 5193
+    controller_id: -1
+    road_id: 2803
+    lane_ids: [-2]
+    begin: [1387.637, 424.789]
+    end: [1387.637, 424.789]
+    route_s: 547.782
+    # route lateral 1177.250 m
+  - id: 5207
+    controller_id: 171
+    road_id: 2804
+    lane_ids: [-3]
+    begin: [1298.929, 493.065]
+    end: [1298.929, 493.065]
+    route_s: 350.082
+    # route lateral 1117.794 m
+  - id: 5208
+    controller_id: 171
+    road_id: 2804
+    lane_ids: [-2]
+    begin: [1302.625, 493.232]
+    end: [1302.625, 493.232]
+    route_s: 350.897
+    # route lateral 1121.345 m
+  - id: 5209
+    controller_id: 171
+    road_id: 2804
+    lane_ids: [-3]
+    begin: [1299.628, 493.097]
+    end: [1299.628, 493.097]
+    route_s: 350.278
+    # route lateral 1118.466 m
+  - id: 5213
+    controller_id: -1
+    road_id: 2804
+    lane_ids: [1]
+    begin: [1307.002, 484.936]
+    end: [1307.002, 484.936]
+    route_s: 358.737
+    # route lateral 1122.813 m
+  - id: 5214
+    controller_id: -1
+    road_id: 2804
+    lane_ids: [2]
+    begin: [1309.999, 485.071]
+    end: [1309.999, 485.071]
+    route_s: 359.417
+    # route lateral 1125.694 m
+  - id: 5215
+    controller_id: -1
+    road_id: 2804
+    lane_ids: [1]
+    begin: [1306.503, 484.914]
+    end: [1306.503, 484.914]
+    route_s: 358.598
+    # route lateral 1122.333 m
+  - id: 5232
+    controller_id: 171
+    road_id: 2804
+    lane_ids: [-3]
+    begin: [1301.175, 443.117]
+    end: [1301.175, 443.117]
+    route_s: 395.828
+    # route lateral 1103.875 m
+  - id: 5233
+    controller_id: 171
+    road_id: 2804
+    lane_ids: [-2]
+    begin: [1304.871, 443.283]
+    end: [1304.871, 443.283]
+    route_s: 396.988
+    # route lateral 1107.429 m
+  - id: 5234
+    controller_id: 171
+    road_id: 2804
+    lane_ids: [-3]
+    begin: [1301.874, 443.148]
+    end: [1301.874, 443.148]
+    route_s: 396.023
+    # route lateral 1104.547 m
+  - id: 5237
+    controller_id: -1
+    road_id: 2805
+    lane_ids: [1]
+    begin: [1408.125, 483.109]
+    end: [1408.125, 483.109]
+    route_s: 391.843
+    # route lateral 1218.003 m
+  - id: 5238
+    controller_id: -1
+    road_id: 2805
+    lane_ids: [-2]
+    begin: [1404.914, 482.973]
+    end: [1404.914, 482.973]
+    route_s: 390.841
+    # route lateral 1214.918 m
+  - id: 5250
+    controller_id: -1
+    road_id: 2805
+    lane_ids: [-2]
+    begin: [1406.070, 444.029]
+    end: [1406.070, 444.029]
+    route_s: 547.782
+    # route lateral 1201.946 m
+  - id: 5251
+    controller_id: -1
+    road_id: 2805
+    lane_ids: [-3]
+    begin: [1403.073, 443.898]
+    end: [1403.073, 443.898]
+    route_s: 547.782
+    # route lateral 1199.163 m
+  - id: 5252
+    controller_id: -1
+    road_id: 2805
+    lane_ids: [-3]
+    begin: [1402.973, 443.893]
+    end: [1402.973, 443.893]
+    route_s: 547.782
+    # route lateral 1199.070 m
+  - id: 5296
+    controller_id: -1
+    road_id: 2807
+    lane_ids: [-3]
+    begin: [1400.569, 503.433]
+    end: [1400.569, 503.433]
+    route_s: 369.888
+    # route lateral 1217.362 m
+  - id: 5297
+    controller_id: -1
+    road_id: 2807
+    lane_ids: [-2]
+    begin: [1403.562, 503.624]
+    end: [1403.562, 503.624]
+    route_s: 370.628
+    # route lateral 1220.259 m
+  - id: 5298
+    controller_id: -1
+    road_id: 2807
+    lane_ids: [-3]
+    begin: [1400.469, 503.426]
+    end: [1400.469, 503.426]
+    route_s: 369.862
+    # route lateral 1217.265 m
+  - id: 5299
+    controller_id: -1
+    road_id: 2808
+    lane_ids: [1]
+    begin: [1320.681, 542.625]
+    end: [1320.681, 542.625]
+    route_s: 325.511
+    # route lateral 1154.486 m
+  - id: 5300
+    controller_id: -1
+    road_id: 2808
+    lane_ids: [1]
+    begin: [1320.668, 542.925]
+    end: [1320.668, 542.925]
+    route_s: 325.511
+    # route lateral 1154.574 m
+  - id: 5308
+    controller_id: -1
+    road_id: 2808
+    lane_ids: [-2]
+    begin: [1347.331, 540.316]
+    end: [1347.331, 540.316]
+    route_s: 325.965
+    # route lateral 1178.864 m
+  - id: 5309
+    controller_id: -1
+    road_id: 2808
+    lane_ids: [-3]
+    begin: [1347.466, 537.319]
+    end: [1347.466, 537.319]
+    route_s: 325.965
+    # route lateral 1178.014 m
+  - id: 5310
+    controller_id: -1
+    road_id: 2808
+    lane_ids: [-3]
+    begin: [1347.475, 537.119]
+    end: [1347.475, 537.119]
+    route_s: 325.965
+    # route lateral 1177.957 m
+  - id: 5314
+    controller_id: -1
+    road_id: 2808
+    lane_ids: [1]
+    begin: [1355.648, 544.192]
+    end: [1355.648, 544.192]
+    route_s: 325.965
+    # route lateral 1187.992 m
+  - id: 5315
+    controller_id: -1
+    road_id: 2808
+    lane_ids: [1]
+    begin: [1355.639, 544.392]
+    end: [1355.639, 544.392]
+    route_s: 325.965
+    # route lateral 1188.049 m
+  - id: 5330
+    controller_id: 167
+    road_id: 2809
+    lane_ids: [-1]
+    begin: [1302.795, 566.243]
+    end: [1302.795, 566.243]
+    route_s: 325.511
+    # route lateral 1145.918 m
+  - id: 5331
+    controller_id: 167
+    road_id: 2809
+    lane_ids: [-2]
+    begin: [1305.792, 566.381]
+    end: [1305.792, 566.381]
+    route_s: 325.511
+    # route lateral 1148.765 m
+  - id: 5332
+    controller_id: 167
+    road_id: 2809
+    lane_ids: [-2]
+    begin: [1306.292, 566.404]
+    end: [1306.292, 566.404]
+    route_s: 325.511
+    # route lateral 1149.239 m
+  - id: 5334
+    controller_id: -1
+    road_id: 2810
+    lane_ids: [1]
+    begin: [1117.301, 491.424]
+    end: [1117.301, 491.424]
+    route_s: 325.511
+    # route lateral 945.935 m
+  - id: 5335
+    controller_id: -1
+    road_id: 2810
+    lane_ids: [2]
+    begin: [1114.357, 492.002]
+    end: [1114.357, 492.002]
+    route_s: 325.511
+    # route lateral 943.390 m
+  - id: 5390
+    controller_id: 165
+    road_id: 2810
+    lane_ids: [-1]
+    begin: [1279.616, 581.569]
+    end: [1279.616, 581.569]
+    route_s: 325.067
+    # route lateral 1130.002 m
+  - id: 5391
+    controller_id: 165
+    road_id: 2810
+    lane_ids: [-2]
+    begin: [1279.749, 578.572]
+    end: [1279.749, 578.572]
+    route_s: 325.067
+    # route lateral 1128.999 m
+  - id: 5393
+    controller_id: 169
+    road_id: 2811
+    lane_ids: [2]
+    begin: [1320.574, 585.590]
+    end: [1320.574, 585.590]
+    route_s: 325.067
+    # route lateral 1169.511 m
+  - id: 5394
+    controller_id: 169
+    road_id: 2811
+    lane_ids: [3]
+    begin: [1320.436, 588.587]
+    end: [1320.436, 588.587]
+    route_s: 325.067
+    # route lateral 1170.488 m
+  - id: 5395
+    controller_id: 169
+    road_id: 2811
+    lane_ids: [3]
+    begin: [1320.408, 589.186]
+    end: [1320.408, 589.186]
+    route_s: 325.067
+    # route lateral 1170.684 m
+  - id: 5404
+    controller_id: 170
+    road_id: 2811
+    lane_ids: [-1]
+    begin: [1343.364, 583.135]
+    end: [1343.364, 583.135]
+    route_s: 325.511
+    # route lateral 1189.847 m
+  - id: 5405
+    controller_id: 170
+    road_id: 2811
+    lane_ids: [-1]
+    begin: [1343.387, 582.636]
+    end: [1343.387, 582.636]
+    route_s: 325.511
+    # route lateral 1189.689 m
+  - id: 5409
+    controller_id: 169
+    road_id: 2811
+    lane_ids: [3]
+    begin: [1353.400, 590.104]
+    end: [1353.400, 590.104]
+    route_s: 325.067
+    # route lateral 1201.721 m
+  - id: 5410
+    controller_id: 169
+    road_id: 2811
+    lane_ids: [2]
+    begin: [1353.538, 587.107]
+    end: [1353.538, 587.107]
+    route_s: 325.511
+    # route lateral 1200.768 m
+  - id: 5411
+    controller_id: 169
+    road_id: 2811
+    lane_ids: [3]
+    begin: [1353.372, 590.704]
+    end: [1353.372, 590.704]
+    route_s: 325.067
+    # route lateral 1201.912 m
+  - id: 5433
+    controller_id: -1
+    road_id: 2811
+    lane_ids: [-1]
+    begin: [1439.263, 587.551]
+    end: [1439.263, 587.551]
+    route_s: 325.511
+    # route lateral 1281.270 m
+  - id: 5434
+    controller_id: -1
+    road_id: 2811
+    lane_ids: [-1]
+    begin: [1439.286, 587.051]
+    end: [1439.286, 587.051]
+    route_s: 325.511
+    # route lateral 1281.123 m
+  - id: 5436
+    controller_id: 164
+    road_id: 2812
+    lane_ids: [2]
+    begin: [1302.093, 649.527]
+    end: [1302.093, 649.527]
+    route_s: 324.622
+    # route lateral 1177.699 m
+  - id: 5437
+    controller_id: 164
+    road_id: 2812
+    lane_ids: [2]
+    begin: [1302.093, 649.527]
+    end: [1302.093, 649.527]
+    route_s: 324.622
+    # route lateral 1177.699 m
+  - id: 5455
+    controller_id: 164
+    road_id: 2812
+    lane_ids: [-3]
+    begin: [1297.712, 602.586]
+    end: [1297.712, 602.586]
+    route_s: 325.067
+    # route lateral 1154.758 m
+  - id: 5456
+    controller_id: 164
+    road_id: 2812
+    lane_ids: [-2]
+    begin: [1300.706, 602.777]
+    end: [1300.706, 602.777]
+    route_s: 325.067
+    # route lateral 1157.593 m
+  - id: 5459
+    controller_id: 149
+    road_id: 2813
+    lane_ids: [2]
+    begin: [775.529, 533.203]
+    end: [775.529, 533.203]
+    route_s: 322.399
+    # route lateral 660.766 m
+  - id: 5460
+    controller_id: 149
+    road_id: 2813
+    lane_ids: [2]
+    begin: [775.529, 533.203]
+    end: [775.529, 533.203]
+    route_s: 322.399
+    # route lateral 660.766 m
+  - id: 5461
+    controller_id: 149
+    road_id: 2813
+    lane_ids: [3]
+    begin: [778.124, 534.709]
+    end: [778.124, 534.709]
+    route_s: 322.399
+    # route lateral 663.757 m
+  - id: 5487
+    controller_id: 149
+    road_id: 2813
+    lane_ids: [-4]
+    begin: [793.384, 483.908]
+    end: [793.384, 483.908]
+    route_s: 323.289
+    # route lateral 649.400 m
+  - id: 5488
+    controller_id: 149
+    road_id: 2813
+    lane_ids: [-2]
+    begin: [798.410, 486.802]
+    end: [798.410, 486.802]
+    route_s: 323.289
+    # route lateral 655.200 m
+  - id: 5489
+    controller_id: 149
+    road_id: 2813
+    lane_ids: [-3]
+    begin: [795.810, 485.305]
+    end: [795.810, 485.305]
+    route_s: 323.289
+    # route lateral 652.200 m
+  - id: 5491
+    controller_id: 150
+    road_id: 2814
+    lane_ids: [4]
+    begin: [785.921, 574.859]
+    end: [785.921, 574.859]
+    route_s: 321.510
+    # route lateral 693.551 m
+  - id: 5492
+    controller_id: 150
+    road_id: 2814
+    lane_ids: [2]
+    begin: [788.496, 569.887]
+    end: [788.496, 569.887]
+    route_s: 321.955
+    # route lateral 692.645 m
+  - id: 5493
+    controller_id: 150
+    road_id: 2814
+    lane_ids: [3]
+    begin: [787.116, 572.551]
+    end: [787.116, 572.551]
+    route_s: 321.955
+    # route lateral 693.126 m
+  - id: 5566
+    controller_id: 151
+    road_id: 2814
+    lane_ids: [-2]
+    begin: [962.723, 652.632]
+    end: [962.723, 652.632]
+    route_s: 322.399
+    # route lateral 882.702 m
+  - id: 5567
+    controller_id: 151
+    road_id: 2814
+    lane_ids: [-1]
+    begin: [961.310, 655.278]
+    end: [961.310, 655.278]
+    route_s: 322.399
+    # route lateral 883.021 m
+  - id: 5568
+    controller_id: 151
+    road_id: 2814
+    lane_ids: [-2]
+    begin: [964.042, 650.162]
+    end: [964.042, 650.162]
+    route_s: 322.399
+    # route lateral 882.414 m
+  - id: 5571
+    controller_id: 152
+    road_id: 2815
+    lane_ids: [4]
+    begin: [991.339, 681.874]
+    end: [991.339, 681.874]
+    route_s: 322.399
+    # route lateral 922.829 m
+  - id: 5572
+    controller_id: 152
+    road_id: 2815
+    lane_ids: [2]
+    begin: [993.975, 676.933]
+    end: [993.975, 676.933]
+    route_s: 322.399
+    # route lateral 922.209 m
+  - id: 5573
+    controller_id: 152
+    road_id: 2815
+    lane_ids: [3]
+    begin: [992.563, 679.580]
+    end: [992.563, 679.580]
+    route_s: 322.399
+    # route lateral 922.537 m
+  - id: 5656
+    controller_id: 156
+    road_id: 2815
+    lane_ids: [-1]
+    begin: [1226.911, 810.416]
+    end: [1226.911, 810.416]
+    route_s: 322.399
+    # route lateral 1190.052 m
+  - id: 5657
+    controller_id: 155
+    road_id: 2815
+    lane_ids: [-3]
+    begin: [1229.921, 805.694]
+    end: [1229.921, 805.694]
+    route_s: 322.399
+    # route lateral 1189.992 m
+  - id: 5658
+    controller_id: 155
+    road_id: 2815
+    lane_ids: [-2]
+    begin: [1228.523, 807.886]
+    end: [1228.523, 807.886]
+    route_s: 322.399
+    # route lateral 1190.017 m
+  - id: 5662
+    controller_id: 157
+    road_id: 2816
+    lane_ids: [2]
+    begin: [1261.293, 802.921]
+    end: [1261.293, 802.921]
+    route_s: 322.844
+    # route lateral 1214.945 m
+  - id: 5663
+    controller_id: 157
+    road_id: 2816
+    lane_ids: [2]
+    begin: [1261.291, 802.925]
+    end: [1261.291, 802.925]
+    route_s: 322.844
+    # route lateral 1214.945 m
+  - id: 5664
+    controller_id: 157
+    road_id: 2816
+    lane_ids: [2]
+    begin: [1261.656, 803.090]
+    end: [1261.656, 803.090]
+    route_s: 322.844
+    # route lateral 1215.341 m
+  - id: 5689
+    controller_id: 161
+    road_id: 2816
+    lane_ids: [-2]
+    begin: [1279.755, 742.759]
+    end: [1279.755, 742.759]
+    route_s: 323.289
+    # route lateral 1200.142 m
+  - id: 5707
+    controller_id: 161
+    road_id: 2816
+    lane_ids: [-3]
+    begin: [1293.288, 682.260]
+    end: [1293.288, 682.260]
+    route_s: 324.178
+    # route lateral 1183.889 m
+  - id: 5708
+    controller_id: 161
+    road_id: 2816
+    lane_ids: [-2]
+    begin: [1296.261, 682.660]
+    end: [1296.261, 682.660]
+    route_s: 324.178
+    # route lateral 1186.731 m
+  - id: 5713
+    controller_id: 159
+    road_id: 2817
+    lane_ids: [4]
+    begin: [1265.466, 841.072]
+    end: [1265.466, 841.072]
+    route_s: 322.399
+    # route lateral 1239.113 m
+  - id: 5714
+    controller_id: 159
+    road_id: 2817
+    lane_ids: [2]
+    begin: [1268.368, 836.283]
+    end: [1268.368, 836.283]
+    route_s: 322.399
+    # route lateral 1238.905 m
+  - id: 5715
+    controller_id: 159
+    road_id: 2817
+    lane_ids: [3]
+    begin: [1266.813, 838.848]
+    end: [1266.813, 838.848]
+    route_s: 322.399
+    # route lateral 1239.013 m
+  - id: 5782
+    controller_id: 219
+    road_id: 2817
+    lane_ids: [-2]
+    begin: [1416.888, 922.075]
+    end: [1416.888, 922.075]
+    route_s: 322.844
+    # route lateral 1410.189 m
+  - id: 5783
+    controller_id: 219
+    road_id: 2817
+    lane_ids: [-4]
+    begin: [1419.892, 917.114]
+    end: [1419.892, 917.114]
+    route_s: 322.844
+    # route lateral 1410.034 m
+  - id: 5784
+    controller_id: 219
+    road_id: 2817
+    lane_ids: [-3]
+    begin: [1418.444, 919.510]
+    end: [1418.444, 919.510]
+    route_s: 322.844
+    # route lateral 1410.108 m
+  - id: 5785
+    controller_id: 219
+    road_id: 2817
+    lane_ids: [-2]
+    begin: [1416.891, 922.077]
+    end: [1416.891, 922.077]
+    route_s: 322.844
+    # route lateral 1410.192 m
+  - id: 5790
+    controller_id: -1
+    road_id: 2818
+    lane_ids: [1]
+    begin: [1415.472, 1162.958]
+    end: [1415.472, 1162.958]
+    route_s: 321.065
+    # route lateral 1552.834 m
+  - id: 5836
+    controller_id: -1
+    road_id: 2818
+    lane_ids: [-1]
+    begin: [1251.048, 1114.570]
+    end: [1251.048, 1114.570]
+    route_s: 320.175
+    # route lateral 1397.828 m
+  - id: 5837
+    controller_id: -1
+    road_id: 2818
+    lane_ids: [-2]
+    begin: [1248.850, 1116.612]
+    end: [1248.850, 1116.612]
+    route_s: 320.175
+    # route lateral 1397.622 m
+  - id: 5847
+    controller_id: -1
+    road_id: 2818
+    lane_ids: [1]
+    begin: [1239.609, 1097.397]
+    end: [1239.609, 1097.397]
+    route_s: 320.175
+    # route lateral 1377.750 m
+  - id: 5880
+    controller_id: -1
+    road_id: 2818
+    lane_ids: [-1]
+    begin: [1191.977, 984.463]
+    end: [1191.977, 984.463]
+    route_s: 321.065
+    # route lateral 1266.959 m
+  - id: 5885
+    controller_id: -1
+    road_id: 2818
+    lane_ids: [1]
+    begin: [1195.007, 972.958]
+    end: [1195.007, 972.958]
+    route_s: 321.065
+    # route lateral 1261.805 m
+  - id: 5886
+    controller_id: -1
+    road_id: 2818
+    lane_ids: [1]
+    begin: [1195.207, 972.967]
+    end: [1195.207, 972.967]
+    route_s: 321.065
+    # route lateral 1261.964 m
+  - id: 5921
+    controller_id: 153
+    road_id: 2818
+    lane_ids: [-1]
+    begin: [1235.977, 841.224]
+    end: [1235.977, 841.224]
+    route_s: 322.399
+    # route lateral 1214.709 m
+  - id: 6011
+    controller_id: -1
+    road_id: 2823
+    lane_ids: [-1]
+    begin: [1097.208, 350.366]
+    end: [1097.208, 350.366]
+    route_s: 423.001
+    # route lateral 880.871 m
+  - id: 6012
+    controller_id: -1
+    road_id: 2823
+    lane_ids: [-2]
+    begin: [1099.774, 348.812]
+    end: [1099.774, 348.812]
+    route_s: 426.125
+    # route lateral 882.788 m
+  - id: 6023
+    controller_id: -1
+    road_id: 2826
+    lane_ids: [-2]
+    begin: [1080.767, 339.629]
+    end: [1080.767, 339.629]
+    route_s: 429.574
+    # route lateral 861.820 m
+  - id: 6124
+    controller_id: 223
+    road_id: 3113
+    lane_ids: [3]
+    begin: [1497.952, 981.859]
+    end: [1497.952, 981.859]
+    route_s: 322.399
+    # route lateral 1510.730 m
+  - id: 6125
+    controller_id: 223
+    road_id: 3113
+    lane_ids: [4]
+    begin: [1496.400, 984.426]
+    end: [1496.400, 984.426]
+    route_s: 322.399
+    # route lateral 1510.832 m
+  - id: 6126
+    controller_id: 223
+    road_id: 3113
+    lane_ids: [2]
+    begin: [1499.505, 979.292]
+    end: [1499.505, 979.292]
+    route_s: 322.399
+    # route lateral 1510.634 m
+  - id: 6242
+    controller_id: -1
+    road_id: 3167
+    lane_ids: [-2]
+    begin: [1467.199, 918.842]
+    end: [1467.199, 918.842]
+    route_s: 322.844
+    # route lateral 1451.016 m
+  - id: 6243
+    controller_id: -1
+    road_id: 3167
+    lane_ids: [-1]
+    begin: [1463.800, 918.746]
+    end: [1463.800, 918.746]
+    route_s: 322.844
+    # route lateral 1448.074 m
+  - id: 6244
+    controller_id: -1
+    road_id: 3167
+    lane_ids: [-2]
+    begin: [1466.799, 918.830]
+    end: [1466.799, 918.830]
+    route_s: 322.844
+    # route lateral 1450.670 m
+  - id: 6294
+    controller_id: -1
+    road_id: 3288
+    lane_ids: [1]
+    begin: [436.611, -331.477]
+    end: [436.611, -331.477]
+    route_s: 816.049
+    # route lateral 124.095 m
+  - id: 6296
+    controller_id: -1
+    road_id: 3288
+    lane_ids: [-1]
+    begin: [447.960, -325.055]
+    end: [447.960, -325.055]
+    route_s: 816.049
+    # route lateral 131.601 m
+  - id: 6312
+    controller_id: -1
+    road_id: 3372
+    lane_ids: [-2]
+    begin: [908.016, -806.270]
+    end: [908.016, -806.270]
+    route_s: 816.049
+    # route lateral 788.338 m
+  - id: 6313
+    controller_id: -1
+    road_id: 3372
+    lane_ids: [-1]
+    begin: [905.716, -808.196]
+    end: [905.716, -808.196]
+    route_s: 816.049
+    # route lateral 787.950 m
+  - id: 6314
+    controller_id: -1
+    road_id: 3372
+    lane_ids: [-3]
+    begin: [910.776, -803.958]
+    end: [910.776, -803.958]
+    route_s: 816.049
+    # route lateral 788.819 m
+  - id: 6315
+    controller_id: -1
+    road_id: 3372
+    lane_ids: [-3]
+    begin: [910.316, -804.343]
+    end: [910.316, -804.343]
+    route_s: 816.049
+    # route lateral 788.738 m
+  - id: 6335
+    controller_id: -1
+    road_id: 3450
+    lane_ids: [-1]
+    begin: [1471.576, 426.340]
+    end: [1471.576, 426.340]
+    route_s: 547.782
+    # route lateral 1255.025 m
+  - id: 6336
+    controller_id: -1
+    road_id: 3450
+    lane_ids: [-4]
+    begin: [1462.581, 426.042]
+    end: [1462.581, 426.042]
+    route_s: 547.782
+    # route lateral 1246.601 m
+  - id: 6337
+    controller_id: -1
+    road_id: 3450
+    lane_ids: [-4]
+    begin: [1461.781, 426.015]
+    end: [1461.781, 426.015]
+    route_s: 547.782
+    # route lateral 1245.853 m
+  - id: 6338
+    controller_id: -1
+    road_id: 3450
+    lane_ids: [-3]
+    begin: [1465.579, 426.141]
+    end: [1465.579, 426.141]
+    route_s: 547.782
+    # route lateral 1249.408 m
+  - id: 6339
+    controller_id: -1
+    road_id: 3450
+    lane_ids: [-2]
+    begin: [1468.578, 426.241]
+    end: [1468.578, 426.241]
+    route_s: 547.782
+    # route lateral 1252.216 m
 
 crosswalks:
+  - id: 371
+    road_id: 146
+    polygon: "698.660,-211.264; 703.258,-207.409; 707.113,-212.007; 702.515,-215.862"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_6.flt
+  - id: 403
+    road_id: 146
+    polygon: "649.119,-139.074; 644.384,-142.759; 640.698,-138.024; 645.433,-134.339"
+    entry_route_s: 579.803
+    exit_route_s: 580.236
+    # source: RM_532_6_6.flt
+  - id: 467
+    road_id: 173
+    polygon: "784.895,-90.720; 783.389,-82.864; 789.282,-81.734; 790.788,-89.591"
+    entry_route_s: 578.072
+    exit_route_s: 578.505
+    # source: RM_532_6_8.flt
+  - id: 502
+    road_id: 173
+    polygon: "849.885,-5.566; 857.641,-7.524; 856.172,-13.342; 848.416,-11.383"
+    entry_route_s: 576.772
+    exit_route_s: 576.772
+    # source: RM_532_6_8.flt
+  - id: 548
+    road_id: 173
+    polygon: "857.592,111.041; 849.593,110.897; 849.485,116.896; 857.484,117.040"
+    entry_route_s: 548.757
+    exit_route_s: 574.603
+    # source: RM_532_6_8.flt
+  - id: 885
+    road_id: 420
+    polygon: "410.164,-40.303; 407.012,-35.197; 412.118,-32.046; 415.270,-37.152"
+    entry_route_s: 549.250
+    exit_route_s: 573.705
+    # source: RM_532_6_6.flt
   - id: 1046
+    road_id: 550
     polygon: "-6.285,29.667; 0.850,30.635; 1.576,25.284; -5.559,24.316"
     entry_route_s: 42.949
     exit_route_s: 48.840
     # source: RM_532_6_8.flt
   - id: 1052
+    road_id: 562
     polygon: "13.109,51.241; 16.959,33.658; 11.098,32.375; 7.248,49.958"
     entry_route_s: 59.036
     exit_route_s: 65.266
     # source: RM_532_6_18.flt
   - id: 1053
+    road_id: 568
     polygon: "223.153,168.515; 223.007,162.017; 219.508,162.095; 219.653,168.594"
     entry_route_s: 307.958
     exit_route_s: 311.872
     # source: SgRMPelicanCross-2Lanes-4m.flt
   - id: 1054
+    road_id: 577
     polygon: "318.676,-87.354; 323.100,-94.020; 318.101,-97.338; 313.677,-90.672"
     entry_route_s: 584.690
     exit_route_s: 590.985
     # source: RM_532_6_8.flt
+  - id: 1055
+    road_id: 586
+    polygon: "333.769,-100.392; 353.804,-87.178; 358.208,-93.857; 338.173,-107.070"
+    entry_route_s: 579.803
+    exit_route_s: 586.285
+    # source: RM_532_8_24.flt
   - id: 1056
+    road_id: 607
     polygon: "313.453,-65.514; 335.040,-55.027; 338.536,-62.223; 316.948,-72.710"
     entry_route_s: 551.994
     exit_route_s: 568.514
     # source: RM_532_8_24.flt
+  - id: 1057
+    road_id: 676
+    polygon: "387.957,-237.883; 393.369,-233.443; 397.174,-238.082; 391.763,-242.522"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_7.flt
+  - id: 1058
+    road_id: 688
+    polygon: "457.082,-221.727; 436.596,-237.738; 432.901,-233.010; 453.387,-217.000"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_26.flt
+  - id: 1061
+    road_id: 766
+    polygon: "655.941,-95.128; 657.795,-102.910; 651.958,-104.301; 650.104,-96.519"
+    entry_route_s: 578.505
+    exit_route_s: 578.938
+    # source: RM_532_6_8.flt
+  - id: 1068
+    road_id: 775
+    polygon: "633.506,-109.126; 631.060,-100.464; 636.835,-98.834; 639.280,-107.495"
+    entry_route_s: 578.938
+    exit_route_s: 579.371
+    # source: RM_532_6_9.flt
+  - id: 1069
+    road_id: 781
+    polygon: "540.459,-142.251; 544.099,-149.375; 538.756,-152.105; 535.116,-144.982"
+    entry_route_s: 581.101
+    exit_route_s: 581.534
+    # source: RM_532_6_8.flt
+  - id: 1070
+    road_id: 781
+    polygon: "516.812,-141.969; 522.024,-138.996; 524.997,-144.207; 519.786,-147.181"
+    entry_route_s: 581.101
+    exit_route_s: 581.534
+    # source: RM_532_6_6.flt
+  - id: 1080
+    road_id: 794
+    polygon: "462.399,-28.136; 456.906,-31.096; 455.312,-28.138; 460.806,-25.178"
+    entry_route_s: 574.159
+    exit_route_s: 574.603
+    # source: SgRMPelicanCross-2Lanes-4m.flt
   - id: 1088
+    road_id: 809
     polygon: "286.467,-107.380; 293.249,-113.296; 289.304,-117.817; 282.522,-111.901"
     entry_route_s: 620.682
     exit_route_s: 628.491
     # source: RM_532_6_9.flt
   - id: 1089
+    road_id: 812
     polygon: "306.476,-111.784; 300.421,-115.297; 297.410,-110.107; 303.465,-106.594"
     entry_route_s: 608.053
     exit_route_s: 615.261
     # source: RM_532_6_7.flt
+  - id: 1090
+    road_id: 836
+    polygon: "453.205,-194.157; 457.016,-201.190; 451.741,-204.049; 447.929,-197.015"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 1218
+    road_id: 1128
+    polygon: "354.674,-76.027; 349.814,-68.452; 354.864,-65.212; 359.724,-72.787"
+    entry_route_s: 574.603
+    exit_route_s: 576.804
+    # source: RM_532_6_9.flt
+  - id: 1219
+    road_id: 1166
+    polygon: "741.728,-267.330; 748.004,-262.370; 751.725,-267.077; 745.448,-272.038"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 1220
+    road_id: 1172
+    polygon: "366.161,-307.514; 360.897,-312.128; 356.942,-307.615; 362.206,-303.002"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_7.flt
+  - id: 1222
+    road_id: 1174
+    polygon: "362.594,-269.722; 368.455,-276.553; 363.901,-280.460; 358.041,-273.629"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
   - id: 1267
+    road_id: 1187
     polygon: "211.808,181.804; 221.474,171.676; 215.687,166.153; 206.021,176.280"
     entry_route_s: 302.784
     exit_route_s: 309.927
     # source: RM_532_8_14.flt
   - id: 1269
+    road_id: 1196
     polygon: "255.516,153.906; 234.688,146.822; 232.112,154.396; 252.940,161.480"
     entry_route_s: 325.655
     exit_route_s: 333.668
     # source: RM_532_8_22.flt
+  - id: 1272
+    road_id: 1218
+    polygon: "229.309,215.771; 223.532,214.149; 221.910,219.925; 227.687,221.547"
+    entry_route_s: 309.927
+    exit_route_s: 311.265
+    # source: RM_532_6_6.flt
+  - id: 1273
+    road_id: 1219
+    polygon: "256.757,199.247; 247.117,209.400; 251.468,213.531; 261.108,203.379"
+    entry_route_s: 315.029
+    exit_route_s: 317.950
+    # source: RM_532_6_14.flt
+  - id: 1295
+    road_id: 1222
+    polygon: "994.585,258.269; 989.608,264.533; 994.306,268.265; 999.283,262.001"
+    entry_route_s: 547.298
+    exit_route_s: 547.782
+    # source: RM_532_6_8.flt
+  - id: 1333
+    road_id: 1225
+    polygon: "906.135,188.997; 901.054,195.176; 905.688,198.987; 910.769,192.807"
+    entry_route_s: 547.782
+    exit_route_s: 547.782
+    # source: RM_532_6_8.flt
+  - id: 1334
+    road_id: 1241
+    polygon: "938.545,214.022; 933.581,220.296; 938.287,224.019; 943.251,217.745"
+    entry_route_s: 547.782
+    exit_route_s: 547.782
+    # source: RM_532_6_8.flt
+  - id: 1370
+    road_id: 1474
+    polygon: "400.711,-248.947; 405.419,-245.227; 409.139,-249.935; 404.431,-253.654"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_6.flt
+  - id: 1382
+    road_id: 1505
+    polygon: "409.106,-356.337; 406.038,-352.263; 410.112,-349.196; 413.180,-353.270"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_6.flt
+  - id: 1390
+    road_id: 1539
+    polygon: "470.901,-347.488; 474.220,-352.048; 469.660,-355.367; 466.341,-350.807"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_6.flt
+  - id: 1406
+    road_id: 1601
+    polygon: "496.822,-390.247; 493.737,-385.669; 498.315,-382.584; 501.399,-387.162"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_6.flt
+  - id: 1478
+    road_id: 1618
+    polygon: "455.876,-495.665; 449.465,-500.451; 445.876,-495.643; 452.287,-490.857"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 1479
+    road_id: 1625
+    polygon: "427.890,-473.802; 434.692,-469.592; 437.850,-474.694; 431.047,-478.904"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 1480
+    road_id: 1631
+    polygon: "452.125,-467.210; 461.405,-478.995; 456.691,-482.707; 447.411,-470.922"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_15.flt
+  - id: 1481
+    road_id: 1640
+    polygon: "430.456,-490.957; 427.583,-487.112; 431.429,-484.239; 434.301,-488.085"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_6.flt
+  - id: 1493
+    road_id: 1690
+    polygon: "553.269,-406.380; 542.823,-392.967; 547.556,-389.281; 558.002,-402.693"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_17.flt
+  - id: 1494
+    road_id: 1705
+    polygon: "595.732,-397.364; 574.495,-414.037; 569.554,-407.745; 590.791,-391.072"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_27.flt
+  - id: 1568
+    road_id: 1753
+    polygon: "500.659,-677.582; 507.995,-674.390; 510.389,-679.891; 503.054,-683.084"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 1572
+    road_id: 1756
+    polygon: "509.360,-694.293; 515.675,-689.382; 519.359,-694.118; 513.044,-699.029"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 1576
+    road_id: 1765
+    polygon: "496.851,-632.325; 488.881,-631.635; 489.398,-625.657; 497.368,-626.347"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 1692
+    road_id: 1781
+    polygon: "575.318,-777.663; 581.646,-772.769; 585.317,-777.515; 578.989,-782.409"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 1693
+    road_id: 1790
+    polygon: "581.048,-799.284; 576.009,-793.071; 580.669,-789.291; 585.708,-795.505"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 1694
+    road_id: 1799
+    polygon: "602.239,-798.872; 596.007,-803.888; 592.245,-799.214; 598.477,-794.198"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 1695
+    road_id: 1808
+    polygon: "599.254,-784.756; 594.315,-778.462; 599.036,-774.759; 603.974,-781.052"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 1749
+    road_id: 1821
+    polygon: "647.110,-853.943; 651.414,-846.039; 656.683,-848.908; 652.379,-856.812"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 1752
+    road_id: 1824
+    polygon: "668.006,-861.860; 671.605,-853.610; 677.104,-856.009; 673.506,-864.259"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 1796
+    road_id: 1829
+    polygon: "755.658,-914.035; 761.832,-907.486; 766.197,-911.602; 760.023,-918.151"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 1800
+    road_id: 1838
+    polygon: "777.892,-908.850; 783.239,-916.089; 778.413,-919.654; 773.066,-912.415"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 1834
+    road_id: 1858
+    polygon: "826.966,-969.917; 832.585,-976.948; 827.897,-980.694; 822.279,-973.663"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 1943
+    road_id: 1878
+    polygon: "864.827,-1051.022; 873.464,-1044.209; 877.180,-1048.920; 868.544,-1055.733"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_11.flt
+  - id: 1944
+    road_id: 1892
+    polygon: "849.815,-1013.845; 842.449,-1019.016; 839.002,-1014.105; 846.368,-1008.934"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 1950
+    road_id: 1901
+    polygon: "876.661,-1031.592; 863.119,-1014.253; 867.848,-1010.560; 881.390,-1027.899"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_22.flt
+  - id: 2029
+    road_id: 1916
+    polygon: "937.331,-1124.430; 927.962,-1131.929; 924.213,-1127.245; 933.581,-1119.746"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_12.flt
+  - id: 2309
+    road_id: 1931
+    polygon: "978.567,-954.362; 962.330,-934.056; 968.578,-929.060; 984.815,-949.366"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_26.flt
+  - id: 2310
+    road_id: 1949
+    polygon: "1006.036,-897.821; 1022.803,-917.692; 1016.689,-922.851; 999.922,-902.980"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_26.flt
+  - id: 2311
+    road_id: 1964
+    polygon: "1021.112,-938.515; 1000.703,-954.623; 995.747,-948.344; 1016.156,-932.236"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_26.flt
+  - id: 2312
+    road_id: 1973
+    polygon: "1113.458,-1110.017; 1121.110,-1119.261; 1116.488,-1123.087; 1108.836,-1113.843"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_12.flt
+  - id: 2318
+    road_id: 1976
+    polygon: "1107.266,-1091.400; 1128.458,-1074.669; 1133.415,-1080.948; 1112.223,-1097.679"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_27.flt
+  - id: 2353
+    road_id: 1981
+    polygon: "831.937,-877.643; 826.378,-870.565; 831.096,-866.859; 836.655,-873.937"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 2354
+    road_id: 1987
+    polygon: "841.666,-875.496; 848.743,-869.936; 852.450,-874.655; 845.372,-880.214"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 2355
+    road_id: 1993
+    polygon: "847.700,-865.663; 842.153,-858.575; 846.878,-854.877; 852.425,-861.964"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 2504
+    road_id: 2007
+    polygon: "655.910,-740.672; 650.256,-733.669; 654.925,-729.900; 660.578,-736.903"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 2509
+    road_id: 2010
+    polygon: "681.010,-721.738; 675.203,-714.862; 679.787,-710.990; 685.594,-717.866"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 2662
+    road_id: 2024
+    polygon: "755.402,-651.331; 760.614,-658.669; 755.722,-662.143; 750.511,-654.806"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 2663
+    road_id: 2042
+    polygon: "793.267,-635.540; 786.100,-625.916; 790.913,-622.332; 798.080,-631.957"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_12.flt
+  - id: 2665
+    road_id: 2051
+    polygon: "770.904,-664.163; 792.112,-647.453; 797.063,-653.737; 775.855,-670.447"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_27.flt
+  - id: 2666
+    road_id: 2063
+    polygon: "892.237,-831.132; 886.572,-824.138; 891.235,-820.362; 896.899,-827.356"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 2916
+    road_id: 2080
+    polygon: "1140.340,-788.289; 1158.038,-809.986; 1151.839,-815.042; 1134.140,-793.346"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_28.flt
+  - id: 2922
+    road_id: 2086
+    polygon: "1171.042,-764.129; 1187.407,-784.332; 1181.191,-789.367; 1164.826,-769.164"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_26.flt
+  - id: 2923
+    road_id: 2095
+    polygon: "1141.105,-774.201; 1147.450,-769.328; 1151.104,-774.087; 1144.759,-778.960"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 2936
+    road_id: 2096
+    polygon: "1105.400,-728.615; 1111.682,-723.662; 1115.397,-728.374; 1109.114,-733.327"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3002
+    road_id: 2128
+    polygon: "1074.886,-660.884; 1079.808,-667.191; 1075.077,-670.882; 1070.156,-664.575"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3004
+    road_id: 2131
+    polygon: "1054.798,-664.455; 1061.085,-659.508; 1064.796,-664.223; 1058.509,-669.171"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3043
+    road_id: 2165
+    polygon: "1006.951,-603.900; 1013.147,-598.840; 1016.942,-603.487; 1010.746,-608.547"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3067
+    road_id: 2190
+    polygon: "970.315,-557.878; 976.618,-552.951; 980.313,-557.677; 974.011,-562.605"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3209
+    road_id: 2216
+    polygon: "927.580,-510.563; 938.691,-524.724; 932.397,-529.663; 921.286,-515.501"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_18.flt
+  - id: 3210
+    road_id: 2222
+    polygon: "945.944,-495.828; 956.985,-510.044; 950.667,-514.951; 939.626,-500.735"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_18.flt
+  - id: 3211
+    road_id: 2237
+    polygon: "670.732,-532.946; 687.949,-519.252; 692.929,-525.513; 675.711,-539.207"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_22.flt
+  - id: 3248
+    road_id: 2247
+    polygon: "791.836,-330.996; 798.250,-326.215; 801.836,-331.026; 795.421,-335.807"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3252
+    road_id: 2253
+    polygon: "851.072,-406.785; 857.352,-401.828; 861.069,-406.538; 854.790,-411.494"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3256
+    road_id: 2256
+    polygon: "838.279,-390.199; 844.577,-385.265; 848.277,-389.988; 841.980,-394.922"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3291
+    road_id: 2263
+    polygon: "1150.313,-602.152; 1155.243,-608.453; 1150.518,-612.150; 1145.588,-605.850"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3376
+    road_id: 2268
+    polygon: "1207.813,-566.511; 1202.863,-560.227; 1207.576,-556.514; 1212.526,-562.799"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3380
+    road_id: 2295
+    polygon: "1214.699,-543.638; 1208.413,-548.586; 1204.702,-543.872; 1210.987,-538.924"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3381
+    road_id: 2301
+    polygon: "1227.315,-551.229; 1222.296,-544.999; 1226.968,-541.235; 1231.987,-547.465"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3421
+    road_id: 2305
+    polygon: "1409.035,-311.340; 1401.036,-311.189; 1401.149,-305.190; 1409.148,-305.341"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3488
+    road_id: 2311
+    polygon: "1345.931,-445.198; 1352.162,-450.216; 1348.399,-454.889; 1342.168,-449.871"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3624
+    road_id: 2355
+    polygon: "1120.267,-464.376; 1116.591,-447.778; 1124.402,-446.048; 1128.078,-462.646"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_17.flt
+  - id: 3625
+    road_id: 2364
+    polygon: "1154.441,-466.925; 1148.155,-471.874; 1144.444,-467.159; 1150.730,-462.211"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3626
+    road_id: 2370
+    polygon: "1149.978,-454.240; 1141.243,-439.656; 1148.106,-435.545; 1156.841,-450.129"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_17.flt
+  - id: 3627
+    road_id: 2382
+    polygon: "1118.288,-434.001; 1124.566,-429.043; 1128.285,-433.751; 1122.007,-438.710"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3693
+    road_id: 2395
+    polygon: "1087.013,-394.176; 1093.284,-389.208; 1097.010,-393.911; 1090.739,-398.879"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3732
+    road_id: 2399
+    polygon: "1001.829,-285.816; 1008.095,-280.843; 1011.825,-285.542; 1005.559,-290.515"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3735
+    road_id: 2402
+    polygon: "1001.921,-273.338; 995.445,-278.035; 991.922,-273.178; 998.398,-268.481"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3756
+    road_id: 2409
+    polygon: "969.610,-192.189; 961.611,-192.095; 961.682,-186.095; 969.681,-186.190"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 3794
+    road_id: 2419
+    polygon: "980.271,-132.202; 987.213,-136.178; 984.231,-141.384; 977.289,-137.408"
+    entry_route_s: 578.938
+    exit_route_s: 579.371
+    # source: RM_532_6_8.flt
+  - id: 3798
+    road_id: 2422
+    polygon: "998.966,-121.240; 993.998,-114.969; 998.702,-111.244; 1003.669,-117.515"
+    entry_route_s: 578.938
+    exit_route_s: 578.938
+    # source: RM_532_6_8.flt
+  - id: 3903
+    road_id: 2426
+    polygon: "725.394,-273.524; 713.612,-258.618; 719.888,-253.657; 731.670,-268.563"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_19.flt
+  - id: 3904
+    road_id: 2432
+    polygon: "729.216,-239.007; 723.815,-243.459; 719.999,-238.829; 725.400,-234.377"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_7.flt
+  - id: 4137
+    road_id: 2479
+    polygon: "1311.956,-207.849; 1311.021,-199.903; 1316.980,-199.202; 1317.914,-207.147"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 4138
+    road_id: 2488
+    polygon: "1288.490,-189.901; 1302.563,-184.709; 1304.640,-190.338; 1290.567,-195.530"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_15.flt
+  - id: 4142
+    road_id: 2494
+    polygon: "1390.156,-202.420; 1398.089,-201.391; 1398.861,-207.341; 1390.927,-208.370"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 4143
+    road_id: 2512
+    polygon: "1396.662,-186.025; 1388.755,-187.237; 1387.846,-181.306; 1395.754,-180.094"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 4144
+    road_id: 2521
+    polygon: "1383.429,-191.127; 1384.419,-199.066; 1378.465,-199.808; 1377.475,-191.869"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 4294
+    road_id: 2542
+    polygon: "1526.695,-174.203; 1527.634,-182.148; 1521.676,-182.852; 1520.737,-174.907"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 4295
+    road_id: 2554
+    polygon: "1559.770,-166.075; 1532.990,-169.512; 1531.972,-161.577; 1558.752,-158.140"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_27.flt
+  - id: 4296
+    road_id: 2559
+    polygon: "1562.826,-192.956; 1535.997,-195.991; 1535.098,-188.042; 1561.926,-185.007"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_27.flt
+  - id: 4341
+    road_id: 2564
+    polygon: "1374.277,-22.206; 1366.373,-23.444; 1365.445,-17.516; 1373.349,-16.278"
+    entry_route_s: 577.639
+    exit_route_s: 577.639
+    # source: RM_532_6_8.flt
+  - id: 4375
+    road_id: 2573
+    polygon: "1385.527,-77.459; 1374.636,-79.004; 1373.793,-73.064; 1384.684,-71.518"
+    entry_route_s: 578.072
+    exit_route_s: 578.072
+    # source: RM_532_6_11.flt
+  - id: 4419
+    road_id: 2574
+    polygon: "1210.973,45.750; 1206.090,52.086; 1210.842,55.749; 1215.726,49.412"
+    entry_route_s: 576.772
+    exit_route_s: 576.772
+    # source: RM_532_6_8.flt
+  - id: 4425
+    road_id: 2574
+    polygon: "1226.018,57.290; 1221.281,63.736; 1226.115,67.289; 1230.853,60.843"
+    entry_route_s: 576.339
+    exit_route_s: 576.772
+    # source: RM_532_6_8.flt
+  - id: 4485
+    road_id: 2581
+    polygon: "1335.982,112.686; 1333.395,120.256; 1339.072,122.197; 1341.660,114.627"
+    entry_route_s: 576.339
+    exit_route_s: 576.339
+    # source: RM_532_6_8.flt
+  - id: 4490
+    road_id: 2584
+    polygon: "1344.857,112.874; 1355.689,114.792; 1356.735,108.884; 1345.904,106.966"
+    entry_route_s: 576.339
+    exit_route_s: 576.339
+    # source: RM_532_6_11.flt
+  - id: 4505
+    road_id: 2615
+    polygon: "1125.128,-21.805; 1120.207,-15.498; 1124.937,-11.806; 1129.858,-18.113"
+    entry_route_s: 577.206
+    exit_route_s: 577.639
+    # source: RM_532_6_8.flt
+  - id: 4506
+    road_id: 2624
+    polygon: "1096.277,-34.167; 1101.186,-40.483; 1096.448,-44.165; 1091.539,-37.848"
+    entry_route_s: 577.639
+    exit_route_s: 577.639
+    # source: RM_532_6_8.flt
+  - id: 4672
+    road_id: 2650
+    polygon: "1051.392,23.524; 1063.213,32.758; 1068.138,26.453; 1056.317,17.220"
+    entry_route_s: 576.772
+    exit_route_s: 576.772
+    # source: RM_532_8_15.flt
+  - id: 4673
+    road_id: 2659
+    polygon: "1088.290,12.383; 1076.631,27.385; 1082.948,32.294; 1094.606,17.292"
+    entry_route_s: 576.772
+    exit_route_s: 576.772
+    # source: RM_532_8_19.flt
+  - id: 4674
+    road_id: 2665
+    polygon: "1092.427,-1.601; 1079.868,-14.495; 1074.137,-8.913; 1086.697,3.981"
+    entry_route_s: 577.206
+    exit_route_s: 577.206
+    # source: RM_532_8_18.flt
+  - id: 4675
+    road_id: 2670
+    polygon: "1053.311,10.364; 1066.296,-6.140; 1060.008,-11.086; 1047.023,5.418"
+    entry_route_s: 576.772
+    exit_route_s: 577.206
+    # source: RM_532_8_21.flt
+  - id: 4805
+    road_id: 2687
+    polygon: "938.015,197.636; 925.267,189.732; 921.051,196.531; 933.800,204.436"
+    entry_route_s: 547.782
+    exit_route_s: 547.782
+    # source: RM_532_8_15.flt
+  - id: 4806
+    road_id: 2696
+    polygon: "907.292,222.338; 920.708,229.046; 924.286,221.890; 910.870,215.182"
+    entry_route_s: 547.298
+    exit_route_s: 547.782
+    # source: RM_532_8_15.flt
+  - id: 4807
+    road_id: 2708
+    polygon: "979.831,115.201; 993.204,125.696; 998.143,119.403; 984.770,108.907"
+    entry_route_s: 575.038
+    exit_route_s: 575.472
+    # source: RM_532_8_17.flt
+  - id: 4811
+    road_id: 2711
+    polygon: "996.799,93.839; 1010.038,104.504; 1015.056,98.274; 1001.818,87.609"
+    entry_route_s: 575.472
+    exit_route_s: 575.472
+    # source: RM_532_8_17.flt
+  - id: 4907
+    road_id: 2725
+    polygon: "1349.854,153.291; 1338.986,151.592; 1338.059,157.520; 1348.927,159.219"
+    entry_route_s: 575.905
+    exit_route_s: 575.905
+    # source: RM_532_6_11.flt
+  - id: 4908
+    road_id: 2734
+    polygon: "1321.642,158.747; 1314.727,177.513; 1322.234,180.279; 1329.149,161.513"
+    entry_route_s: 575.472
+    exit_route_s: 575.905
+    # source: RM_532_8_20.flt
+  - id: 4909
+    road_id: 2743
+    polygon: "1356.250,188.139; 1359.437,168.394; 1351.539,167.120; 1348.353,186.864"
+    entry_route_s: 575.472
+    exit_route_s: 575.905
+    # source: RM_532_8_20.flt
+  - id: 4910
+    road_id: 2752
+    polygon: "1329.867,193.739; 1341.751,195.405; 1342.584,189.463; 1330.700,187.797"
+    entry_route_s: 575.472
+    exit_route_s: 575.472
+    # source: RM_532_6_12.flt
+  - id: 5009
+    road_id: 2765
+    polygon: "1481.241,186.330; 1507.939,190.354; 1509.132,182.444; 1482.433,178.419"
+    entry_route_s: 575.905
+    exit_route_s: 575.905
+    # source: RM_532_8_27.flt
+  - id: 5014
+    road_id: 2783
+    polygon: "1475.061,208.140; 1478.380,187.404; 1470.481,186.140; 1467.161,206.876"
+    entry_route_s: 575.472
+    exit_route_s: 575.905
+    # source: RM_532_8_21.flt
+  - id: 5015
+    road_id: 2789
+    polygon: "1475.071,218.461; 1505.338,222.382; 1506.459,213.734; 1476.192,209.813"
+    entry_route_s: 575.472
+    exit_route_s: 575.472
+    # source: RM_532_8_28.flt
+  - id: 5043
+    road_id: 2790
+    polygon: "1320.384,334.269; 1307.383,331.989; 1306.139,339.081; 1319.141,341.361"
+    entry_route_s: 547.782
+    exit_route_s: 548.268
+    # source: RM_532_6_11.flt
+  - id: 5068
+    road_id: 2793
+    polygon: "1317.678,267.130; 1330.521,269.145; 1331.451,263.218; 1318.608,261.203"
+    entry_route_s: 574.603
+    exit_route_s: 574.603
+    # source: RM_532_6_13.flt
+  - id: 5072
+    road_id: 2796
+    polygon: "1327.319,289.358; 1314.479,287.323; 1313.540,293.249; 1326.379,295.284"
+    entry_route_s: 548.268
+    exit_route_s: 548.268
+    # source: RM_532_6_13.flt
+  - id: 5113
+    road_id: 2801
+    polygon: "1177.274,414.681; 1176.909,423.674; 1182.904,423.917; 1183.269,414.924"
+    entry_route_s: 373.506
+    exit_route_s: 383.768
+    # source: RM_532_6_9.flt
+  - id: 5114
+    road_id: 2801
+    polygon: "1190.261,415.208; 1189.897,424.200; 1195.892,424.443; 1196.256,415.450"
+    entry_route_s: 377.071
+    exit_route_s: 387.597
+    # source: RM_532_6_9.flt
+  - id: 5179
+    road_id: 2803
+    polygon: "1349.639,421.886; 1349.299,430.879; 1355.295,431.106; 1355.634,422.112"
+    entry_route_s: 547.298
+    exit_route_s: 547.782
+    # source: RM_532_6_9.flt
+  - id: 5212
+    road_id: 2804
+    polygon: "1311.196,486.279; 1298.210,485.695; 1297.940,491.689; 1310.927,492.273"
+    entry_route_s: 350.843
+    exit_route_s: 358.816
+    # source: RM_532_6_13.flt
+  - id: 5313
+    road_id: 2808
+    polygon: "1354.376,545.432; 1354.779,536.441; 1348.785,536.173; 1348.382,545.164"
+    entry_route_s: 325.511
+    exit_route_s: 325.965
+    # source: RM_532_6_9.flt
+  - id: 5406
+    road_id: 2811
+    polygon: "1345.457,581.570; 1344.997,591.559; 1350.991,591.835; 1351.451,581.846"
+    entry_route_s: 325.067
+    exit_route_s: 325.511
+    # source: RM_532_6_10.flt
+  - id: 5840
+    road_id: 2818
+    polygon: "1248.858,1106.442; 1242.958,1111.845; 1247.011,1116.270; 1252.910,1110.867"
+    entry_route_s: 320.175
+    exit_route_s: 320.175
+    # source: RM_532_6_8.flt
+  - id: 5843
+    road_id: 2818
+    polygon: "1241.546,1098.279; 1235.556,1103.582; 1239.533,1108.075; 1245.523,1102.772"
+    entry_route_s: 320.175
+    exit_route_s: 320.175
+    # source: RM_532_6_8.flt
+  - id: 5883
+    road_id: 2818
+    polygon: "1196.563,975.462; 1190.563,975.474; 1190.576,981.474; 1196.576,981.462"
+    entry_route_s: 321.065
+    exit_route_s: 321.065
+    # source: RM_532_6_6.flt
+  - id: 6016
+    road_id: 2826
+    polygon: "1103.323,379.163; 1113.297,374.525; 1110.767,369.085; 1100.793,373.723"
+    entry_route_s: 392.487
+    exit_route_s: 406.068
+    # source: RM_532_6_11.flt
+  - id: 6024
+    road_id: 2835
+    polygon: "1126.702,412.615; 1126.392,421.610; 1132.388,421.816; 1132.699,412.822"
+    entry_route_s: 360.314
+    exit_route_s: 369.798
+    # source: RM_532_6_9.flt
+  - id: 6025
+    road_id: 2844
+    polygon: "1114.263,436.181; 1122.257,436.499; 1122.495,430.503; 1114.501,430.186"
+    entry_route_s: 345.221
+    exit_route_s: 351.881
+    # source: RM_532_6_8.flt
+  - id: 6029
+    road_id: 2847
+    polygon: "1120.795,478.426; 1112.801,478.109; 1112.563,484.104; 1120.557,484.422"
+    entry_route_s: 325.511
+    exit_route_s: 325.511
+    # source: RM_532_6_8.flt
+  - id: 6034
+    road_id: 2865
+    polygon: "1301.394,412.469; 1313.361,413.361; 1313.807,407.377; 1301.841,406.485"
+    entry_route_s: 547.298
+    exit_route_s: 547.782
+    # source: RM_532_6_12.flt
+  - id: 6035
+    road_id: 2880
+    polygon: "1322.255,429.741; 1322.642,420.750; 1316.647,420.492; 1316.260,429.483"
+    entry_route_s: 418.206
+    exit_route_s: 547.298
+    # source: RM_532_6_9.flt
+  - id: 6036
+    road_id: 2889
+    polygon: "1300.813,440.041; 1312.802,440.551; 1313.057,434.556; 1301.068,434.046"
+    entry_route_s: 399.033
+    exit_route_s: 410.380
+    # source: RM_532_6_12.flt
+  - id: 6037
+    road_id: 2898
+    polygon: "1292.430,419.303; 1292.050,428.295; 1298.044,428.549; 1298.425,419.557"
+    entry_route_s: 409.167
+    exit_route_s: 423.492
+    # source: RM_532_6_9.flt
+  - id: 6038
+    road_id: 2906
+    polygon: "1415.283,424.663; 1415.005,433.659; 1421.002,433.844; 1421.280,424.848"
+    entry_route_s: 547.782
+    exit_route_s: 547.782
+    # source: RM_532_6_9.flt
+  - id: 6039
+    road_id: 2915
+    polygon: "1389.081,423.593; 1388.576,432.579; 1394.567,432.916; 1395.072,423.930"
+    entry_route_s: 547.782
+    exit_route_s: 547.782
+    # source: RM_532_6_9.flt
+  - id: 6043
+    road_id: 2918
+    polygon: "1411.157,436.641; 1402.166,436.248; 1401.903,442.242; 1410.895,442.635"
+    entry_route_s: 547.782
+    exit_route_s: 547.782
+    # source: RM_532_6_9.flt
+  - id: 6044
+    road_id: 2930
+    polygon: "1450.202,426.708; 1449.939,434.704; 1455.935,434.902; 1456.199,426.906"
+    entry_route_s: 547.782
+    exit_route_s: 547.782
+    # source: RM_532_6_8.flt
+  - id: 6046
+    road_id: 2933
+    polygon: "1458.569,422.712; 1488.516,423.579; 1488.764,415.023; 1458.817,414.155"
+    entry_route_s: 547.782
+    exit_route_s: 547.782
+    # source: RM_532_8_28.flt
+  - id: 6054
+    road_id: 2942
+    polygon: "1408.863,491.582; 1399.869,491.253; 1399.650,497.249; 1408.644,497.578"
+    entry_route_s: 375.161
+    exit_route_s: 383.467
+    # source: RM_532_6_9.flt
+  - id: 6064
+    road_id: 2960
+    polygon: "1318.685,543.511; 1319.043,535.519; 1313.049,535.251; 1312.691,543.243"
+    entry_route_s: 325.511
+    exit_route_s: 325.511
+    # source: RM_532_6_8.flt
+  - id: 6070
+    road_id: 2972
+    polygon: "1307.448,568.368; 1294.461,567.770; 1294.185,573.764; 1307.172,574.362"
+    entry_route_s: 325.067
+    exit_route_s: 325.511
+    # source: RM_532_6_13.flt
+  - id: 6071
+    road_id: 2981
+    polygon: "1283.252,577.360; 1282.477,586.326; 1288.454,586.843; 1289.230,577.877"
+    entry_route_s: 325.067
+    exit_route_s: 325.067
+    # source: RM_532_6_9.flt
+  - id: 6072
+    road_id: 2990
+    polygon: "1317.075,590.379; 1317.649,580.396; 1311.659,580.051; 1311.085,590.035"
+    entry_route_s: 325.067
+    exit_route_s: 325.067
+    # source: RM_532_6_10.flt
+  - id: 6073
+    road_id: 3005
+    polygon: "1296.552,600.270; 1305.534,600.844; 1305.917,594.856; 1296.935,594.282"
+    entry_route_s: 325.067
+    exit_route_s: 325.067
+    # source: RM_532_6_9.flt
+  - id: 6088
+    road_id: 3027
+    polygon: "1441.199,586.565; 1440.785,595.555; 1446.778,595.831; 1447.192,586.841"
+    entry_route_s: 325.511
+    exit_route_s: 325.511
+    # source: RM_532_6_9.flt
+  - id: 6089
+    road_id: 3039
+    polygon: "1303.223,653.621; 1294.233,653.214; 1293.961,659.208; 1302.952,659.615"
+    entry_route_s: 324.178
+    exit_route_s: 324.622
+    # source: RM_532_6_9.flt
+  - id: 6093
+    road_id: 3051
+    polygon: "1292.403,678.679; 1301.348,679.668; 1302.008,673.705; 1293.062,672.715"
+    entry_route_s: 324.178
+    exit_route_s: 324.178
+    # source: RM_532_6_9.flt
+  - id: 6097
+    road_id: 3057
+    polygon: "1235.334,807.265; 1226.060,822.691; 1232.916,826.813; 1242.191,811.387"
+    entry_route_s: 322.399
+    exit_route_s: 322.399
+    # source: RM_532_8_18.flt
+  - id: 6098
+    road_id: 3066
+    polygon: "1249.054,810.688; 1257.123,814.673; 1259.780,809.293; 1251.710,805.308"
+    entry_route_s: 322.844
+    exit_route_s: 322.844
+    # source: RM_532_6_9.flt
+  - id: 6099
+    road_id: 3084
+    polygon: "1235.378,838.933; 1240.823,841.454; 1243.344,836.009; 1237.899,833.488"
+    entry_route_s: 322.399
+    exit_route_s: 322.399
+    # source: RM_532_6_6.flt
+  - id: 6100
+    road_id: 3090
+    polygon: "820.842,460.907; 808.327,454.631; 805.638,459.995; 818.153,466.270"
+    entry_route_s: 323.733
+    exit_route_s: 323.733
+    # source: RM_532_6_14.flt
+  - id: 6104
+    road_id: 3093
+    polygon: "793.776,481.266; 805.910,488.249; 808.903,483.049; 796.769,476.065"
+    entry_route_s: 323.289
+    exit_route_s: 323.289
+    # source: RM_532_6_14.flt
+  - id: 6120
+    road_id: 3102
+    polygon: "967.562,654.252; 960.821,667.652; 966.181,670.349; 972.922,656.949"
+    entry_route_s: 321.955
+    exit_route_s: 322.399
+    # source: RM_532_6_15.flt
+  - id: 6178
+    road_id: 3119
+    polygon: "1425.816,943.141; 1436.684,925.172; 1429.839,921.032; 1418.971,939.000"
+    entry_route_s: 322.399
+    exit_route_s: 322.844
+    # source: RM_532_8_21.flt
+  - id: 6179
+    road_id: 3128
+    polygon: "1434.923,975.130; 1466.254,976.487; 1466.641,967.535; 1435.311,966.179"
+    entry_route_s: 322.399
+    exit_route_s: 322.399
+    # source: RM_532_8_28.flt
+  - id: 6180
+    road_id: 3131
+    polygon: "1494.594,960.819; 1483.726,978.788; 1490.571,982.928; 1501.439,964.960"
+    entry_route_s: 322.399
+    exit_route_s: 322.844
+    # source: RM_532_8_21.flt
+  - id: 6245
+    road_id: 3167
+    polygon: "1468.162,921.420; 1437.936,920.512; 1437.676,929.148; 1467.903,930.056"
+    entry_route_s: 322.844
+    exit_route_s: 322.844
+    # source: RM_532_8_28.flt
+  - id: 6255
+    road_id: 3174
+    polygon: "1418.191,1161.691; 1417.983,1167.507; 1423.799,1167.715; 1424.007,1161.898"
+    entry_route_s: 321.065
+    exit_route_s: 321.065
+    # source: RM_532_6_6.flt
+  - id: 6283
+    road_id: 3195
+    polygon: "885.631,-806.118; 903.019,-792.639; 907.920,-798.961; 890.533,-812.441"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_22.flt
+  - id: 6287
+    road_id: 3229
+    polygon: "990.838,-901.118; 970.398,-917.188; 965.454,-910.899; 985.894,-894.829"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_26.flt
+  - id: 6289
+    road_id: 3258
+    polygon: "990.960,666.593; 984.181,679.297; 989.262,682.009; 996.042,669.305"
+    entry_route_s: 322.399
+    exit_route_s: 322.399
+    # source: RM_532_6_15.flt
+  - id: 6293
+    road_id: 3261
+    polygon: "415.401,-235.485; 409.453,-228.731; 413.956,-224.765; 419.904,-231.520"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_9.flt
+  - id: 6299
+    road_id: 3337
+    polygon: "904.565,-1102.481; 913.986,-1095.049; 917.702,-1099.760; 908.281,-1107.192"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_12.flt
+  - id: 6304
+    road_id: 3340
+    polygon: "407.940,-202.511; 429.235,-185.912; 434.153,-192.222; 412.858,-208.821"
+    entry_route_s: 810.619
+    exit_route_s: 816.049
+    # source: RM_532_8_27.flt
+  - id: 6305
+    road_id: 3346
+    polygon: "566.919,-362.036; 545.636,-378.650; 540.713,-372.344; 561.997,-355.730"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_27.flt
+  - id: 6306
+    road_id: 3360
+    polygon: "746.436,-633.149; 767.687,-616.495; 772.622,-622.791; 751.371,-639.446"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_27.flt
+  - id: 6321
+    road_id: 3382
+    polygon: "924.093,-499.282; 930.371,-494.323; 934.090,-499.032; 927.811,-503.990"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 6326
+    road_id: 3389
+    polygon: "944.277,-525.299; 950.530,-520.309; 954.273,-524.998; 948.020,-529.989"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 6330
+    road_id: 3398
+    polygon: "965.422,-81.826; 956.109,-70.067; 960.813,-66.342; 970.125,-78.101"
+    entry_route_s: 578.072
+    exit_route_s: 578.072
+    # source: RM_532_6_15.flt
+  - id: 6332
+    road_id: 3405
+    polygon: "744.748,-233.538; 756.474,-248.488; 750.180,-253.425; 738.453,-238.476"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_8_19.flt
+  - id: 6333
+    road_id: 3415
+    polygon: "586.364,-358.837; 596.286,-371.389; 591.579,-375.110; 581.657,-362.558"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_16.flt
+  - id: 6334
+    road_id: 3431
+    polygon: "1262.534,820.272; 1253.473,834.655; 1260.242,838.920; 1269.303,824.536"
+    entry_route_s: 322.399
+    exit_route_s: 322.844
+    # source: RM_532_8_17.flt
+  - id: 6340
+    road_id: 3464
+    polygon: "1332.565,-468.263; 1327.629,-461.968; 1332.350,-458.265; 1337.287,-464.561"
+    entry_route_s: 816.049
+    exit_route_s: 816.049
+    # source: RM_532_6_8.flt
+  - id: 6343
+    road_id: 4477
+    polygon: "633.061,-118.784; 628.306,-122.442; 624.647,-117.687; 629.403,-114.028"
+    entry_route_s: 579.371
+    exit_route_s: 579.803
+    # source: RM_532_6_6.flt
 
 speed_zones: []
 

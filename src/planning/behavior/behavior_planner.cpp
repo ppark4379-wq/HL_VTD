@@ -213,16 +213,31 @@ void updateBehavior(BehaviorState& state,
         findLeadObject(world, state.staticObstacleAvoidanceActive,
                        state.safelyAvoidedObjectId);
     if (lead != nullptr) {
+        const double egoSpeed = std::max(0.0, world.egoSpeed);
+        const double leadSpeed = std::clamp(
+            longitudinalSpeedOf(*lead, world), 0.0, limitedCruise);
         const double desiredGap =
             config.minimumFollowDistance +
-            config.followTimeGap * std::max(0.0, world.egoSpeed);
+            config.followTimeGap * egoSpeed;
+        // 시간간격만 보면 급제동하는 선행차가 desiredGap 안에 들어올 때까지
+        // 반응하지 않는다. 두 차량의 정지거리 차이도 탐색 문턱에 더해,
+        // 선행차 속도가 빠르게 떨어지는 순간부터 미리 감속한다.
+        const double relativeStoppingDistance = std::max(
+            0.0, (egoSpeed * egoSpeed - leadSpeed * leadSpeed) /
+                     (2.0 * config.comfortableDeceleration));
+        const double brakingAwareGap = desiredGap + relativeStoppingDistance;
         const double threshold =
             state.longitudinal == LonMode::Follow
-                ? desiredGap * config.followReleaseRatio
-                : desiredGap;
+                ? brakingAwareGap * config.followReleaseRatio
+                : brakingAwareGap;
         if (lead->relativeS < threshold) {
+            // 선행차 속도로 한 번에 떨어뜨리지 않고 간격 여유만큼 속도를
+            // 허용한다. 목표 간격보다 가까우면 자연스럽게 선행차 속도 이하가
+            // 되고, 멀면 점진적으로 순항속도까지 허용된다.
+            const double gapError = lead->relativeS - desiredGap;
             const double leadTarget = std::clamp(
-                longitudinalSpeedOf(*lead, world), 0.0, limitedCruise);
+                leadSpeed + config.followGapGain * gapError,
+                0.0, limitedCruise);
             if (leadTarget < targetSpeed) {
                 targetSpeed = leadTarget;
                 selectedMode = LonMode::Follow;

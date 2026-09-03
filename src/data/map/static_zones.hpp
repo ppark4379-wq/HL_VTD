@@ -19,6 +19,9 @@ struct SpeedZone {
     double routeSBegin{};
     double routeSEnd{};
     bool hasRouteRange{};
+    // 보호구역 기준점에서 런타임에 만든 구간인지 구분한다. 법정 제한속도와
+    // 별개로 제어 목표(speed.school_zone_target_kph)를 적용할 때 사용한다.
+    bool schoolZone{};
 };
 
 // VTD Scenario Editor에서 측정한 보호구역 기준점 원본이다. 이 점들은
@@ -44,6 +47,9 @@ struct StopLine {
 
 struct Crosswalk {
     int id{-1};
+    // 생성 파일은 지도 전체 횡단보도를 담는다. 런타임 경로와 같은 road의
+    // 횡단보도만 남기기 위한 OpenDRIVE road id다(-1은 수동 설정).
+    int roadId{-1};
     std::vector<Point2D> polygon;
     double entryRouteS{};
     double exitRouteS{};
@@ -78,6 +84,9 @@ bool isFlashingRedController(const StaticZoneData& zones,
                              int controllerId);
 bool alignStaticZonesToRoute(StaticZoneData& zones,
                              const std::vector<Waypoint>& route);
+bool isSchoolZoneActive(const StaticZoneData& zones,
+                        const Point2D& position,
+                        double routeS);
 
 // 현재 위치에 적용되는 제한속도. polygon 구간과 route_s 구간을 모두 본다.
 // routeS가 유효하지 않으면 음수를 넘겨 route 구간 검사를 건너뛴다.

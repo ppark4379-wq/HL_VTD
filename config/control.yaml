@@ -24,7 +24,7 @@ speed:
   straight_target_kph: 45.0        # 50 km/h 제한 대비 4 km/h 여유
   curve_target_kph: 30.0
   sharp_curve_target_kph: 20.0    # maxCurvature >= sharp_curve_threshold
-  school_zone_target_kph: 27.0     # 30 km/h 제한 대비 3 km/h 여유
+  school_zone_target_kph: 25.0     # 보호구역 진입 후 유지할 보수적 목표속도
 
 planning:
   comfortable_deceleration: 1.5   # [m/s^2] 정지 계획용 감속도
@@ -35,6 +35,7 @@ planning:
   stopped_speed_threshold_kph: 0.55 # [km/h] 정지로 인정할 속도
   follow_time_gap: 1.8             # [s] 선행 객체 추종 시간 간격
   minimum_follow_distance: 5.0     # [m] 최소 추종거리
+  follow_gap_gain: 0.35            # [1/s] 간격 오차 기반 ACC 속도 보정
   # 50 km/h에서 위 두 값을 쓰면 5 + 1.8*13.9 = 약 30 m 전방부터
   # 옆 차선 차량도 주의속도로 감속한다. 끼어들기 후 제동거리를 남기기 위함.
   nearby_object_caution_kph: 15.0   # [km/h] 근접 전방 객체 주의속도
@@ -48,6 +49,8 @@ planning:
   stationary_vehicle_minimum_width: 1.4  # [m] 차량형 bounding box 폭 하한
   stationary_vehicle_maximum_width: 2.8  # [m] 차량형 bounding box 폭 상한
   emergency_ttc: 1.5               # [s] 긴급제동 TTC
+  emergency_braking_deceleration: 4.0 # [m/s^2] 속도별 비상제동 문턱 계산
+  emergency_reaction_time: 0.4     # [s] 인지·명령·차량 응답 여유
   collision_prediction_horizon: 3.0 # [s] OBB 예측 범위
   collision_prediction_step: 0.2   # [s] OBB 예측 간격
   # [m] 지역경로 길이. 미래 OBB 검사에서 Ego 예측 위치를 이 경로 위에서 찾으므로
@@ -60,22 +63,22 @@ planning:
   # 접근하면 그 시점엔 정지거리가 이미 모자란다. 미리 감속해 둔다.
   crosswalk_approach_kph: 10.0      # [km/h] 횡단보도 접근 제한속도
   crosswalk_approach_distance: 40.0 # [m] 이 거리부터 감속
-  crosswalk_nearby_object_distance: 3.0 # [m] 횡단보도 주변 객체 조기감속 범위
+  crosswalk_nearby_object_distance: 5.0 # [m] 횡단보도 주변 객체 조기감속 범위
   # 위험 객체가 횡단보도를 완전히 비운 뒤, Ego가 횡단보도를 빠져나갈 때까지
   # 적용한다. 처음부터 빈 횡단보도에는 속도 제한을 적용하지 않는다.
   crosswalk_clearance_kph: 25.0     # [km/h] 보행자 통과 후 횡단보도 통과속도
-  crosswalk_pedestrian_prediction: 2.0 # [s] 이 시간 뒤 예상 위치도 점유로 판정
+  crosswalk_pedestrian_prediction: 4.0 # [s] 저속으로 진입하는 횡단 객체도 조기 판정
   # 횡단보도 위 정지는 감점이다. 입구가 아니라 그 앞 정지선에 선다.
   crosswalk_stop_line_search: 15.0  # [m] 횡단보도 앞 정지선 탐색 거리
 
 lane_change:
-  obstacle_trigger_minimum_distance: 12.0 # [m] 너무 가까우면 차선변경 대신 제동
+  obstacle_trigger_minimum_distance: 20.0 # [m] 조향 가능한 종방향 여유를 확보
   obstacle_trigger_maximum_distance: 45.0 # [m] 정적 장애물 탐색거리
   # 주행하던 선행차가 계속 정지하면 영구 정지 대신 안전한 회피를 다시 검토한다.
   stopped_lead_wait_time: 2.0             # [s] 정지 지속 후 회피 후보 승격
-  stopped_lead_minimum_distance: 5.0      # [m] 정지 Ego가 회피를 시작할 최소 간격
-  stopped_ego_maximum_speed_kph: 2.0      # [km/h] 가까운 거리 회피 허용 Ego 속도
-  transition_length: 12.0                 # [m] 한 번의 횡이동 길이
+  stopped_lead_minimum_distance: 5.0      # [m] 확인 지연 뒤에도 재계획할 최소 간격
+  stopped_ego_maximum_speed_kph: 2.0      # [km/h] 레거시 설정(판정 gating에는 미사용)
+  transition_length: 18.0                 # [m] 곡률/조향 급변을 낮춘 횡이동 길이
   obstacle_clearance: 10.0                # [m] 장애물 통과 뒤 복귀 여유
   prepare_time: 0.5                       # [s] 이동 전 방향지시등 선행시간
   settle_time: 0.5                        # [s] 원래 경로 복귀 후 안정시간
@@ -88,7 +91,7 @@ lane_change:
   maximum_obstacle_lane_intrusion: 1.55   # [m] 횡오프셋 허용 최대 침범량
   lateral_offset_step: 0.2                # [m] 0.2, 0.4, 0.6 ... 후보 간격
   maximum_lateral_offset: 1.0            # [m] 차선 중앙 기준 최대 횡오프셋
-  minimum_lane_edge_clearance: 0.0        # [m] Ego OBB와 차선 끝선 최소 여유
+  minimum_lane_edge_clearance: 0.15       # [m] Ego OBB와 차선 끝선 최소 여유
 
 # 종방향 PD 속도 제어 설정
 speed_pd:

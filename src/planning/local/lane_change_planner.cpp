@@ -18,7 +18,9 @@ namespace {
 
 double smoothStep(double value) {
     const double t = std::clamp(value, 0.0, 1.0);
-    return t * t * (3.0 - 2.0 * t);
+    // 위치뿐 아니라 속도와 가속도까지 양 끝에서 0이 되는 quintic blend.
+    // cubic blend의 곡률 hand-off로 생기던 순간 조향 변화를 줄인다.
+    return t * t * t * (10.0 + t * (-15.0 + 6.0 * t));
 }
 
 void resetLaneChange(LaneChangeData& state) {
@@ -37,6 +39,10 @@ const WorldObjectState* findBlockingObstacle(
                       persistentStoppedObjectIds->end(),
                       static_cast<int>(object.raw.id)) !=
                 persistentStoppedObjectIds->end();
+        const bool stationaryConfirmed =
+            persistentStoppedObjectIds == nullptr
+                ? std::abs(object.raw.speed) < 0.3
+                : persistentStoppedLead;
         const double minimumTriggerDistance = persistentStoppedLead
             ? config.stoppedLeadMinimumDistance
             : config.obstacleTriggerMinimumDistance;
@@ -49,13 +55,14 @@ const WorldObjectState* findBlockingObstacle(
                << " section=" << object.sectionIndex
                << " lane=" << object.laneId;
         if (!object.isAhead || !object.isOnEgoPath ||
-            std::abs(object.raw.speed) >= 0.3 ||
+            !stationaryConfirmed ||
             object.relativeS < minimumTriggerDistance ||
             object.relativeS > config.obstacleTriggerMaximumDistance) {
             detail << " result=reject reasons="
                    << (!object.isAhead ? "not_ahead;" : "")
                    << (!object.isOnEgoPath ? "not_on_ego_path;" : "")
-                   << (std::abs(object.raw.speed) >= 0.3 ? "moving;" : "")
+                   << (!stationaryConfirmed
+                           ? "moving_or_stationary_not_confirmed;" : "")
                    << (object.relativeS < minimumTriggerDistance
                            ? "too_close_for_new_lane_change;" : "")
                    << (object.relativeS > config.obstacleTriggerMaximumDistance
@@ -66,8 +73,8 @@ const WorldObjectState* findBlockingObstacle(
         }
         detail << " result="
                << (persistentStoppedLead
-                       ? "persistent_stopped_lead_candidate"
-                       : "static_blocker_candidate");
+                       ? "confirmed_stationary_blocker_candidate"
+                       : "static_blocker_candidate_without_history");
         traceDecision(trace, "obstacle_scan", "candidate_checked",
                       detail.str());
         if (result == nullptr || object.relativeS < result->relativeS) {
@@ -76,7 +83,7 @@ const WorldObjectState* findBlockingObstacle(
     }
     if (result == nullptr) {
         traceDecision(trace, "obstacle_scan", "no_blocker",
-                      "no static object satisfies path/speed/12-45m trigger");
+                      "no confirmed stationary object satisfies path/distance trigger");
     } else {
         std::ostringstream detail;
         detail << "object=" << result->raw.id
@@ -743,11 +750,24 @@ bool candidatePathIsSafe(const std::vector<Waypoint>& points,
          laneChangeConfig.maximumLaneChangeSpeed});
     const double remainingLength =
         std::max(0.0, points.back().s - world.egoPathS);
+    constexpr double kMaximumManeuverLength = 250.0;
+    constexpr double kMaximumPredictionHorizon = 12.0;
+    if (remainingLength > kMaximumManeuverLength) {
+        std::ostringstream detail;
+        detail << "remaining_length=" << remainingLength
+               << " maximum=" << kMaximumManeuverLength
+               << " result=reject reason=excessive_global_reconnect_detour";
+        traceDecision(trace, "candidate_obb", "full_path_checked",
+                      detail.str());
+        return false;
+    }
     const double fullManeuverHorizon =
         remainingLength / predictionWorld.egoSpeed +
         config.collisionPredictionStep;
     const double predictionHorizon =
-        std::max(config.collisionPredictionHorizon, fullManeuverHorizon);
+        std::min(kMaximumPredictionHorizon,
+                 std::max(config.collisionPredictionHorizon,
+                          fullManeuverHorizon));
 
     PathSafetyResult safety;
     resetPathSafety(safety);
@@ -1135,10 +1155,20 @@ void advanceLaneChangePhase(LaneChangeData& state,
                             const WorldState& world,
                             double dt,
                             bool executionBlocked,
+                            bool obstacleStillRequiresManeuver,
                             bool candidatePathSafe,
                             DecisionTraceData* trace) {
     if (state.phase == LaneChangePhase::None) return;
     if (state.phase == LaneChangePhase::Prepare) {
+        // Prepare 중에는 아직 횡이동을 시작하지 않았다. 이때 원인이던 객체가
+        // 재출발하면 보관된 경로를 실행하지 않고 취소한다. Execute 진입 후에는
+        // 판단을 뒤집지 않고 기동을 완주해 좌우 와리가리를 막는다.
+        if (!obstacleStillRequiresManeuver) {
+            traceDecision(trace, "lane_change", "phase_transition",
+                          "prepare->none reason=blocking_object_moved_or_disappeared");
+            resetLaneChange(state);
+            return;
+        }
         if (executionBlocked || !candidatePathSafe) {
             std::ostringstream detail;
             detail << "execution_blocked=" << executionBlocked

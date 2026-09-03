@@ -31,7 +31,7 @@ struct LogFrameInput {
     double elapsedWallTimeS;
     const GtFrame& gt;
     const WorldState& world;
-    const PathPlan& plan;
+    const PlanningResult& planning;
     const ControlProcessData& control;
 };
 
@@ -74,4 +74,11 @@ struct LogRecord {
     TrafficLightState trafficLight;
     PathPlan plan;
     ControlCommand command;
+    double currentSpeedLimit{};
+    bool schoolZoneActive{};
+    bool stopDistanceValid{};
+    double stopDistance{};
+    bool crosswalkActive{};
+    bool laneChangeActive{};
+    bool collision{};
 };

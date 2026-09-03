@@ -22,6 +22,7 @@ void advanceLaneChangePhase(LaneChangeData& state,
                             const WorldState& world,
                             double dt,
                             bool executionBlocked,
+                            bool obstacleStillRequiresManeuver,
                             bool candidatePathSafe,
                             DecisionTraceData* trace = nullptr);
 

@@ -25,11 +25,9 @@
 
 namespace {
 
-// 전역경로에서 이 거리보다 먼 표지는 이번 주행과 무관하므로 버린다.
-// 정지선과 노면표시는 우리 차선 위에 있어야 하므로 좁게, 횡단보도는
-// 도로를 가로지르므로 넓게 잡는다.
-constexpr double kStopLineLateralLimit = 4.0;
-constexpr double kCrosswalkLateralLimit = 15.0;
+// 정지선과 횡단보도는 지도 전체를 generated YAML에 보존하고 실제 주행
+// 경로에 맞추는 일은 alignStaticZonesToRoute()가 런타임에 한다. 오프라인
+// 생성 시 한 경로로 잘라 버리면 다른 시나리오 route의 시설이 영구 누락된다.
 constexpr double kSpeedMarkLateralLimit = 6.0;
 constexpr double kSignalLateralLimit = 40.0;
 
@@ -257,10 +255,7 @@ int main(int argc, char* argv[]) {
         WorldFeature feature;
         if (!roadObjectToWorld(feature, map, object)) continue;
         const RouteProjection projection = worldToRoute(route, feature.center);
-        if (!projection.valid ||
-            projection.lateral > kStopLineLateralLimit) {
-            continue;
-        }
+        if (!projection.valid) continue;
         const auto roadFound = map.roads.find(object.roadId);
         if (roadFound == map.roads.end()) continue;
         const int laneId =
@@ -286,10 +281,7 @@ int main(int argc, char* argv[]) {
         WorldFeature feature;
         if (!roadObjectToWorld(feature, map, object)) continue;
         const RouteProjection projection = worldToRoute(route, feature.center);
-        if (!projection.valid ||
-            projection.lateral > kCrosswalkLateralLimit) {
-            continue;
-        }
+        if (!projection.valid) continue;
         const std::vector<Point2D> polygon = makeRectangle(feature);
         double entryS = std::numeric_limits<double>::max();
         double exitS = -std::numeric_limits<double>::max();
@@ -302,6 +294,7 @@ int main(int argc, char* argv[]) {
         }
         if (entryS > exitS) continue;
         output << "  - id: " << object.id << '\n'
+               << "    road_id: " << object.roadId << '\n'
                << "    polygon: \"" << polygonText(polygon) << "\"\n"
                << "    entry_route_s: " << entryS << '\n'
                << "    exit_route_s: " << exitS << '\n'

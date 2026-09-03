@@ -296,6 +296,7 @@ bool loadSingleMapRuntimeConfig(MapRuntimeConfig& config,
         } else if (section == "crosswalks" && !config.zones.crosswalks.empty()) {
             auto& crosswalk = config.zones.crosswalks.back();
             if (key == "id") parseInteger(value, crosswalk.id);
+            else if (key == "road_id") parseInteger(value, crosswalk.roadId);
             else if (key == "polygon") crosswalk.polygon = parsePolygon(value);
             else if (key == "entry_route_s")
                 parseDouble(value, crosswalk.entryRouteS);
@@ -359,25 +360,97 @@ bool isFlashingRedController(const StaticZoneData& zones,
 bool alignStaticZonesToRoute(StaticZoneData& zones,
                              const std::vector<Waypoint>& route) {
     if (route.size() < 2) return false;
-    for (auto& line : zones.stopLines) {
+
+    // generated YAML은 특정 시나리오 경로의 일부가 아니라 지도 전체 정적
+    // 시설을 담는다. 여기서 실제 경로의 road와 물리적으로 겹치는 시설만
+    // 남긴다. 그래야 M03/M04처럼 패키지별 route.csv를 써도 횡단보도가
+    // 누락되지 않고, 먼 평행도로의 시설이 경로 끝점에 잘못 투영되지 않는다.
+    std::unordered_set<int> routeRoadIds;
+    for (const auto& waypoint : route) {
+        if (waypoint.roadId >= 0) routeRoadIds.insert(waypoint.roadId);
+    }
+
+    std::vector<StopLine> alignedStopLines;
+    alignedStopLines.reserve(zones.stopLines.size());
+    for (auto line : zones.stopLines) {
+        if (line.roadId >= 0 &&
+            routeRoadIds.find(line.roadId) == routeRoadIds.end()) {
+            continue;
+        }
         const Point2D center{0.5 * (line.begin.x + line.end.x),
                              0.5 * (line.begin.y + line.end.y)};
         const RouteProjection projection = projectToRoute(center, route);
-        if (!projection.valid) return false;
+        if (!projection.valid || projection.distance > 5.0) continue;
         line.routeS = projection.routeS;
+        alignedStopLines.push_back(std::move(line));
     }
-    for (auto& crosswalk : zones.crosswalks) {
+    zones.stopLines = std::move(alignedStopLines);
+
+    std::vector<Crosswalk> alignedCrosswalks;
+    alignedCrosswalks.reserve(zones.crosswalks.size());
+    for (auto crosswalk : zones.crosswalks) {
+        if (crosswalk.roadId >= 0 &&
+            routeRoadIds.find(crosswalk.roadId) == routeRoadIds.end()) {
+            continue;
+        }
         double entry = std::numeric_limits<double>::infinity();
         double exit = -std::numeric_limits<double>::infinity();
+        double minimumDistance = std::numeric_limits<double>::infinity();
         for (const auto& corner : crosswalk.polygon) {
             const RouteProjection projection = projectToRoute(corner, route);
             if (!projection.valid) continue;
             entry = std::min(entry, projection.routeS);
             exit = std::max(exit, projection.routeS);
+            minimumDistance = std::min(minimumDistance, projection.distance);
         }
-        if (!std::isfinite(entry) || !std::isfinite(exit)) return false;
+        if (!std::isfinite(entry) || !std::isfinite(exit) ||
+            minimumDistance > 15.0) {
+            continue;
+        }
         crosswalk.entryRouteS = entry;
         crosswalk.exitRouteS = exit;
+        alignedCrosswalks.push_back(std::move(crosswalk));
+    }
+    zones.crosswalks = std::move(alignedCrosswalks);
+
+    // 측정 기준점은 구간의 시작/끝 및 중간 표본이다. 현재 경로 가까이에
+    // 투영되는 점만 모아 route_s 순으로 정렬하고, 큰 공백에서 서로 다른
+    // 보호구역으로 나눈다. XODR track id와 OpenDRIVE road id가 다른 지도라
+    // 좌표 기반 투영을 사용한다.
+    zones.speedZones.erase(
+        std::remove_if(zones.speedZones.begin(), zones.speedZones.end(),
+                       [](const SpeedZone& zone) { return zone.schoolZone; }),
+        zones.speedZones.end());
+    std::vector<double> schoolRoutePoints;
+    for (const auto& point : zones.schoolZoneReferencePoints) {
+        const RouteProjection projection =
+            projectToRoute(point.position, route);
+        if (projection.valid && projection.distance <= 8.0) {
+            schoolRoutePoints.push_back(projection.routeS);
+        }
+    }
+    std::sort(schoolRoutePoints.begin(), schoolRoutePoints.end());
+    constexpr double kSchoolZoneMaximumSampleGap = 200.0;
+    for (std::size_t begin = 0; begin < schoolRoutePoints.size();) {
+        std::size_t end = begin;
+        while (end + 1 < schoolRoutePoints.size() &&
+               schoolRoutePoints[end + 1] - schoolRoutePoints[end] <=
+                   kSchoolZoneMaximumSampleGap) {
+            ++end;
+        }
+        SpeedZone zone;
+        zone.id = "auto_school_zone_" + std::to_string(begin);
+        zone.speedLimit = zones.schoolZoneReferenceSpeedLimit;
+        zone.routeSBegin = schoolRoutePoints[begin];
+        zone.routeSEnd = schoolRoutePoints[end];
+        zone.hasRouteRange = true;
+        zone.schoolZone = true;
+        // 한 점만 매칭된 경로에서는 그 점을 구간 경계라고 단정할 수 없다.
+        // 오검출 방지를 위해 실제 길이를 가진 구간만 활성화한다.
+        if (zone.routeSEnd - zone.routeSBegin >= 10.0) {
+            zones.speedZones.push_back(std::move(zone));
+        }
+        begin = end + 1;
     }
     if (zones.finish.valid) {
         const RouteProjection projection =
@@ -386,6 +459,21 @@ bool alignStaticZonesToRoute(StaticZoneData& zones,
         zones.finish.routeS = projection.routeS;
     }
     return true;
+}
+
+bool isSchoolZoneActive(const StaticZoneData& zones,
+                        const Point2D& position,
+                        double routeS) {
+    for (const auto& zone : zones.speedZones) {
+        if (!zone.schoolZone) continue;
+        const bool insidePolygon =
+            !zone.polygon.empty() && containsPoint(zone.polygon, position);
+        const bool insideRouteRange =
+            zone.hasRouteRange && routeS >= 0.0 &&
+            routeS >= zone.routeSBegin && routeS <= zone.routeSEnd;
+        if (insidePolygon || insideRouteRange) return true;
+    }
+    return false;
 }
 
 double findZoneSpeedLimit(const StaticZoneData& zones,

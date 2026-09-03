@@ -147,23 +147,24 @@ double calculateRouteDistance(const PathGeneratorData& data,
                               const LaneMatch& goal);
 
 // 찾은 lane 연결의 중심선 점들을 최종 경로에 추가한다.
-void appendRoute(const PathGeneratorData& data,
+// 목표 checkpoint까지 물리적으로 이어 붙일 수 있을 때만 true를 반환한다.
+// 차선 변경 공간이나 합법적인 road-mark 구간이 부족하면 부분 경로를 남기지
+// 않고 false를 반환한다.
+bool appendRoute(const PathGeneratorData& data,
                  const std::vector<LaneKey>& route,
                  const LaneMatch& start, const LaneMatch& goal,
                  std::vector<Waypoint>& output);
 
 // 두 경로 조각 사이의 빈 공간을 일정 간격의 점으로 채운다.
-void appendInterpolatedGap(const Waypoint& start, const Waypoint& end,
+bool appendInterpolatedGap(const Waypoint& start, const Waypoint& end,
                            double interval, std::vector<Waypoint>& output);
-
-// 같은 road 구간의 인접 차선 사이를 부드러운 곡선으로 연결한다.
-size_t appendSmoothLaneChange(const std::vector<Waypoint>& currentLane,
-                              const std::vector<Waypoint>& nextLane,
-                              size_t begin,
-                              std::vector<Waypoint>& output);
 
 // 이어 붙인 경로의 연속 중복점을 제거한다.
 void removeDuplicates(std::vector<Waypoint>& path);
 
 // 최종 경로 각 점의 yaw와 누적거리 s를 다시 계산한다.
 void updateYawAndS(std::vector<Waypoint>& path);
+
+// 최종 경로에 역방향 road-s, 순간 U-turn, 비정상 간격이 없는지 검사한다.
+bool validateGeneratedPath(const std::vector<Waypoint>& path,
+                           std::string* reason = nullptr);

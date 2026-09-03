@@ -8,12 +8,12 @@
 #include <vector>
 
 struct LaneChangeConfig {
-    double obstacleTriggerMinimumDistance{18.0};
+    double obstacleTriggerMinimumDistance{20.0};
     double obstacleTriggerMaximumDistance{45.0};
     double stoppedLeadWaitTime{2.0};
     double stoppedLeadMinimumDistance{5.0};
     double stoppedEgoMaximumSpeed{2.0 / 3.6};
-    double transitionLength{12.0};
+    double transitionLength{18.0};
     double obstacleClearance{10.0};
     double prepareTime{0.5};
     double settleTime{0.5};
@@ -25,7 +25,7 @@ struct LaneChangeConfig {
     double maximumObstacleLaneIntrusion{1.25};
     double lateralOffsetStep{0.2};
     double maximumLateralOffset{0.8};
-    double minimumLaneEdgeClearance{0.0};
+    double minimumLaneEdgeClearance{0.15};
 };
 
 enum class LaneChangeRouteMode {

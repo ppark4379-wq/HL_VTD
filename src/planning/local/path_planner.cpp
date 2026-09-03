@@ -47,16 +47,39 @@ std::size_t findNearestWaypoint(const std::vector<Waypoint>& waypoints,
                            std::size_t previousIndex) {
     if (waypoints.empty()) return 0;
 
-    const std::size_t begin = previousIndex > 20 ? previousIndex - 20 : 0;
-    const std::size_t end = std::min(waypoints.size(), previousIndex + 201);
+    previousIndex = std::min(previousIndex, waypoints.size() - 1);
+    constexpr double kMaximumBackwardProgress = 2.0;
+    constexpr double kMaximumForwardProgress = 35.0;
+    constexpr double kHeadingGate = 1.35;
+    const double previousS = waypoints[previousIndex].s;
+    std::size_t begin = previousIndex;
+    while (begin > 0 &&
+           waypoints[begin - 1].s >= previousS - kMaximumBackwardProgress) {
+        --begin;
+    }
+    std::size_t end = previousIndex + 1;
+    while (end < waypoints.size() &&
+           waypoints[end].s <= previousS + kMaximumForwardProgress) {
+        ++end;
+    }
     std::size_t nearest = begin;
-    double nearestDistance = std::numeric_limits<double>::infinity();
+    double bestScore = std::numeric_limits<double>::infinity();
+    bool foundHeadingCompatible = false;
 
     for (std::size_t index = begin; index < end; ++index) {
         const double distance = distanceSquared(
             gt.ego.x, gt.ego.y, waypoints[index].x, waypoints[index].y);
-        if (distance < nearestDistance) {
-            nearestDistance = distance;
+        const double headingError = std::abs(normalizeAngle(
+            gt.ego.heading - waypoints[index].yaw));
+        const bool headingCompatible = headingError <= kHeadingGate;
+        if (foundHeadingCompatible && !headingCompatible) continue;
+        const double progress = waypoints[index].s - previousS;
+        const double score = distance + 2.0 * headingError * headingError +
+                             0.002 * progress * progress;
+        if ((headingCompatible && !foundHeadingCompatible) ||
+            score < bestScore) {
+            foundHeadingCompatible = headingCompatible;
+            bestScore = score;
             nearest = index;
         }
     }

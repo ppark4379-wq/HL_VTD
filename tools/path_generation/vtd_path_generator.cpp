@@ -68,8 +68,16 @@ double transitionDistance(const PathGeneratorData& data,
     }
     const std::vector<LaneKey> route = connectLanes(data, startKey, goalKey);
     if (route.empty()) return std::numeric_limits<double>::infinity();
-    if (route.size() == 1) return std::abs(goal.roadS - start.roadS);
-    return calculateRouteDistance(data, route, start, goal);
+    std::vector<Waypoint> candidate;
+    if (!appendRoute(data, route, start, goal, candidate)) {
+        return std::numeric_limits<double>::infinity();
+    }
+    removeDuplicates(candidate);
+    updateYawAndS(candidate);
+    if (!validateGeneratedPath(candidate)) {
+        return std::numeric_limits<double>::infinity();
+    }
+    return candidate.back().s;
 }
 
 std::vector<LaneMatch> selectConnectedMatches(
@@ -232,7 +240,11 @@ VtdRouteResult makePathFromVtdRoute(
             result = {};
             return result;
         }
-        appendRoute(data, laneRoute, start, goal, result.path);
+        if (!appendRoute(data, laneRoute, start, goal, result.path)) {
+            std::cerr << "[vtd-path] lane route is not physically traversable\n";
+            result = {};
+            return result;
+        }
     }
     removeDuplicates(result.path);
     if (!result.path.empty()) {
@@ -240,5 +252,9 @@ VtdRouteResult makePathFromVtdRoute(
         result.path.back() = result.checkpoints.back();
     }
     updateYawAndS(result.path);
+    if (!result.path.empty() && !validateGeneratedPath(result.path)) {
+        std::cerr << "[vtd-path] generated path failed geometry validation\n";
+        result = {};
+    }
     return result;
 }

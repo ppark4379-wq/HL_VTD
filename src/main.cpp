@@ -155,6 +155,9 @@ void printDrivingStatus(const GtFrame& gt,
               << " target=" << plan.targetIndex
               << " Ld=" << plan.lookahead
               << " targetSpeed=" << plan.targetSpeed
+              << " speedLimitKph=" << planning.currentSpeedLimit * 3.6
+              << " schoolZone=" << planning.schoolZoneActive
+              << " crosswalkControl=" << planning.crosswalkActive
               << " steering=" << control.latestCommand.steering
               << " targetAccel=" << control.latestCommand.targetAccel
               << " trafficLightId=" << gt.trafficLight.id
@@ -237,7 +240,8 @@ void printNetworkConfig(
               << '\n';
 }
 
-void printMapReadiness(const StaticZoneData& zones) {
+void printMapReadiness(const StaticZoneData& zones,
+                       double schoolZoneTargetSpeed) {
     std::cout << "[map] static features: stop_lines=" << zones.stopLines.size()
               << " crosswalks=" << zones.crosswalks.size()
               << " speed_zones=" << zones.speedZones.size()
@@ -246,12 +250,20 @@ void printMapReadiness(const StaticZoneData& zones) {
               << " flashing_red_ids="
               << zones.flashingRedControllerIds.size() << '\n';
     if (zones.speedZones.empty()) {
-        std::cout << "[config-warning] protection/speed zones are not configured";
+        std::cout << "[config-warning] current route has no protection/speed zone";
         if (!zones.schoolZoneReferencePoints.empty()) {
             std::cout << " (" << zones.schoolZoneReferencePoints.size()
-                      << " reference points loaded but not activated)";
+                      << " map reference points loaded)";
         }
         std::cout << '\n';
+    }
+    for (const auto& zone : zones.speedZones) {
+        if (!zone.schoolZone || !zone.hasRouteRange) continue;
+        std::cout << "[map] school zone: route_s=["
+                  << zone.routeSBegin << ", " << zone.routeSEnd
+                  << "] map_limit=" << zone.speedLimit * 3.6
+                  << " km/h control_target="
+                  << schoolZoneTargetSpeed * 3.6 << " km/h\n";
     }
     if (zones.flashingRedControllerIds.empty()) {
         std::cout << "[config-warning] no packet traffic-light ID is marked as flashing red\n";
@@ -324,7 +336,8 @@ int main(int argc, char* argv[]) {
         }
         mapData.staticZones = mapConfig.zones;
         std::cout << "[map] XODR loaded\n";
-        printMapReadiness(mapData.staticZones);
+        printMapReadiness(mapData.staticZones,
+                          drivingConfig.planner.schoolZoneSpeed);
 
         if (options.check_config_only) {
             std::cout << "[config] all configured files and values are valid\n";
@@ -426,7 +439,7 @@ int main(int argc, char* argv[]) {
             if (options.logging) {
                 const LogFrameInput logInput{
                     frameCount, elapsedWallTime, gt, world.state,
-                    planning.result.trackingPlan, control};
+                    planning.result, control};
                 runLoggingProcess(logger, logInput);
             }
 

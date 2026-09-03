@@ -11,6 +11,7 @@
 #include <cassert>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <limits>
@@ -429,6 +430,41 @@ void testSchoolZoneReferencePointConfig() {
     assert(std::abs(first.trackS - 0.084) < 1e-9);
 }
 
+void testScenarioRoutesKeepTheirOwnCrosswalksAndSchoolZone() {
+    struct Case {
+        const char* routePath;
+        int expectedCrosswalkId;
+        bool expectsSchoolZone;
+    };
+    for (const Case testCase : {
+             Case{"scenario/mixed/M03/route.csv", 6289, false},
+             Case{"scenario/mixed/M04/route.csv", 1090, true}}) {
+        MapRuntimeConfig config;
+        std::vector<Waypoint> route;
+        if (!loadMapRuntimeConfig(config, "config/maps/living_lab.yaml") ||
+            !loadWaypointsCsv(route, testCase.routePath) ||
+            !alignStaticZonesToRoute(config.zones, route)) {
+            std::cerr << "failed to align static zones for "
+                      << testCase.routePath << '\n';
+            std::abort();
+        }
+        const bool hasExpectedCrosswalk = std::any_of(
+            config.zones.crosswalks.begin(), config.zones.crosswalks.end(),
+            [&](const Crosswalk& crosswalk) {
+                return crosswalk.id == testCase.expectedCrosswalkId;
+            });
+        const bool hasSchoolZone = std::any_of(
+            config.zones.speedZones.begin(), config.zones.speedZones.end(),
+            [](const SpeedZone& zone) { return zone.schoolZone; });
+        if (!hasExpectedCrosswalk ||
+            hasSchoolZone != testCase.expectsSchoolZone) {
+            std::cerr << "route-specific static zone regression for "
+                      << testCase.routePath << '\n';
+            std::abort();
+        }
+    }
+}
+
 void testPredictedCollisionIsNotCurrentCollision() {
     WorldState world = makeWorldWithObstacle();
     world.objects.front().raw.x = 20.0F;
@@ -523,9 +559,10 @@ void testObstacleLaneChange() {
     assert(nearObstacle != laneChange.path.end());
     assert(nearObstacle->y < -4.0);
     advanceLaneChangePhase(laneChange, config, world,
-                           config.prepareTime, false, true);
+                           config.prepareTime, false, true, true);
     assert(laneChange.phase == LaneChangePhase::Execute);
-    advanceLaneChangePhase(laneChange, config, world, 0.1, false, false);
+    advanceLaneChangePhase(laneChange, config, world, 0.1,
+                           false, true, false);
     assert(laneChange.waitingForReturn);
 
     WorldObjectState targetVehicle;
@@ -968,11 +1005,12 @@ void testKeepTargetLaneWhenItRejoinsNextRoad() {
     assert(laneChange.reconnectLane == expectedReconnect);
 
     advanceLaneChangePhase(laneChange, config, world,
-                           config.prepareTime, false, true);
+                           config.prepareTime, false, true, true);
     world.egoRoadId = 2;
     world.egoSectionIndex = 0;
     world.egoLaneId = -1;
-    advanceLaneChangePhase(laneChange, config, world, 0.1, false, true);
+    advanceLaneChangePhase(laneChange, config, world, 0.1,
+                           false, true, true);
     assert(laneChange.phase == LaneChangePhase::Settle);
 }
 
@@ -1020,6 +1058,56 @@ void testNearbyAdjacentVehicleCapsSpeedBeforeCutIn() {
                    50.0 / 3.6, config, 0.05);
     assert(output.longitudinal == LonMode::Cruise);
     assert(std::abs(output.targetSpeed - 50.0 / 3.6) < 1e-9);
+}
+
+void testLeadBrakingUsesRelativeStoppingDistance() {
+    PlanningBehaviorConfig config;
+    config.comfortableDeceleration = 1.5;
+    config.followTimeGap = 1.8;
+    config.minimumFollowDistance = 5.0;
+    config.followGapGain = 0.35;
+
+    WorldState world;
+    world.egoSpeed = 10.0;
+    world.ego.heading = 0.0F;
+    WorldObjectState lead;
+    lead.raw.id = 4;
+    lead.raw.speed = 4.0F;
+    lead.raw.heading = 0.0F;
+    lead.isAhead = true;
+    lead.isOnEgoPath = true;
+    // 시간간격 문턱(23 m) 바로 밖이다. 예전 로직은 여기서 12.5 m/s로
+    // 계속 가속했지만 상대 정지거리까지 보면 이미 감속해야 한다.
+    lead.relativeS = 24.0;
+    world.objects.push_back(lead);
+
+    BehaviorState state;
+    BehaviorDecision output;
+    ConstraintSet constraints;
+    constraints.speedLimit = 12.5;
+    StopDecision stop;
+    updateBehavior(state, output, constraints, stop, world,
+                   12.5, config, 0.05);
+    if (output.longitudinal != LonMode::Follow ||
+        output.targetSpeed >= world.egoSpeed) {
+        std::cerr << "lead braking did not trigger braking-aware follow\n";
+        std::abort();
+    }
+}
+
+void testPreparedLaneChangeCancelsWhenBlockerMoves() {
+    LaneChangeData laneChange;
+    laneChange.phase = LaneChangePhase::Prepare;
+    laneChange.obstacleId = 17;
+    LaneChangeConfig config;
+    WorldState world;
+    advanceLaneChangePhase(laneChange, config, world, 0.1,
+                           false, false, true);
+    if (laneChange.phase != LaneChangePhase::None ||
+        laneChange.obstacleId != -1) {
+        std::cerr << "prepared lane change survived a cleared blocker\n";
+        std::abort();
+    }
 }
 
 void testStationaryAdjacentVehicleUsesShortRangeCaution() {
@@ -1193,6 +1281,89 @@ void testSharpCurveHasSeparateSpeed() {
                     config.sharpCurveSpeed) < 1e-9);
 }
 
+void testNearestWaypointCannotJumpToOverlappingFutureBranch() {
+    std::vector<Waypoint> path;
+    for (int index = 0; index <= 20; ++index) {
+        Waypoint point;
+        point.x = static_cast<double>(index);
+        point.y = 0.0;
+        point.yaw = 0.0;
+        point.s = static_cast<double>(index);
+        path.push_back(point);
+    }
+    // 훨씬 뒤의 route branch가 같은 월드 위치를 반대방향으로 지난다.
+    for (int index = 0; index <= 20; ++index) {
+        Waypoint point;
+        point.x = static_cast<double>(20 - index);
+        point.y = 0.0;
+        point.yaw = 3.14159265358979323846;
+        point.s = 60.0 + index;
+        path.push_back(point);
+    }
+    GtFrame gt;
+    gt.ego.x = 5.0F;
+    gt.ego.y = 0.0F;
+    gt.ego.heading = 0.0F;
+    const std::size_t nearest = findNearestWaypoint(path, gt, 4);
+    if (nearest != 5) {
+        std::cerr << "nearest waypoint jumped to another route branch: "
+                  << nearest << '\n';
+        std::abort();
+    }
+}
+
+void testLaneGraphDoesNotInventMissingSectionLink() {
+    PathGeneratorData map;
+    map.sampleInterval = 0.5;
+    Road road;
+    road.id = 77;
+    road.length = 40.0;
+    Geometry geometry;
+    geometry.type = GeometryType::Line;
+    geometry.length = road.length;
+    road.geometries.push_back(geometry);
+    for (double sectionS : {0.0, 20.0}) {
+        LaneSection section;
+        section.s = sectionS;
+        LaneDefinition lane;
+        lane.id = -1;
+        lane.type = "driving";
+        lane.widths.push_back(constantWidth(3.5));
+        // successor/predecessor를 의도적으로 두지 않는다.
+        section.lanes.emplace(-1, lane);
+        road.sections.push_back(std::move(section));
+    }
+    map.roads.emplace(road.id, std::move(road));
+    sampleLaneCenters(map);
+    buildLaneGraph(map);
+    const LaneKey start{77, 0, -1};
+    const LaneKey goal{77, 1, -1};
+    if (!connectLanes(map, start, goal).empty()) {
+        std::cerr << "lane graph invented a missing laneSection link\n";
+        std::abort();
+    }
+}
+
+void testMixedCheckpointRoutesHaveValidGeometry() {
+    PathGeneratorData map;
+    if (!loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr", 0.5)) {
+        std::cerr << "failed to load LivingLAB map for route regression\n";
+        std::abort();
+    }
+    for (const char* checkpoints : {
+             "scenario/mixed/M03/checkpoints.csv",
+             "scenario/mixed/M04/checkpoints.csv"}) {
+        if (!loadCheckpointsCsv(map, checkpoints)) std::abort();
+        const std::vector<Waypoint> route = makePath(map);
+        std::string reason;
+        if (route.empty() || !validateGeneratedPath(route, &reason)) {
+            std::cerr << "invalid mixed route generated from " << checkpoints
+                      << ": " << reason << '\n';
+            std::abort();
+        }
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -1200,6 +1371,7 @@ int main() {
     testRdbSimulationTimeMatchesGtInFrameOrder();
     testStaticZoneRouteAlignment();
     testSchoolZoneReferencePointConfig();
+    testScenarioRoutesKeepTheirOwnCrosswalksAndSchoolZone();
     testPredictedCollisionIsNotCurrentCollision();
     testBlockedReturnUsesWaitingSpeedUntilCollisionIsUrgent();
     testMovingReturnConflictCanClearAtWaitingSpeed();
@@ -1213,10 +1385,15 @@ int main() {
     testLimitedLateralOffsetAvoidance();
     testKeepTargetLaneWhenItRejoinsNextRoad();
     testNearbyAdjacentVehicleCapsSpeedBeforeCutIn();
+    testLeadBrakingUsesRelativeStoppingDistance();
+    testPreparedLaneChangeCancelsWhenBlockerMoves();
     testStationaryAdjacentVehicleUsesShortRangeCaution();
     testCloserVehicleConstraintOverridesFarStopPlan();
     testSafeAvoidanceIgnoresStaticSiblingObstacles();
     testSharpCurveHasSeparateSpeed();
+    testNearestWaypointCannotJumpToOverlappingFutureBranch();
+    testLaneGraphDoesNotInventMissingSectionLink();
+    testMixedCheckpointRoutesHaveValidGeometry();
     std::cout << "controller_logic_tests: PASS\n";
     return 0;
 }

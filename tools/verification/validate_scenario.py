@@ -486,6 +486,76 @@ def parse_route_csv(
     return points
 
 
+def normalize_angle(angle: float) -> float:
+    return (angle + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def validate_route_geometry(
+    report: ValidationReport,
+    points: list[dict[str, float]],
+) -> None:
+    if len(points) < 2:
+        return
+    maximum_curvature = 0.0
+    maximum_curvature_line = 0
+    for index, (current, following) in enumerate(
+        zip(points, points[1:]), start=2
+    ):
+        dx = following["x"] - current["x"]
+        dy = following["y"] - current["y"]
+        spacing = math.hypot(dx, dy)
+        if spacing <= 1e-9 or spacing > 2.0:
+            report.add(
+                "FAIL",
+                f"route geometry line {index}: point spacing {spacing:.3f} m "
+                "is outside (0, 2.0] m",
+            )
+            return
+        if following["s"] <= current["s"]:
+            report.add(
+                "FAIL",
+                f"route geometry line {index}: cumulative s does not increase",
+            )
+            return
+        same_lane = (
+            int(current["road_id"]) == int(following["road_id"])
+            and int(current["lane_id"]) == int(following["lane_id"])
+        )
+        if same_lane and int(current["lane_id"]) != 0:
+            road_s_delta = following["road_s"] - current["road_s"]
+            lane_id = int(current["lane_id"])
+            backwards = (
+                lane_id < 0 and road_s_delta < -0.15
+            ) or (
+                lane_id > 0 and road_s_delta > 0.15
+            )
+            if backwards:
+                report.add(
+                    "FAIL",
+                    f"route geometry line {index}: road_s reverses on "
+                    f"road {int(current['road_id'])} lane {lane_id}",
+                )
+                return
+        curvature = abs(normalize_angle(
+            following["yaw"] - current["yaw"]
+        )) / spacing
+        if curvature > maximum_curvature:
+            maximum_curvature = curvature
+            maximum_curvature_line = index
+    if maximum_curvature > 0.20:
+        report.add(
+            "FAIL",
+            f"route geometry line {maximum_curvature_line}: curvature "
+            f"{maximum_curvature:.3f} 1/m exceeds 0.200 1/m",
+        )
+        return
+    report.add(
+        "PASS",
+        f"route geometry: monotonic, max curvature "
+        f"{maximum_curvature:.3f} 1/m",
+    )
+
+
 def resolve_packaged_route(
     report: ValidationReport,
     manifest: dict[str, Any],
@@ -842,6 +912,7 @@ def validate_scenario(package_path: Path) -> ValidationReport:
         validate_xml_entities(report, manifest, root)
     route_file = resolve_packaged_route(report, manifest)
     points = parse_route_csv(report, route_file) if route_file else []
+    validate_route_geometry(report, points)
     validate_start_alignment(report, manifest, root, points)
     validate_catalog(report, manifest)
     return report

@@ -127,8 +127,15 @@ LogRecord makeLogRecord(const LogFrameInput& input) {
     record.objectCount = objects.count;
     record.nearestObject = objects.nearest;
     record.trafficLight = input.gt.trafficLight;
-    record.plan = input.plan;
+    record.plan = input.planning.trackingPlan;
     record.command = input.control.latestCommand;
+    record.currentSpeedLimit = input.planning.currentSpeedLimit;
+    record.schoolZoneActive = input.planning.schoolZoneActive;
+    record.stopDistanceValid = input.planning.stopDistanceValid;
+    record.stopDistance = input.planning.stopDistance;
+    record.crosswalkActive = input.planning.crosswalkActive;
+    record.laneChangeActive = input.planning.laneChangeActive;
+    record.collision = input.planning.pathSafety.collision;
     return record;
 }
 
@@ -236,9 +243,24 @@ void writeCsvRecord(CsvLoggerData& logger,
         logger.output << ",,,,,,,";
     }
 
-    // 아래 공식 평가 필드는 현재 TCP GT에 원천 데이터가 없어 비워 둔다.
-    // 향후 VTD 평가 인터페이스나 시나리오 annotation이 제공하면 채운다.
-    logger.output << ",,,,,,,,,,,\n";
+    // Planner가 실제 적용한 값은 공식 평가 열에도 남긴다. 도로 침범과
+    // respawn처럼 현재 GT만으로 신뢰성 있게 계산할 수 없는 값만 비워 둔다.
+    logger.output << ',';  // evaluation_section_id
+    if (std::isfinite(record.currentSpeedLimit)) {
+        logger.output << record.currentSpeedLimit * 3.6;
+    }
+    logger.output
+        << ',' << static_cast<int>(record.schoolZoneActive) << ',';
+    if (record.stopDistanceValid && std::isfinite(record.stopDistance)) {
+        logger.output << record.stopDistance;
+    }
+    logger.output
+        << ',' << static_cast<int>(record.crosswalkActive)
+        << ',' << static_cast<int>(record.laneChangeActive)
+        // solid_line_crossing, centerline_intrusion_m,
+        // sidewalk_intrusion_m, pedestrian_crossing_complete
+        << ",,,,," << static_cast<int>(record.collision)
+        << ",\n";  // respawn_count
 }
 
 void flushCsvOutput(CsvLoggerData& logger) {

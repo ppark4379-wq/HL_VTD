@@ -71,6 +71,7 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.behavior.stopHoldTime >= 1.0 &&
            config.behavior.followTimeGap > 0.0 &&
            config.behavior.minimumFollowDistance > 0.0 &&
+           config.behavior.followGapGain > 0.0 &&
            config.behavior.nearbyObjectCautionSpeed > 0.0 &&
            config.behavior.nearbyObjectLateralDistance > 0.0 &&
            config.behavior.stationaryAdjacentVehicleCautionSpeed > 0.0 &&
@@ -86,6 +87,8 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.behavior.crosswalkClearanceSpeed > 0.0 &&
            config.behavior.signalStopSearchDistance > 0.0 &&
            config.behavior.emergencyTTC > 0.0 &&
+           config.behavior.emergencyBrakingDeceleration > 0.0 &&
+           config.behavior.emergencyReactionTime >= 0.0 &&
            config.behavior.collisionPredictionStep > 0.0 &&
            config.behavior.collisionPredictionHorizon >=
                config.behavior.collisionPredictionStep &&
@@ -160,6 +163,8 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.followTimeGap) &&
         setConfigValue(values, "planning.minimum_follow_distance",
                        config.behavior.minimumFollowDistance) &&
+        setConfigValue(values, "planning.follow_gap_gain",
+                       config.behavior.followGapGain) &&
         setSpeedConfigValue(values, "planning.nearby_object_caution_kph",
                        config.behavior.nearbyObjectCautionSpeed) &&
         setConfigValue(values, "planning.nearby_object_lateral_distance",
@@ -180,6 +185,10 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.stationaryVehicleMaximumWidth) &&
         setConfigValue(values, "planning.emergency_ttc",
                        config.behavior.emergencyTTC) &&
+        setConfigValue(values, "planning.emergency_braking_deceleration",
+                       config.behavior.emergencyBrakingDeceleration) &&
+        setConfigValue(values, "planning.emergency_reaction_time",
+                       config.behavior.emergencyReactionTime) &&
         setConfigValue(values, "planning.collision_prediction_horizon",
                        config.behavior.collisionPredictionHorizon) &&
         setConfigValue(values, "planning.collision_prediction_step",

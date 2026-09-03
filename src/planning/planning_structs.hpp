@@ -35,6 +35,8 @@ struct PlanningBehaviorConfig {
     double stoppedSpeedThreshold{0.15};
     double followTimeGap{1.8};
     double minimumFollowDistance{5.0};
+    // 목표 간격 오차를 선행차 속도에 더하는 ACC 비례이득 [1/s].
+    double followGapGain{0.35};
     // 옆 차선 차량이 급격히 진입해도 제동 거리를 확보한다.
     double nearbyObjectCautionSpeed{5.5555555556};
     double nearbyObjectLateralDistance{5.5};
@@ -48,6 +50,10 @@ struct PlanningBehaviorConfig {
     double stationaryVehicleMinimumWidth{1.4};
     double stationaryVehicleMaximumWidth{2.8};
     double emergencyTTC{1.5};
+    // 고정 TTC만 쓰면 고속에서 정지시간보다 늦게 비상제동한다. 현재 속도에
+    // 따른 정지시간 v/a와 인지·작동 여유를 함께 계산한다.
+    double emergencyBrakingDeceleration{4.0};
+    double emergencyReactionTime{0.4};
     double collisionPredictionHorizon{3.0};
     double collisionPredictionStep{0.2};
     // 미래 OBB 검사가 Ego 예측 위치를 이 경로 위에서 찾는다.
@@ -67,12 +73,12 @@ struct PlanningBehaviorConfig {
     // 처음부터 빈 횡단보도는 전역경로의 원래 목표속도로 통과한다.
     double crosswalkApproachSpeed{5.5};      // [m/s]
     double crosswalkApproachDistance{25.0};  // [m] 이 거리부터 감속
-    double crosswalkNearbyObjectDistance{3.0}; // [m] 주변 객체 조기감속 범위
+    double crosswalkNearbyObjectDistance{5.0}; // [m] 주변 객체 조기감속 범위
     // 한 번 정지 원인이 된 객체가 횡단보도를 완전히 비운 뒤, Ego가
     // 횡단보도를 빠져나갈 때까지 적용하는 통과속도.
     double crosswalkClearanceSpeed{6.9};     // [m/s]
     // 횡단보도 밖이라도 이 시간 뒤 예상 위치가 안이면 점유로 본다.
-    double crosswalkPedestrianPrediction{2.0}; // [s]
+    double crosswalkPedestrianPrediction{4.0}; // [s]
     // 횡단보도 앞 이 거리 안의 정지선을 정지 목표로 삼는다.
     double crosswalkStopLineSearch{15.0};    // [m]
 };
@@ -131,11 +137,25 @@ struct PlanningResult {
     PathSafetyResult pathSafety;
     bool emergencyBrake{};
     std::uint8_t turnSignal{};
+    // 실행 로그가 Planner가 실제로 적용한 제한과 상태를 기록하도록
+    // 최종 의사결정과 함께 내보낸다.
+    double currentSpeedLimit{};
+    bool schoolZoneActive{};
+    bool stopDistanceValid{};
+    double stopDistance{};
+    bool crosswalkActive{};
+    bool laneChangeActive{};
 };
 
 struct StationaryObjectState {
     std::uint32_t id{};
     double duration{};
+    double lastX{};
+    double lastY{};
+    bool hasPosition{};
+    // 별도 semantic type이 없어도, 한 번 실제로 움직였던 객체를 영구 정적
+    // 시설물처럼 즉시 회피하지 않기 위한 시간 이력이다.
+    bool hasEverMoved{};
 };
 
 struct PlanningProcessData {
