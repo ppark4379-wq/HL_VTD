@@ -1,0 +1,230 @@
+schema_version: 1
+
+scenario:
+  id: M04
+  category: mixed
+  name: checkpoint_loop_mixed_hazards
+  description: LivingLAB 대회 제공 체크포인트 순환 경로에서 다중 차량의 가속·정지·차선변경, 보행자와 정적 장애물 대응을 검증
+  file: M04.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+  # 대회 제공 route_pretest_2.csv 좌표를 그대로 유지한다.
+  preserve_checkpoint_coordinates: true
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+    initial_position:
+      x: 239.36572265625
+      y: 147.2657241821289
+      z: 37.2
+      heading_rad: 5.033820614705177
+
+  - name: "New Player"
+    type: vehicle
+    role: relevant_object
+    initial_path_shape:
+      path_shape_id: 2
+      start_s_m: 0.01
+      target_s_m: 250.36348957045885
+
+  - name: "New Player01"
+    type: vehicle
+    role: relevant_object
+    initial_route:
+      path_id: 3
+      start_s_m: 0.0
+      target_s_m: 150.0
+      start_lane: 3
+
+  - name: "New Player02"
+    type: vehicle
+    role: relevant_object
+    initial_route:
+      path_id: 2
+      start_s_m: 90.47
+      target_s_m: 260.51911942591744
+      start_lane: -3
+
+  - name: "New Player03"
+    type: vehicle
+    role: relevant_object
+    initial_path_shape:
+      path_shape_id: 4
+      start_s_m: 0.01
+      target_s_m: 108.11583976748562
+
+  - name: "New Character"
+    type: pedestrian
+    role: relevant_object
+    initial_position:
+      x: 433.21405029296875
+      y: -185.0139923095703
+      z: 44.16
+      heading_rad: 0.0
+
+  - name: "New Object"
+    type: obstacle
+    role: flower_box
+    initial_position:
+      x: 284.3801574707031
+      y: 18.03769302368164
+      z: 39.99830172694524
+    scale:
+      x: 5.0
+      y: 5.0
+      z: 5.0
+
+events:
+  - name: player_accelerates
+    subject: "New Player"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 23.0
+    action:
+      type: speed_change
+      target_speed_mps: 6.944444444444445
+      rate_mps2: 4.0
+
+  - name: player_stops_at_position
+    subject: "New Player"
+    trigger:
+      type: absolute_position
+      x: 267.04209899902344
+      y: 65.85470581054688
+      radius_m: 8.0
+    action:
+      type: speed_change
+      target_speed_mps: 0.0
+      rate_mps2: 4.0
+      autonomous_delay_s: 5.0
+
+  - name: player01_accelerates
+    subject: "New Player01"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 17.0
+    action:
+      type: speed_change
+      target_speed_mps: 4.722222222222222
+      rate_mps2: 4.0
+
+  - name: player01_changes_lane
+    subject: "New Player01"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 8.0
+    action:
+      type: lane_change_and_autonomous
+      lane_change_direction: -1
+      duration_s: 3.0
+      autonomous_delay_s: 8.0
+
+  - name: player02_accelerates
+    subject: "New Player02"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 17.0
+    action:
+      type: speed_change
+      target_speed_mps: 5.555555555555555
+      rate_mps2: 4.0
+
+  - name: player02_changes_lane_at_position
+    subject: "New Player02"
+    trigger:
+      type: absolute_position
+      x: 402.2586258422051
+      y: -162.77882877338166
+      radius_m: 11.0
+    action:
+      type: lane_change_and_autonomous
+      lane_change_direction: -1
+      duration_s: 3.0
+      autonomous_delay_s: 7.0
+
+  - name: player03_accelerates
+    subject: "New Player03"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 18.0
+    action:
+      type: speed_change
+      target_speed_mps: 5.555555555555555
+      rate_mps2: 4.0
+
+  - name: player03_stops_at_position
+    subject: "New Player03"
+    trigger:
+      type: absolute_position
+      x: 369.6480407714844
+      y: -121.7072525024414
+      radius_m: 11.0
+    action:
+      type: speed_change
+      target_speed_mps: 0.0
+      rate_mps2: 4.0
+      autonomous_delay_s: 5.0
+
+  - name: pedestrian_crossing
+    subject: "New Character"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 16.0
+    action:
+      type: pedestrian_motion
+      speed_mps: 2.8111112117767334
+      path_shape_id: 3
+
+expected_outcomes:
+  - follow_reference_path
+  - remain_in_driving_lane
+  - obey_traffic_signals
+  - detect_dynamic_vehicles
+  - respond_to_cut_in_and_braking
+  - detect_pedestrian
+  - detect_static_obstacle
+  - reach_route_end
+  - avoid_collision
+
+evaluation:
+  codes:
+    - internal.mixed_checkpoint_loop
+  required_metrics:
+    - relevant_object_id
+    - object_gap
+    - relative_speed
+    - ttc
+    - lateral_error
+    - heading_error
+    - ego_speed
+    - route_progress
+    - collision
+  thresholds_status: pending

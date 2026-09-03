@@ -1,0 +1,119 @@
+schema_version: 1
+
+scenario:
+  id: M02
+  category: mixed
+  name: mixed_vehicle_cut_in_obstacles
+  description: LivingLAB 경로에서 신호 판단과 인접 차량의 차선변경 및 정적 장애물 대응을 함께 검증
+  file: M02.xml
+  format: vtd_native
+  map: LivingLAB
+
+runtime:
+  simulator: VTD
+  simulator_version: "2025.2"
+
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+  # VTD PathShape01에서 선정한 8개 checkpoint 좌표를 그대로 유지한다.
+  preserve_checkpoint_coordinates: true
+
+validation:
+  ego_control: external
+  start_position_tolerance_m: 2.0
+  start_heading_tolerance_deg: 10.0
+
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+
+entities:
+  - name: Ego
+    type: vehicle
+    role: ego
+
+  - name: "New Player02"
+    type: vehicle
+    role: cut_in_vehicle
+
+  - name: "New Object"
+    type: obstacle
+    role: traffic_cone
+
+  - name: "New Object Copy "
+    type: obstacle
+    role: traffic_cone
+
+  - name: "New Object Copy 01"
+    type: obstacle
+    role: traffic_cone
+
+  - name: "New Object01"
+    type: obstacle
+    role: wheel_stack
+
+  - name: "New Object01 Copy "
+    type: obstacle
+    role: wheel_stack
+
+  - name: "New Object02"
+    type: obstacle
+    role: garage
+
+  - name: "New Object03"
+    type: obstacle
+    role: bicycle
+
+  - name: "New Object04"
+    type: obstacle
+    role: bucket
+
+  - name: "New Object04 Copy "
+    type: obstacle
+    role: bucket
+
+  - name: "New Object04 Copy 01"
+    type: obstacle
+    role: bucket
+
+events:
+  - name: player02_changes_lane
+    subject: "New Player02"
+    trigger:
+      type: relative_distance
+      reference: Ego
+      threshold_m: 9.0
+    action:
+      type: lane_change
+      lane_change_direction: 1
+      duration_s: 3.0
+
+expected_outcomes:
+  - follow_reference_path
+  - obey_traffic_signals
+  - detect_dynamic_vehicles
+  - respond_to_vehicle_lane_change
+  - detect_static_obstacles
+  - avoid_collision
+  - reach_route_end
+
+evaluation:
+  codes:
+    - internal.mixed_vehicle_cut_in_obstacles
+  required_metrics:
+    - traffic_light_state
+    - stop_line_distance
+    - relevant_object_id
+    - object_gap
+    - relative_speed
+    - ttc
+    - ego_speed
+    - lateral_error
+    - target_accel
+    - collision
+    - route_progress
+  thresholds_status: pending

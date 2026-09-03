@@ -11,7 +11,8 @@
 #   vtd.host_ip: "165.246.170.76"
 #   controller.ip: "165.246.170.86"
 vtd:
-  host_ip: "127.0.0.1"
+  host_ip: "172.30.144.2"
+  # "127.0.0.1"
   tcp_port: 9910
   rdb_port: 48190  # VTD frameNo/simTime 수신(위치 기반 속도 계산 시간축)
   rtsp_port: 8554
@@ -20,5 +21,6 @@ vtd:
 # 제어 명령은 vtd.tcp_port 소켓으로 나간다.
 # VTD가 UDP로 별도 데이터를 보내는지 확인되면 그때 사용한다.
 controller:
-  ip: "127.0.0.1"
+  ip: "172.30.144.1"
+  #"127.0.0.1"
   udp_port: 9912

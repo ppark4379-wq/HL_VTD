@@ -4,13 +4,16 @@
 Ego가 PosRoute/PathRef를 사용하면 TrackId/road s/StartLane을 추출해 기존
 OpenDRIVE lane graph로 checkpoints.csv, route.csv, route.svg까지 재생성한다.
 PosAbsolute Scenario는 기존 checkpoints.csv의 목적지를 유지하고 Ego 시작 좌표를
-갱신해 OpenDRIVE 경로를 다시 생성한다.
+갱신해 OpenDRIVE 경로를 다시 생성한다. scenario.yaml의
+route.preserve_checkpoint_coordinates가 true면 대회 제공 좌표 전체를 보존하고,
+route.linear_checkpoint_segments에 지정한 구간은 checkpoint 직선 형상을 보존한다.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import math
 import os
 import re
 import shutil
@@ -59,11 +62,18 @@ class EgoAbsolutePosition:
 
 
 @dataclass(frozen=True)
+class RouteSyncOptions:
+    linear_checkpoint_segments: tuple[int, ...] = ()
+    preserve_checkpoint_coordinates: bool = False
+
+
+@dataclass(frozen=True)
 class SyncConfig:
     repo_root: Path
     map_path: Path
     generator: Path
     checkpoint_generator: Path
+    path_shape_generator: Path
     plotter: Path
 
 
@@ -249,16 +259,29 @@ def make_config(args: argparse.Namespace) -> SyncConfig:
             "checkpoints_to_route를 찾지 못했습니다. 먼저 scripts/build.sh를 "
             "실행하세요"
         )
+    path_shape_executable = (
+        "path_shape_to_route.exe" if os.name == "nt" else "path_shape_to_route"
+    )
+    path_shape_generator = repo_root / "build" / path_shape_executable
+    if not path_shape_generator.is_file():
+        raise SyncError(
+            "path_shape_to_route를 찾지 못했습니다. 먼저 scripts/build.sh를 "
+            "실행하세요"
+        )
     plotter = repo_root / "tools" / "plot_reference_path.py"
     if not plotter.is_file():
         raise SyncError(f"경로 SVG 도구를 찾지 못했습니다: {plotter}")
     return SyncConfig(
-        repo_root, map_path, generator, checkpoint_generator, plotter
+        repo_root, map_path, generator, checkpoint_generator,
+        path_shape_generator, plotter
     )
 
 
 def write_absolute_checkpoints(
-    source: Path, destination: Path, ego: EgoAbsolutePosition
+    source: Path,
+    destination: Path,
+    ego: EgoAbsolutePosition,
+    preserve_coordinates: bool = False,
 ) -> int:
     try:
         with source.open(newline="", encoding="utf-8") as stream:
@@ -269,8 +292,9 @@ def write_absolute_checkpoints(
         raise SyncError(
             "PosAbsolute 경로 재생성에는 seq,x,y 형식의 체크포인트 2개 이상이 필요합니다"
         )
-    rows[0]["x"] = f"{ego.x:.8f}"
-    rows[0]["y"] = f"{ego.y:.8f}"
+    if not preserve_coordinates:
+        rows[0]["x"] = f"{ego.x:.8f}"
+        rows[0]["y"] = f"{ego.y:.8f}"
     with destination.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(
             stream, fieldnames=["seq", "x", "y"], lineterminator="\n"
@@ -281,6 +305,204 @@ def write_absolute_checkpoints(
             for row in rows
         )
     return len(rows)
+
+
+def read_route_sync_options(package: Path) -> RouteSyncOptions:
+    """Read checkpoint preservation and linear-segment settings."""
+    manifest_path = package / "scenario.yaml"
+    if not manifest_path.is_file():
+        return RouteSyncOptions()
+    try:
+        import yaml
+    except ImportError as error:
+        raise SyncError("scenario.yaml을 읽으려면 PyYAML이 필요합니다") from error
+    try:
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise SyncError(f"scenario.yaml을 읽을 수 없습니다: {manifest_path}") from error
+    if not isinstance(manifest, dict):
+        raise SyncError(f"scenario.yaml 루트는 mapping이어야 합니다: {manifest_path}")
+    route = manifest.get("route", {})
+    if not isinstance(route, dict):
+        raise SyncError(f"scenario.yaml route는 mapping이어야 합니다: {manifest_path}")
+    raw_segments = route.get("linear_checkpoint_segments", [])
+    if not isinstance(raw_segments, list):
+        raise SyncError("route.linear_checkpoint_segments는 정수 배열이어야 합니다")
+    preserve_coordinates = route.get("preserve_checkpoint_coordinates", False)
+    if not isinstance(preserve_coordinates, bool):
+        raise SyncError("route.preserve_checkpoint_coordinates는 bool이어야 합니다")
+
+    segments = []
+    for value in raw_segments:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise SyncError(
+                "route.linear_checkpoint_segments에는 1 이상의 정수만 사용할 수 있습니다"
+            )
+        segments.append(value)
+    return RouteSyncOptions(
+        linear_checkpoint_segments=tuple(sorted(set(segments))),
+        preserve_checkpoint_coordinates=preserve_coordinates,
+    )
+
+
+def read_xy_rows(path: Path) -> tuple[list[str], list[dict[str, str]]]:
+    try:
+        with path.open(newline="", encoding="utf-8-sig") as stream:
+            reader = csv.DictReader(stream)
+            fieldnames = list(reader.fieldnames or [])
+            rows = list(reader)
+    except OSError as error:
+        raise SyncError(f"CSV를 읽을 수 없습니다: {path}") from error
+    if not {"x", "y"}.issubset(fieldnames) or not rows:
+        raise SyncError(f"x,y 열이 있는 CSV가 필요합니다: {path}")
+    return fieldnames, rows
+
+
+def xy(row: dict[str, str]) -> tuple[float, float]:
+    try:
+        return float(row["x"]), float(row["y"])
+    except (KeyError, ValueError) as error:
+        raise SyncError("경로 CSV의 x,y 값이 올바르지 않습니다") from error
+
+
+def nearest_route_indices(
+    checkpoints: list[dict[str, str]], route: list[dict[str, str]]
+) -> list[int]:
+    indices = []
+    search_begin = 0
+    for checkpoint in checkpoints:
+        checkpoint_x, checkpoint_y = xy(checkpoint)
+        nearest = min(
+            range(search_begin, len(route)),
+            key=lambda index: (
+                (xy(route[index])[0] - checkpoint_x) ** 2
+                + (xy(route[index])[1] - checkpoint_y) ** 2
+            ),
+        )
+        route_x, route_y = xy(route[nearest])
+        distance = math.hypot(route_x - checkpoint_x, route_y - checkpoint_y)
+        if distance > 2.0:
+            raise SyncError(
+                f"checkpoint를 route에서 찾을 수 없습니다: "
+                f"({checkpoint_x:.3f}, {checkpoint_y:.3f}), distance={distance:.3f}m"
+            )
+        indices.append(nearest)
+        search_begin = min(nearest + 1, len(route) - 1)
+    return indices
+
+
+def contiguous_segment_groups(segments: tuple[int, ...]) -> list[tuple[int, int]]:
+    groups: list[tuple[int, int]] = []
+    for segment in segments:
+        if groups and segment == groups[-1][1] + 1:
+            groups[-1] = (groups[-1][0], segment)
+        else:
+            groups.append((segment, segment))
+    return groups
+
+
+def update_route_yaw_and_s(rows: list[dict[str, str]]) -> None:
+    cumulative_s = 0.0
+    previous_yaw = 0.0
+    for index, row in enumerate(rows):
+        current_x, current_y = xy(row)
+        if index > 0:
+            previous_x, previous_y = xy(rows[index - 1])
+            step = math.hypot(current_x - previous_x, current_y - previous_y)
+            if step > 2.0:
+                raise SyncError(
+                    f"직선 구간 병합 후 route 간격이 너무 큽니다: {step:.3f}m"
+                )
+            cumulative_s += step
+        if index + 1 < len(rows):
+            next_x, next_y = xy(rows[index + 1])
+            if math.hypot(next_x - current_x, next_y - current_y) > 1e-9:
+                previous_yaw = math.atan2(next_y - current_y, next_x - current_x)
+        row["yaw"] = f"{previous_yaw:.8f}"
+        row["s"] = f"{cumulative_s:.8f}"
+
+
+def splice_linear_checkpoint_segments(
+    checkpoints_path: Path,
+    lane_graph_route_path: Path,
+    path_shape_route_path: Path,
+    output_path: Path,
+    segments: tuple[int, ...],
+) -> None:
+    """Replace selected lane-graph spans with straight checkpoint interpolation."""
+    _, checkpoints = read_xy_rows(checkpoints_path)
+    fieldnames, lane_graph_route = read_xy_rows(lane_graph_route_path)
+    _, path_shape_route = read_xy_rows(path_shape_route_path)
+    if any(segment >= len(checkpoints) for segment in segments):
+        raise SyncError(
+            "route.linear_checkpoint_segments 값은 checkpoint 개수보다 작아야 합니다"
+        )
+
+    graph_indices = nearest_route_indices(checkpoints, lane_graph_route)
+    shape_indices = nearest_route_indices(checkpoints, path_shape_route)
+    merged: list[dict[str, str]] = []
+    graph_cursor = 0
+    for first_segment, last_segment in contiguous_segment_groups(segments):
+        first_checkpoint = first_segment - 1
+        last_checkpoint = last_segment
+        graph_start = graph_indices[first_checkpoint]
+        graph_end = graph_indices[last_checkpoint]
+        shape_start = shape_indices[first_checkpoint]
+        shape_end = shape_indices[last_checkpoint]
+        merged.extend(lane_graph_route[graph_cursor:graph_start])
+        linear_rows = [
+            dict(row) for row in path_shape_route[shape_start : shape_end + 1]
+        ]
+        graph_start_x, graph_start_y = xy(lane_graph_route[graph_start])
+        graph_end_x, graph_end_y = xy(lane_graph_route[graph_end])
+        shape_start_x, shape_start_y = xy(linear_rows[0])
+        shape_end_x, shape_end_y = xy(linear_rows[-1])
+        denominator = max(1, len(linear_rows) - 1)
+        for index, row in enumerate(linear_rows):
+            progress = index / denominator
+            row_x, row_y = xy(row)
+            offset_x = (
+                (graph_start_x - shape_start_x) * (1.0 - progress)
+                + (graph_end_x - shape_end_x) * progress
+            )
+            offset_y = (
+                (graph_start_y - shape_start_y) * (1.0 - progress)
+                + (graph_end_y - shape_end_y) * progress
+            )
+            row["x"] = f"{row_x + offset_x:.8f}"
+            row["y"] = f"{row_y + offset_y:.8f}"
+        for field in ("road_id", "lane_id", "road_s"):
+            linear_rows[0][field] = lane_graph_route[graph_start][field]
+            linear_rows[-1][field] = lane_graph_route[graph_end][field]
+        merged.extend(linear_rows)
+        graph_cursor = graph_end + 1
+    merged.extend(lane_graph_route[graph_cursor:])
+
+    filtered = []
+    for row in merged:
+        if filtered:
+            current_x, current_y = xy(row)
+            previous_x, previous_y = xy(filtered[-1])
+            if math.hypot(current_x - previous_x, current_y - previous_y) <= 1e-4:
+                continue
+        filtered.append(row)
+    if len(filtered) < 2:
+        raise SyncError("직선 구간 병합 결과에 route point가 부족합니다")
+    update_route_yaw_and_s(filtered)
+
+    try:
+        with output_path.open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=fieldnames, lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(filtered)
+    except OSError as error:
+        raise SyncError(f"병합 route를 저장할 수 없습니다: {output_path}") from error
+    joined = ",".join(str(segment) for segment in segments)
+    print(
+        f"[sync] preserved linear checkpoint segments: {joined} "
+        f"({len(filtered)} route points)",
+        flush=True,
+    )
 
 
 def write_vtd_path(path: Path, route: EgoRoute) -> None:
@@ -338,6 +560,8 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
             )
             return
 
+        route_options = read_route_sync_options(destination)
+        linear_segments = route_options.linear_checkpoint_segments
         destination.parent.mkdir(parents=True, exist_ok=True)
         staging = Path(
             tempfile.mkdtemp(prefix=f".{destination_stem}.sync-", dir=destination.parent)
@@ -346,11 +570,16 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
             staged_xml = staging / f"{destination_stem}.xml"
             staged_checkpoints = staging / "checkpoints.csv"
             staged_route = staging / "route.csv"
+            staged_path_shape_route = staging / "path_shape_route.csv"
+            staged_merged_route = staging / "merged_route.csv"
             staged_lane_map = staging / "lane_map.csv"
             staged_svg = staging / "route.svg"
             shutil.copy2(source, staged_xml)
             checkpoint_count = write_absolute_checkpoints(
-                checkpoints, staged_checkpoints, ego_absolute
+                checkpoints,
+                staged_checkpoints,
+                ego_absolute,
+                route_options.preserve_checkpoint_coordinates,
             )
             run_checked(
                 [
@@ -362,6 +591,24 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
                 ],
                 config.repo_root,
             )
+            if linear_segments:
+                run_checked(
+                    [
+                        str(config.path_shape_generator),
+                        str(config.map_path),
+                        str(staged_checkpoints),
+                        str(staged_path_shape_route),
+                    ],
+                    config.repo_root,
+                )
+                splice_linear_checkpoint_segments(
+                    staged_checkpoints,
+                    staged_route,
+                    staged_path_shape_route,
+                    staged_merged_route,
+                    linear_segments,
+                )
+                os.replace(staged_merged_route, staged_route)
             run_checked(
                 [
                     sys.executable,
@@ -387,7 +634,9 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
             print(
                 f"[sync] synced PosAbsolute: {source} -> {destination}\n"
                 f"[sync] Ego start=({ego_absolute.x:.3f}, {ego_absolute.y:.3f}) "
-                f"checkpoints={checkpoint_count}",
+                f"checkpoints={checkpoint_count} "
+                f"preserve_checkpoint_coordinates="
+                f"{route_options.preserve_checkpoint_coordinates}",
                 flush=True,
             )
         finally:

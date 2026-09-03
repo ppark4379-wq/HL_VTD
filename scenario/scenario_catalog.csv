@@ -26,3 +26,6 @@ V07,vehicle,vehicle/V07_obstacle_sudden_come,internal.dynamic_vehicle_obstacle_a
 V08,vehicle,vehicle/V08_side_vehicle,internal.dynamic_side_vehicle_stop,packaged,옆 차선 차량 급정지 대응; 실주행 검증 전
 V09,vehicle,vehicle/V09_double_cut_in,internal.dynamic_vehicle_cut_in,packaged,양쪽 차선 두 차량의 동시 Cut-in 대응; 실주행 검증 전
 M01,mixed,mixed/M01,internal.mixed_dynamic_traffic,packaged,다중 차량 출현·급정지·차선변경 및 정적 장애물 복합 대응; 실주행 검증 전
+M02,mixed,mixed/M02,internal.mixed_vehicle_cut_in_obstacles,packaged,신호 판단·인접 차량 차선변경·정적 장애물 복합 대응; 실주행 검증 전
+M03,mixed,mixed/M03,internal.mixed_curve_vehicle_obstacle,packaged,곡선 경로 다중 차량 가속·급정지·차선변경과 보행자·정적 장애물 복합 대응; 실주행 검증 전
+M04,mixed,mixed/M04,internal.mixed_checkpoint_loop,packaged,대회 체크포인트 순환 경로의 다중 차량·보행자·정적 장애물 복합 대응; 실주행 검증 전
