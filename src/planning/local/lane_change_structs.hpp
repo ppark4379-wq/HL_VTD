@@ -9,7 +9,7 @@
 
 struct LaneChangeConfig {
     double obstacleTriggerMinimumDistance{20.0};
-    double obstacleTriggerMaximumDistance{45.0};
+    double obstacleTriggerMaximumDistance{60.0};
     double stoppedLeadWaitTime{2.0};
     double stoppedLeadMinimumDistance{5.0};
     double stoppedEgoMaximumSpeed{2.0 / 3.6};

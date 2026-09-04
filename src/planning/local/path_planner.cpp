@@ -169,6 +169,15 @@ PathPlan runPurePursuit(PathPlannerData& planner, const GtFrame& gt,
         planner.config.curvatureCheckDistance);
     plan.lookahead = chooseLookahead(plan.maxCurvature, planner.config,
                                      egoSpeed);
+    const Waypoint& nearest = planner.waypoints[plan.nearestIndex];
+    const double routeOffset = std::hypot(nearest.x - gt.ego.x,
+                                          nearest.y - gt.ego.y);
+    const bool recoveringToRoute = routeOffset > 1.0;
+    if (recoveringToRoute) {
+        const double recoveryLookahead = std::clamp(
+            4.0 + 2.0 * routeOffset, 6.0, 14.0);
+        plan.lookahead = std::max(plan.lookahead, recoveryLookahead);
+    }
     plan.targetIndex = findTargetWaypoint(
         planner.waypoints, plan.nearestIndex, plan.lookahead);
 
@@ -181,6 +190,11 @@ PathPlan runPurePursuit(PathPlannerData& planner, const GtFrame& gt,
     plan.steering = computePurePursuitSteering(
         headingError, targetDistance, planner.config.wheelbase);
     plan.targetSpeed = chooseTargetSpeed(plan.maxCurvature, planner.config);
+    if (recoveringToRoute) {
+        const double recoverySpeed = std::clamp(3.0 - 0.3 * routeOffset,
+                                                1.5, 2.5);
+        plan.targetSpeed = std::min(plan.targetSpeed, recoverySpeed);
+    }
     plan.goalReached = plan.targetIndex + 1 == planner.waypoints.size() &&
                        targetDistance <= planner.config.goalTolerance;
     if (plan.goalReached) plan.targetSpeed = 0.0;

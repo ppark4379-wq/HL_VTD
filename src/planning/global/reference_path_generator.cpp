@@ -499,6 +499,15 @@ std::vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
                     const std::vector<LaneKey> route =
                         connectLanes(data, priorKey, currentKey);
                     if (route.empty()) continue;
+                    int lateralTransitions = 0;
+                    for (std::size_t routeIndex = 1;
+                         routeIndex < route.size(); ++routeIndex) {
+                        const LaneKey& from = route[routeIndex - 1];
+                        const LaneKey& to = route[routeIndex];
+                        if (from.roadId == to.roadId &&
+                            from.sectionIndex == to.sectionIndex &&
+                            from.laneId != to.laneId) ++lateralTransitions;
+                    }
                     // LaneKey 연결만으로는 checkpoint 전에 차선변경을 끝낼 수
                     // 있는지 알 수 없다. 실제 조립을 해 보고, 목표점 도달·실선
                     // 구간·곡률까지 만족하는 후보만 DP에 넣는다.
@@ -517,7 +526,8 @@ std::vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
                     const double routeDistance = candidatePath.back().s;
                     const double newCost =
                         costs[checkpointIndex - 1][priorIndex] +
-                        routeDistance + checkpointLanePenalty(
+                        routeDistance + 40.0 * lateralTransitions +
+                        checkpointLanePenalty(
                             data, current, checkpointIndex);
                     if (newCost < costs[checkpointIndex][currentIndex]) {
                         costs[checkpointIndex][currentIndex] = newCost;

@@ -24,8 +24,7 @@ void runControlProcess(ControlProcessData& data,
                             data.controller.config.maxSteeringRate;
         const double previous = data.controller.hasPreviousSteering
                                     ? data.controller.previousSteering
-                                    : static_cast<double>(
-                                          data.nominalCommand.steering);
+                                    : 0.0;
         const double limited = std::clamp(
             static_cast<double>(data.nominalCommand.steering),
             previous - step, previous + step);

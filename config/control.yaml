@@ -73,7 +73,7 @@ planning:
 
 lane_change:
   obstacle_trigger_minimum_distance: 20.0 # [m] 조향 가능한 종방향 여유를 확보
-  obstacle_trigger_maximum_distance: 45.0 # [m] 정적 장애물 탐색거리
+  obstacle_trigger_maximum_distance: 60.0 # [m] 정적 장애물 탐색거리
   # 주행하던 선행차가 계속 정지하면 영구 정지 대신 안전한 회피를 다시 검토한다.
   stopped_lead_wait_time: 2.0             # [s] 정지 지속 후 회피 후보 승격
   stopped_lead_minimum_distance: 5.0      # [m] 확인 지연 뒤에도 재계획할 최소 간격

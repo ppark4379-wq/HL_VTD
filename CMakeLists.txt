@@ -124,6 +124,8 @@ target_include_directories(checkpoints_to_route
 if(MSVC)
     target_compile_options(hl_vtd PRIVATE /W4 /permissive- /utf-8)
     target_compile_options(vtd_path_to_checkpoints PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(path_shape_to_route PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(checkpoints_to_route PRIVATE /W4 /permissive- /utf-8)
 else()
     target_compile_options(hl_vtd PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(vtd_path_to_checkpoints
