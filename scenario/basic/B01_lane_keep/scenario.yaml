@@ -1,5 +1,4 @@
 schema_version: 1
-
 scenario:
   id: B01
   category: basic
@@ -8,45 +7,42 @@ scenario:
   file: B01_lane_keep.xml
   format: vtd_native
   map: LivingLAB
-
 runtime:
   simulator: VTD
-  simulator_version: "2025.2"
-
+  simulator_version: '2025.2'
 route:
   default: route.csv
   mode: packaged
   compatible_routes: []
-
 validation:
   ego_control: external
   start_position_tolerance_m: 2.0
   start_heading_tolerance_deg: 10.0
-
 parameters:
   ego_speed_mps:
     type: float
     unit: m/s
     default: 0.0
-
 entities:
-  - name: Ego
-    type: vehicle
-    role: ego
-
+- name: Ego
+  type: vehicle
+  role: ego
+  initial_position:
+    x: 344.2292785644531
+    y: -110.28851318359375
+    z: 41.5
+    heading_rad: 5.2900052038517895
 events: []
-
 expected_outcomes:
-  - follow_route
-  - maintain_lane
-  - reach_goal
-
+- follow_route
+- maintain_lane
+- reach_goal
 evaluation:
   codes:
-    - S2.1.01
+  - S2.1.01
   required_metrics:
-    - ego_speed
-    - lateral_error
-    - goal_reached
-    - command_steering
+  - ego_speed
+  - lateral_error
+  - goal_reached
+  - command_steering
   thresholds_status: pending

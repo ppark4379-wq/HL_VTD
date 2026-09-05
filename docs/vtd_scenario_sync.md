@@ -73,6 +73,18 @@ route.csv
 route.svg
 ```
 
+대상 Package에 `scenario.yaml`이 있으면 XML 저장 시 다음 XML 연동 필드도
+자동으로 맞춘다.
+
+- `scenario.file`
+- `validation.ego_control`
+- `entities`의 차량·보행자·정적 객체 목록
+- Ego의 `initial_position` (`PosAbsolute`인 경우)
+
+기존 엔티티의 역할과 추가 메타데이터는 이름이 같은 동안 유지한다. XML에서
+삭제된 엔티티와 해당 엔티티를 참조하는 manifest event는 함께 제거한다. 설명,
+평가 코드, 경로 옵션처럼 XML에서 결정할 수 없는 값은 변경하지 않는다.
+
 Ego가 `PosAbsolute`이면 경로 끝점을 XML만으로 알 수 없으므로 XML만 복사하고
 기존 `checkpoints.csv`, `route.csv`, `route.svg`는 보존한다. 이 경우도 실패로
 처리하려면 `--require-route`를 사용한다.

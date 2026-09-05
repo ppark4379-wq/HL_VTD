@@ -83,6 +83,12 @@ Scenario 검증 및 XML 전송
 → 제어기 종료 후 VTD Stop
 ```
 
+초기화 직후 `00_HL_VTD`의 Image Generator 두 개가 팝업을 하나씩 띄우고
+Ego에 자동 연결한다. `igVisualBroadcast/cam1`은 대회용 follower view
+(`x=-6.5 m`, `z=2.6 m`), `igVisualStudent/birdCam`은 기존 bird view를
+사용한다. VTD 2025.2의 공유 메모리 제약 때문에 두 RenderSurface를 한 IG에
+넣지 않고 별도 프로세스로 실행한다.
+
 Runner는 Play 직후 External Ego의 driver input을
 `ctrlLatLong="extern"`으로 고정한다. `00_HL_VTD` Setup에서도
 `Config/ModuleManager/moduleManager.xml`의 Ego를 담당하는

@@ -12,6 +12,7 @@ route.linear_checkpoint_segments에 지정한 구간은 checkpoint 직선 형상
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import math
 import os
@@ -366,7 +367,9 @@ def xy(row: dict[str, str]) -> tuple[float, float]:
 
 
 def nearest_route_indices(
-    checkpoints: list[dict[str, str]], route: list[dict[str, str]]
+    checkpoints: list[dict[str, str]],
+    route: list[dict[str, str]],
+    max_distance_m: float = 2.0,
 ) -> list[int]:
     indices = []
     search_begin = 0
@@ -381,7 +384,7 @@ def nearest_route_indices(
         )
         route_x, route_y = xy(route[nearest])
         distance = math.hypot(route_x - checkpoint_x, route_y - checkpoint_y)
-        if distance > 2.0:
+        if distance > max_distance_m:
             raise SyncError(
                 f"checkpoint를 route에서 찾을 수 없습니다: "
                 f"({checkpoint_x:.3f}, {checkpoint_y:.3f}), distance={distance:.3f}m"
@@ -438,7 +441,12 @@ def splice_linear_checkpoint_segments(
             "route.linear_checkpoint_segments 값은 checkpoint 개수보다 작아야 합니다"
         )
 
-    graph_indices = nearest_route_indices(checkpoints, lane_graph_route)
+    # Checkpoints may lie away from a lane centerline (for example near a lane
+    # edge), so allow one lane-width of offset when locating splice boundaries.
+    # The PathShape route still has to pass within the stricter default limit.
+    graph_indices = nearest_route_indices(
+        checkpoints, lane_graph_route, max_distance_m=5.0
+    )
     shape_indices = nearest_route_indices(checkpoints, path_shape_route)
     merged: list[dict[str, str]] = []
     graph_cursor = 0
@@ -535,11 +543,199 @@ def atomic_copy(source: Path, destination: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def direct_child(element: ET.Element, name: str) -> ET.Element | None:
+    """Return a direct child while tolerating an XML namespace."""
+    return next(
+        (child for child in element if child.tag.rsplit("}", 1)[-1] == name),
+        None,
+    )
+
+
+def xml_manifest_entities(root: ET.Element) -> list[dict[str, object]]:
+    """Extract the XML-backed portion of scenario.yaml entities."""
+    entities: list[dict[str, object]] = []
+    for element in root.iter():
+        tag = element.tag.rsplit("}", 1)[-1]
+        if tag == "Player":
+            description = direct_child(element, "Description")
+            if description is None:
+                continue
+            name = description.get("Name", "")
+            entity_type = "vehicle"
+        elif tag == "Character":
+            description = None
+            name = element.get("Name", "")
+            entity_type = "pedestrian"
+        elif tag == "Object":
+            description = None
+            name = element.get("Name", "")
+            entity_type = "obstacle"
+        else:
+            continue
+        if not name.strip():
+            continue
+
+        entity: dict[str, object] = {"name": name, "type": entity_type}
+        position = None
+        if tag == "Player":
+            init = direct_child(element, "Init")
+            position = direct_child(init, "PosAbsolute") if init is not None else None
+            path_ref = direct_child(init, "PathRef") if init is not None else None
+            path_shape_ref = (
+                direct_child(init, "PathShapeRef") if init is not None else None
+            )
+            if position is None and path_ref is not None:
+                try:
+                    entity["initial_route"] = {
+                        "path_id": int(path_ref.attrib["PathId"]),
+                        "start_s_m": float(path_ref.attrib["StartS"]),
+                        "target_s_m": float(path_ref.attrib["TargetS"]),
+                        "start_lane": int(path_ref.attrib["StartLane"]),
+                    }
+                except (KeyError, ValueError):
+                    pass
+            elif position is None and path_shape_ref is not None:
+                try:
+                    entity["initial_path_shape"] = {
+                        "path_shape_id": int(path_shape_ref.attrib["PathShapeId"]),
+                        "start_s_m": float(path_shape_ref.attrib["StartS"]),
+                        "target_s_m": float(path_shape_ref.attrib["TargetS"]),
+                    }
+                except (KeyError, ValueError):
+                    pass
+        else:
+            position = direct_child(element, "StartPosAbs")
+
+        if position is not None:
+            try:
+                entity["initial_position"] = {
+                    "x": float(position.attrib["X"]),
+                    "y": float(position.attrib["Y"]),
+                    "z": float(position.attrib["Z"]),
+                    "heading_rad": float(position.attrib["Direction"]),
+                }
+            except (KeyError, ValueError):
+                pass
+        if tag == "Object":
+            scaling = direct_child(element, "Scaling")
+            if scaling is not None:
+                try:
+                    entity["scale"] = {
+                        axis.lower(): float(scaling.attrib[axis])
+                        for axis in ("X", "Y", "Z")
+                    }
+                except (KeyError, ValueError):
+                    pass
+        entities.append(entity)
+    return entities
+
+
+def sync_manifest_from_xml(
+    package: Path,
+    scenario_file_name: str,
+    root: ET.Element,
+) -> None:
+    """Reconcile XML-owned manifest fields while preserving authored metadata."""
+    manifest_path = package / "scenario.yaml"
+    if not manifest_path.is_file():
+        return
+    try:
+        import yaml
+    except ImportError as error:
+        raise SyncError("scenario.yaml을 갱신하려면 PyYAML이 필요합니다") from error
+    try:
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise SyncError(f"scenario.yaml을 읽을 수 없습니다: {manifest_path}") from error
+    if not isinstance(manifest, dict):
+        raise SyncError(f"scenario.yaml 루트는 mapping이어야 합니다: {manifest_path}")
+
+    updated = copy.deepcopy(manifest)
+    scenario = updated.setdefault("scenario", {})
+    if not isinstance(scenario, dict):
+        raise SyncError(f"scenario.yaml scenario는 mapping이어야 합니다: {manifest_path}")
+    scenario["file"] = scenario_file_name
+
+    extracted = xml_manifest_entities(root)
+    existing_entities = manifest.get("entities", [])
+    existing_by_name = {
+        entity.get("name"): entity
+        for entity in existing_entities
+        if isinstance(entity, dict) and isinstance(entity.get("name"), str)
+    } if isinstance(existing_entities, list) else {}
+    reconciled = []
+    for xml_entity in extracted:
+        name = str(xml_entity["name"])
+        entity = copy.deepcopy(existing_by_name.get(name, {}))
+        for key in ("initial_position", "initial_route", "initial_path_shape", "scale"):
+            entity.pop(key, None)
+        entity.update(xml_entity)
+        if name == "Ego":
+            entity["role"] = "ego"
+        else:
+            entity.setdefault("role", "relevant_object")
+        reconciled.append(entity)
+    updated["entities"] = reconciled
+
+    entity_names = {str(entity["name"]) for entity in extracted}
+    events = updated.get("events")
+    if isinstance(events, list):
+        updated["events"] = [
+            event
+            for event in events
+            if isinstance(event, dict)
+            and (event.get("subject") is None or event.get("subject") in entity_names)
+            and (
+                not isinstance(event.get("trigger"), dict)
+                or event["trigger"].get("reference") is None
+                or event["trigger"].get("reference") in entity_names
+            )
+        ]
+
+    ego_player = next(
+        (
+            element
+            for element in root.iter()
+            if element.tag.rsplit("}", 1)[-1] == "Player"
+            and direct_child(element, "Description") is not None
+            and direct_child(element, "Description").get("Name") == "Ego"
+        ),
+        None,
+    )
+    if ego_player is not None:
+        description = direct_child(ego_player, "Description")
+        validation = updated.setdefault("validation", {})
+        if isinstance(validation, dict) and description is not None:
+            control = description.get("Control")
+            if control:
+                validation["ego_control"] = control
+
+    if updated == manifest:
+        return
+    handle, temporary_name = tempfile.mkstemp(
+        prefix=".scenario.yaml.", suffix=".tmp", dir=package
+    )
+    os.close(handle)
+    temporary = Path(temporary_name)
+    try:
+        temporary.write_text(
+            yaml.safe_dump(updated, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        os.replace(temporary, manifest_path)
+    except OSError as error:
+        raise SyncError(f"scenario.yaml을 저장할 수 없습니다: {manifest_path}") from error
+    finally:
+        temporary.unlink(missing_ok=True)
+    print(f"[sync] updated manifest: {manifest_path}", flush=True)
+
+
 def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
     source = source.expanduser().resolve()
     if not source.is_file() or source.suffix.lower() != ".xml":
         raise SyncError(f"VTD XML 파일이 아닙니다: {source}")
-    _, ego_route, ego_absolute = parse_xml(source)
+    tree, ego_route, ego_absolute = parse_xml(source)
+    root = tree.getroot()
     destination, destination_stem = resolve_destination(source, config.repo_root)
     xml_destination = destination / f"{destination_stem}.xml"
     if source == xml_destination.resolve():
@@ -553,6 +749,7 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
         checkpoints = destination / "checkpoints.csv"
         if ego_absolute is None or not checkpoints.is_file():
             atomic_copy(source, xml_destination)
+            sync_manifest_from_xml(destination, xml_destination.name, root)
             print(
                 f"[sync] XML copied: {xml_destination}\n"
                 "[sync] PosAbsolute checkpoints missing: existing route was kept",
@@ -631,6 +828,7 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
                 (staged_xml, f"{destination_stem}.xml"),
             ):
                 os.replace(staged, destination / name)
+            sync_manifest_from_xml(destination, xml_destination.name, root)
             print(
                 f"[sync] synced PosAbsolute: {source} -> {destination}\n"
                 f"[sync] Ego start=({ego_absolute.x:.3f}, {ego_absolute.y:.3f}) "
@@ -691,6 +889,7 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
             (staged_xml, f"{destination_stem}.xml"),
         ):
             os.replace(staged, destination / name)
+        sync_manifest_from_xml(destination, xml_destination.name, root)
         print(
             f"[sync] synced: {source} -> {destination}\n"
             f"[sync] PathId={ego_route.path_id} StartLane={ego_route.start_lane} "

@@ -372,7 +372,13 @@ def run_automated(
             print(f"[auto-vtd] connected to SCP {scp_host}:{args.scp_port}")
             print(f"[auto-vtd] loading and applying {scenario_file.name}")
             scp.configure_scenario(
-                scenario_file, args.vtd_timeout, inline=args.inline_scenario
+                scenario_file,
+                args.vtd_timeout,
+                inline=args.inline_scenario,
+                # Reload the active Setup on every automated run so changes to
+                # IG render surfaces (follower + bird popups) are applied even
+                # when TaskControl was already sitting in READY.
+                force_reconfigure=True,
             )
             print("[auto-vtd] VTD is READY; initializing scenario")
             try:
@@ -393,8 +399,18 @@ def run_automated(
                 )
                 print("[auto-vtd] VTD setup recovered; retrying initialization")
                 scp.initialize(args.vtd_timeout)
-            scp.show_camera_owner("birdCam")
-            print("[auto-vtd] birdCam configured to show Ego")
+            scp.set_relative_camera(
+                "VIEW_CAMERA",
+                "Ego",
+                dx=-6.5,
+                dy=0.0,
+                dz=2.6,
+                channel_mask=0x08,
+                view_name="cam1",
+            )
+            print(
+                "[auto-vtd] follower and bird view popups configured for Ego"
+            )
             print("[auto-vtd] VTD is initialized; starting HL_VTD")
             controller = subprocess.Popen(command, cwd=REPO_ROOT)
             try:

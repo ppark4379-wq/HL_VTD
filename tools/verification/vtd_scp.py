@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import socket
 import struct
 import time
@@ -287,6 +288,41 @@ class VtdScpClient:
         quoted_name = quoteattr(camera_name)
         self.send(
             f"<Camera name={quoted_name} showOwner=\"true\"><Set/></Camera>"
+        )
+
+    def set_relative_camera(
+        self,
+        camera_name: str,
+        player_name: str,
+        *,
+        dx: float,
+        dy: float,
+        dz: float,
+        heading: float = 0.0,
+        pitch: float = 0.0,
+        roll: float = 0.0,
+        channel_mask: int | None = None,
+        view_name: str | None = None,
+    ) -> None:
+        """Attach an IG camera to a player using VTD relative coordinates."""
+        values = (dx, dy, dz, heading, pitch, roll)
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("camera pose values must be finite")
+        if channel_mask is not None and not 0 <= channel_mask <= 0xFFFFFFFF:
+            raise ValueError("camera channel mask must fit in an unsigned 32-bit value")
+        set_attributes = []
+        if channel_mask is not None:
+            set_attributes.append(f'channel="{channel_mask:#x}"')
+        if view_name is not None:
+            set_attributes.append(f"view={quoteattr(view_name)}")
+        set_suffix = f" {' '.join(set_attributes)}" if set_attributes else ""
+        self.send(
+            f"<Camera name={quoteattr(camera_name)} showOwner=\"true\">"
+            f"<PosRelative dx=\"{dx:.6f}\" dy=\"{dy:.6f}\" "
+            f"dz=\"{dz:.6f}\" player={quoteattr(player_name)}/>"
+            f"<ViewRelative dh=\"{heading:.6f}\" dp=\"{pitch:.6f}\" "
+            f"dr=\"{roll:.6f}\"/>"
+            f"<Set{set_suffix}/></Camera>"
         )
 
     def set_player_driver_control(

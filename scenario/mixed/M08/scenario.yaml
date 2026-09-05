@@ -1,0 +1,166 @@
+schema_version: 1
+scenario:
+  id: M08
+  category: mixed
+  name: checkpoint_route_dense_vehicle_cluster
+  description: M06 체크포인트 경로에서 밀집된 다중 정차·주행 차량 대응을 검증
+  file: M08.xml
+  format: vtd_native
+  map: LivingLAB
+runtime:
+  simulator: VTD
+  simulator_version: '2025.2'
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+  preserve_checkpoint_coordinates: true
+validation:
+  ego_control: external
+  start_position_tolerance_m: 5.0
+  start_heading_tolerance_deg: 10.0
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+entities:
+- name: Ego
+  type: vehicle
+  role: ego
+  initial_position:
+    x: 242.96734912109375
+    y: 146.3208142089844
+    z: 37.2
+    heading_rad: 5.033878628602046
+- name: New Player
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 291.68596236254484
+    y: -19.517984680238
+    z: 40.9878982251884
+    heading_rad: 5.139287233057293
+- name: New Player01
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 296.30411306719844
+    y: -20.790866809892435
+    z: 41.06578449229645
+    heading_rad: 5.057502218911524
+- name: 'New Player01 Copy '
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 293.73892752032344
+    y: -15.577894168901224
+    z: 40.915389108561214
+    heading_rad: 5.0646876501423845
+- name: New Player01 Copy 01
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 290.5494133601672
+    y: 1.1917944373609828
+    z: 40.475514225657534
+    heading_rad: 5.030005457994089
+- name: New Player01 Copy 02
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 289.4619194636828
+    y: 13.603555721235495
+    z: 40.15530112026927
+    heading_rad: 5.079392114310329
+- name: New Player01 Copy 03
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 291.7873589168078
+    y: -10.614313083696146
+    z: 40.77655348152973
+    heading_rad: 5.057502218911524
+- name: New Player01 Copy 04
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 289.57965628008907
+    y: -13.649156528520365
+    z: 40.82766978823545
+    heading_rad: 5.057502218911524
+- name: New Player02
+  type: vehicle
+  role: relevant_object
+  initial_route:
+    path_id: 2
+    start_s_m: 13.0
+    target_s_m: 75.34239421648513
+    start_lane: -3
+- name: New Player03
+  type: vehicle
+  role: relevant_object
+  initial_route:
+    path_id: 2
+    start_s_m: 5.0
+    target_s_m: 75.34239421648513
+    start_lane: -3
+- name: New Player01 Copy 05
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 309.17154470782344
+    y: -25.954500156450052
+    z: 41.306197643293665
+    heading_rad: 5.057502218911524
+- name: New Player01 Copy 06
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 311.9198967586047
+    y: -31.367980915117045
+    z: 41.40700016687735
+    heading_rad: 5.057502218911524
+- name: New Player01 Copy 07
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 308.00555960040157
+    y: -30.784994083452005
+    z: 41.37409847189925
+    heading_rad: 5.057502218911524
+- name: New Character
+  type: pedestrian
+  initial_position:
+    x: 470.98870849609375
+    y: -39.69447326660156
+    z: 40.154564596442235
+    heading_rad: 3.6416879463450385
+  role: relevant_object
+- name: 'New Character Copy '
+  type: pedestrian
+  initial_position:
+    x: 510.0034484863281
+    y: -111.44819259643555
+    z: 41.90372856856439
+    heading_rad: 3.6416879463450385
+  role: relevant_object
+events: []
+expected_outcomes:
+- follow_reference_path
+- detect_dynamic_vehicles
+- avoid_collision
+- reach_route_end
+evaluation:
+  codes:
+  - internal.mixed_checkpoint_dense_vehicle_cluster
+  required_metrics:
+  - relevant_object_id
+  - object_gap
+  - relative_speed
+  - ttc
+  - ego_speed
+  - lateral_error
+  - collision
+  - route_progress
+  thresholds_status: pending

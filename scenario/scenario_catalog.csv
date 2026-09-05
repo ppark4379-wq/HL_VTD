@@ -29,3 +29,7 @@ M01,mixed,mixed/M01,internal.mixed_dynamic_traffic,packaged,다중 차량 출현
 M02,mixed,mixed/M02,internal.mixed_vehicle_cut_in_obstacles,packaged,신호 판단·인접 차량 차선변경·정적 장애물 복합 대응; 실주행 검증 전
 M03,mixed,mixed/M03,internal.mixed_curve_vehicle_obstacle,packaged,곡선 경로 다중 차량 가속·급정지·차선변경과 보행자·정적 장애물 복합 대응; 실주행 검증 전
 M04,mixed,mixed/M04,internal.mixed_checkpoint_loop,packaged,대회 체크포인트 순환 경로의 다중 차량·보행자·정적 장애물 복합 대응; 실주행 검증 전
+M05,mixed,mixed/M05,internal.mixed_pretest_checkpoint_route,packaged,route_pretest 체크포인트 경로의 다중 차량·보행자·정적 장애물 복합 대응; 실주행 검증 전
+M06,mixed,mixed/M06,internal.mixed_checkpoint_vehicle_cluster,packaged,M04 체크포인트 경로의 다중 정차·주행 차량 대응; 실주행 검증 전
+M07,mixed,mixed/M07,internal.mixed_pretest_checkpoint_vehicle_cluster,packaged,M05 체크포인트 경로의 다중 이륜차·차량 및 보행자 대응; XML 편집 중·실주행 검증 전
+M08,mixed,mixed/M08,internal.mixed_checkpoint_dense_vehicle_cluster,packaged,M06 체크포인트 경로의 밀집된 다중 정차·주행 차량 대응; XML 편집 중·실주행 검증 전

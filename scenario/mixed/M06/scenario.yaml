@@ -1,0 +1,126 @@
+schema_version: 1
+scenario:
+  id: M06
+  category: mixed
+  name: checkpoint_route_vehicle_cluster
+  description: LivingLAB 체크포인트 경로에서 다중 정차 차량과 주행 차량 대응을 검증
+  file: M06.xml
+  format: vtd_native
+  map: LivingLAB
+runtime:
+  simulator: VTD
+  simulator_version: '2025.2'
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+  preserve_checkpoint_coordinates: true
+validation:
+  ego_control: external
+  start_position_tolerance_m: 5.0
+  start_heading_tolerance_deg: 10.0
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+entities:
+- name: Ego
+  type: vehicle
+  role: ego
+  initial_position:
+    x: 242.96734912109375
+    y: 146.3208142089844
+    z: 37.2
+    heading_rad: 5.033878628602046
+- name: New Player
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 302.31303755785734
+    y: -19.05992155462765
+    z: 41.08869646826905
+    heading_rad: 5.139287233057293
+- name: New Player01
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 299.87698904376094
+    y: -13.18700214009263
+    z: 40.92064628439315
+    heading_rad: 5.057502218911524
+- name: 'New Player01 Copy '
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 297.03702322344844
+    y: -6.874675708818216
+    z: 40.73731625775381
+    heading_rad: 5.0646876501423845
+- name: New Player01 Copy 01
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 293.08551565508907
+    y: 3.321188968610983
+    z: 40.44654264348829
+    heading_rad: 5.030005457994089
+- name: New Player01 Copy 02
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 280.8978020320422
+    y: 7.599302333784323
+    z: 40.22706949692752
+    heading_rad: 5.079392114310329
+- name: New Player01 Copy 03
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 294.8333489070422
+    y: -9.766532856035013
+    z: 40.786171007127564
+    heading_rad: 5.057502218911524
+- name: New Player01 Copy 04
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 297.73319021563594
+    y: -16.305927234697123
+    z: 40.97386617169724
+    heading_rad: 5.057502218911524
+- name: New Player02
+  type: vehicle
+  role: relevant_object
+  initial_route:
+    path_id: 1
+    start_s_m: 38.0
+    target_s_m: 68.44486305620664
+    start_lane: -2
+- name: New Player03
+  type: vehicle
+  role: relevant_object
+  initial_route:
+    path_id: 1
+    start_s_m: 30.0
+    target_s_m: 68.44486305620664
+    start_lane: -2
+events: []
+expected_outcomes:
+- follow_reference_path
+- detect_dynamic_vehicles
+- avoid_collision
+- reach_route_end
+evaluation:
+  codes:
+  - internal.mixed_checkpoint_vehicle_cluster
+  required_metrics:
+  - relevant_object_id
+  - object_gap
+  - relative_speed
+  - ttc
+  - ego_speed
+  - lateral_error
+  - collision
+  - route_progress
+  thresholds_status: pending

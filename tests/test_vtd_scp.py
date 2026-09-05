@@ -76,6 +76,52 @@ class VtdScpTests(unittest.TestCase):
             ['<Camera name=\'bird"Cam\' showOwner="true"><Set/></Camera>'],
         )
 
+    def test_set_relative_camera_command(self) -> None:
+        client = VtdScpClient.__new__(VtdScpClient)
+        sent: list[str] = []
+        client.send = sent.append
+        client.set_relative_camera(
+            'cam"1',
+            'Ego"Car',
+            dx=-6.5,
+            dy=0.0,
+            dz=2.6,
+            pitch=1.25,
+            channel_mask=0x08,
+            view_name='view"1',
+        )
+        self.assertEqual(
+            sent,
+            [
+                '<Camera name=\'cam"1\' showOwner="true">'
+                '<PosRelative dx="-6.500000" dy="0.000000" dz="2.600000" '
+                'player=\'Ego"Car\'/>'
+                '<ViewRelative dh="0.000000" dp="1.250000" dr="0.000000"/>'
+                '<Set channel="0x8" view=\'view"1\'/></Camera>'
+            ],
+        )
+
+    def test_set_relative_camera_rejects_non_finite_pose(self) -> None:
+        client = VtdScpClient.__new__(VtdScpClient)
+        client.send = lambda _payload: None
+        with self.assertRaises(ValueError):
+            client.set_relative_camera(
+                "cam1", "Ego", dx=float("nan"), dy=0.0, dz=2.6
+            )
+
+    def test_set_relative_camera_rejects_invalid_channel_mask(self) -> None:
+        client = VtdScpClient.__new__(VtdScpClient)
+        client.send = lambda _payload: None
+        with self.assertRaises(ValueError):
+            client.set_relative_camera(
+                "VIEW_CAMERA",
+                "Ego",
+                dx=-6.5,
+                dy=0.0,
+                dz=2.6,
+                channel_mask=0x100000000,
+            )
+
     def test_set_player_driver_control_command(self) -> None:
         client = VtdScpClient.__new__(VtdScpClient)
         sent: list[str] = []

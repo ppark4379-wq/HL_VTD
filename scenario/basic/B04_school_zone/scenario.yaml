@@ -1,5 +1,4 @@
 schema_version: 1
-
 scenario:
   id: B04
   category: basic
@@ -8,44 +7,41 @@ scenario:
   file: B04_school_zone.xml
   format: vtd_native
   map: LivingLAB
-
 runtime:
   simulator: VTD
-  simulator_version: "2025.2"
-
+  simulator_version: '2025.2'
 route:
   default: route.csv
   mode: packaged
   compatible_routes: []
-
 validation:
   ego_control: external
   start_position_tolerance_m: 2.0
   start_heading_tolerance_deg: 10.0
-
 parameters:
   ego_speed_mps:
     type: float
     unit: m/s
     default: 0.0
-
 entities:
-  - name: Ego
-    type: vehicle
-    role: ego
-
+- name: Ego
+  type: vehicle
+  role: ego
+  initial_route:
+    path_id: 1
+    start_s_m: 13.919838461363682
+    target_s_m: 464.64954807040635
+    start_lane: -4
 events: []
-
 expected_outcomes:
-  - follow_route
-  - comply_with_school_zone_speed_limit
-
+- follow_route
+- comply_with_school_zone_speed_limit
 evaluation:
   codes:
-    - S1.1.02
+  - S1.1.02
   required_metrics:
-    - ego_speed
-    - school_zone_active
-    - current_speed_limit
-    - overspeed
+  - ego_speed
+  - school_zone_active
+  - current_speed_limit
+  - overspeed
   thresholds_status: pending

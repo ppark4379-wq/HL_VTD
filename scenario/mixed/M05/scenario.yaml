@@ -1,0 +1,89 @@
+schema_version: 1
+scenario:
+  id: M05
+  category: mixed
+  name: pretest_checkpoint_route
+  description: LivingLAB route_pretest 체크포인트 경로에서 차량과 보행자 대응을 검증
+  file: M05.xml
+  format: vtd_native
+  map: LivingLAB
+runtime:
+  simulator: VTD
+  simulator_version: '2025.2'
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+  preserve_checkpoint_coordinates: true
+  linear_checkpoint_segments:
+  - 4
+validation:
+  ego_control: external
+  start_position_tolerance_m: 25.0
+  start_heading_tolerance_deg: 10.0
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+entities:
+- name: Ego
+  type: vehicle
+  role: ego
+  initial_position:
+    x: 1392.074267578125
+    y: 918.3715454101563
+    z: 52.618094251617585
+    heading_rad: 3.7243580908306995
+- name: New Player01
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1026.5823419156363
+    y: 702.1252175004763
+    z: 41.99001065350441
+    heading_rad: 3.6800902205841837
+- name: New Player04
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1365.3223876953125
+    y: 901.83447265625
+    z: 50.21788448196204
+    heading_rad: 3.6872406735544736
+- name: New Character01
+  type: pedestrian
+  role: relevant_object
+  initial_position:
+    x: 1307.9205322265625
+    y: 870.8705444335938
+    z: 47.26701673787289
+    heading_rad: 5.2284317004478345
+- name: New Character02
+  type: pedestrian
+  role: relevant_object
+  initial_position:
+    x: 1307.012939453125
+    y: 872.2113037109375
+    z: 47.263293050083185
+    heading_rad: 5.285604200579507
+events: []
+expected_outcomes:
+- follow_reference_path
+- detect_dynamic_vehicles
+- detect_pedestrians
+- avoid_collision
+- reach_route_end
+evaluation:
+  codes:
+  - internal.mixed_pretest_checkpoint_route
+  required_metrics:
+  - relevant_object_id
+  - object_gap
+  - relative_speed
+  - ttc
+  - ego_speed
+  - lateral_error
+  - collision
+  - route_progress
+  thresholds_status: pending
