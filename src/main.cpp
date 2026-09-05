@@ -50,7 +50,6 @@ const char* stopReasonName(StopReason reason) {
         case StopReason::RedLight: return "red_light";
         case StopReason::FlashingRed: return "flashing_red";
         case StopReason::Pedestrian: return "pedestrian";
-        case StopReason::Obstacle: return "obstacle";
         case StopReason::CrosswalkBlocked: return "crosswalk_blocked";
     }
     return "multiple";

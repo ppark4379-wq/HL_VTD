@@ -72,6 +72,7 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.behavior.followTimeGap > 0.0 &&
            config.behavior.minimumFollowDistance > 0.0 &&
            config.behavior.followGapGain > 0.0 &&
+           config.behavior.minimumObjectResponseSpeed > 0.0 &&
            config.behavior.nearbyObjectCautionSpeed > 0.0 &&
            config.behavior.nearbyObjectLateralDistance > 0.0 &&
            config.behavior.stationaryAdjacentVehicleCautionSpeed > 0.0 &&
@@ -89,17 +90,15 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.behavior.emergencyTTC > 0.0 &&
            config.behavior.emergencyBrakingDeceleration > 0.0 &&
            config.behavior.emergencyReactionTime >= 0.0 &&
+           config.behavior.emergencyMinimumHoldTime >= 0.0 &&
            config.behavior.collisionPredictionStep > 0.0 &&
            config.behavior.collisionPredictionHorizon >=
                config.behavior.collisionPredictionStep &&
            config.laneChange.obstacleTriggerMinimumDistance > 0.0 &&
            config.laneChange.obstacleTriggerMaximumDistance >
                config.laneChange.obstacleTriggerMinimumDistance &&
-           config.laneChange.stoppedLeadWaitTime > 0.0 &&
-           config.laneChange.stoppedLeadMinimumDistance > 0.0 &&
-           config.laneChange.stoppedLeadMinimumDistance <
-               config.laneChange.obstacleTriggerMinimumDistance &&
-           config.laneChange.stoppedEgoMaximumSpeed > 0.0 &&
+           config.laneChange.stoppedDynamicConfirmationTime >= 0.0 &&
+           config.laneChange.roadConnectionPrepareDistance > 0.0 &&
            config.laneChange.transitionLength > 0.0 &&
            config.laneChange.minimumTargetTTC > 0.0 &&
            config.laneChange.maximumObstacleLaneIntrusion >= 0.0 &&
@@ -165,6 +164,9 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.minimumFollowDistance) &&
         setConfigValue(values, "planning.follow_gap_gain",
                        config.behavior.followGapGain) &&
+        setSpeedConfigValue(values,
+                       "planning.minimum_object_response_speed_kph",
+                       config.behavior.minimumObjectResponseSpeed) &&
         setSpeedConfigValue(values, "planning.nearby_object_caution_kph",
                        config.behavior.nearbyObjectCautionSpeed) &&
         setConfigValue(values, "planning.nearby_object_lateral_distance",
@@ -189,6 +191,8 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.emergencyBrakingDeceleration) &&
         setConfigValue(values, "planning.emergency_reaction_time",
                        config.behavior.emergencyReactionTime) &&
+        setConfigValue(values, "planning.emergency_minimum_hold_time",
+                       config.behavior.emergencyMinimumHoldTime) &&
         setConfigValue(values, "planning.collision_prediction_horizon",
                        config.behavior.collisionPredictionHorizon) &&
         setConfigValue(values, "planning.collision_prediction_step",
@@ -213,12 +217,10 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.laneChange.obstacleTriggerMinimumDistance) &&
         setConfigValue(values, "lane_change.obstacle_trigger_maximum_distance",
                        config.laneChange.obstacleTriggerMaximumDistance) &&
-        setConfigValue(values, "lane_change.stopped_lead_wait_time",
-                       config.laneChange.stoppedLeadWaitTime) &&
-        setConfigValue(values, "lane_change.stopped_lead_minimum_distance",
-                       config.laneChange.stoppedLeadMinimumDistance) &&
-        setSpeedConfigValue(values, "lane_change.stopped_ego_maximum_speed_kph",
-                       config.laneChange.stoppedEgoMaximumSpeed) &&
+        setConfigValue(values, "lane_change.stopped_dynamic_confirmation_time",
+                       config.laneChange.stoppedDynamicConfirmationTime) &&
+        setConfigValue(values, "lane_change.road_connection_prepare_distance",
+                       config.laneChange.roadConnectionPrepareDistance) &&
         setConfigValue(values, "lane_change.transition_length",
                        config.laneChange.transitionLength) &&
         setConfigValue(values, "lane_change.obstacle_clearance",

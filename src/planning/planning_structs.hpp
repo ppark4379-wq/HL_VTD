@@ -37,9 +37,12 @@ struct PlanningBehaviorConfig {
     double minimumFollowDistance{5.0};
     // 목표 간격 오차를 선행차 속도에 더하는 ACC 비례이득 [1/s].
     double followGapGain{0.35};
+    // 법규 정지나 비상제동이 아닌 객체 대응은 이 속도 아래로
+    // 목표속도를 내리지 않는다.
+    double minimumObjectResponseSpeed{15.0 / 3.6};
     // 옆 차선 차량이 급격히 진입해도 제동 거리를 확보한다.
     double nearbyObjectCautionSpeed{5.5555555556};
-    double nearbyObjectLateralDistance{5.5};
+    double nearbyObjectLateralDistance{7.0};
     // 바로 옆 차선에 정차한 승용차급 객체는 아직 움직임이 없어도 출발·끼어들기
     // 가능성이 있으므로 짧은 범위에서만 주의속도를 적용한다. 콘·수목 등은
     // GT bounding box 치수 범위로 제외한다.
@@ -54,6 +57,9 @@ struct PlanningBehaviorConfig {
     // 따른 정지시간 v/a와 인지·작동 여유를 함께 계산한다.
     double emergencyBrakingDeceleration{4.0};
     double emergencyReactionTime{0.4};
+    // 한 프레임의 속도/자세 잡음으로 충돌 예측이 잠깐 사라져도 제동을
+    // 바로 풀지 않는다. 마지막 위험 검출 뒤 이 시간 동안 제동을 유지한다.
+    double emergencyMinimumHoldTime{0.5};
     double collisionPredictionHorizon{3.0};
     double collisionPredictionStep{0.2};
     // 미래 OBB 검사가 Ego 예측 위치를 이 경로 위에서 찾는다.
@@ -149,30 +155,32 @@ struct PlanningResult {
 
 struct StationaryObjectState {
     std::uint32_t id{};
-    double duration{};
+    double stationaryDuration{};
     double lastX{};
     double lastY{};
     bool hasPosition{};
-    // 별도 semantic type이 없어도, 한 번 실제로 움직였던 객체를 영구 정적
-    // 시설물처럼 즉시 회피하지 않기 위한 시간 이력이다.
     bool hasEverMoved{};
 };
 
 struct PlanningProcessData {
     PathPlannerData pathPlanner;
+    // pathPlanner는 checkpoint의 road corridor/구역 route_s를 보존한다.
+    // roadLanePlanner는 현재 자유 차선을 추종하는 조향용 경로다.
+    PathPlannerData roadLanePlanner;
     PlanningBehaviorConfig config;
     BehaviorState behaviorState;
     StopManagerData stopManager;
     LaneChangeData laneChange;
     LaneChangeConfig laneChangeConfig;
-    // 현재 프레임에도 같은 ID로 존재하는 객체만 유지한다. 객체가 사라지면
-    // 즉시 삭제하여 나중에 재사용된 ID에 과거 정지시간을 물려주지 않는다.
+    // 움직이던 차량이 정지하면 짧은 확인 후 정적 회피 대상으로
+    // 전환하기 위한 ID별 이력이다. 사라진 ID는 다음 프레임에 제거된다.
     std::vector<StationaryObjectState> stationaryObjects;
     PlanningFrameData frame;
     PlanningResult result;
     // 객체 위험을 한 번이라도 확인한 횡단보도. 객체가 빠져나간 뒤에도
     // Ego가 횡단보도를 완전히 통과할 때까지 clearance 속도를 적용한다.
     std::vector<int> activeCrosswalkIds;
+    double emergencyBrakeHoldRemaining{};
     double previousRouteS{};
     bool hasPreviousRouteS{};
 };

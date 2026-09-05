@@ -47,7 +47,6 @@ enum class StopReason : std::uint32_t {
     RedLight = 1U << 0,
     FlashingRed = 1U << 1,
     Pedestrian = 1U << 2,
-    Obstacle = 1U << 3,
     CrosswalkBlocked = 1U << 4,
 };
 

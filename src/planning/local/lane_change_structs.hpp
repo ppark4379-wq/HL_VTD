@@ -8,11 +8,12 @@
 #include <vector>
 
 struct LaneChangeConfig {
-    double obstacleTriggerMinimumDistance{20.0};
-    double obstacleTriggerMaximumDistance{60.0};
-    double stoppedLeadWaitTime{2.0};
-    double stoppedLeadMinimumDistance{5.0};
-    double stoppedEgoMaximumSpeed{2.0 / 3.6};
+    double obstacleTriggerMinimumDistance{5.0};
+    double obstacleTriggerMaximumDistance{70.0};
+    double stoppedDynamicConfirmationTime{0.75};
+    // 현재 차선이 다음 road로 연결되지 않을 때만 도로 끝에서
+    // 이 거리 이내에 들어오면 연결 차선으로 정렬한다.
+    double roadConnectionPrepareDistance{45.0};
     double transitionLength{18.0};
     double obstacleClearance{10.0};
     double prepareTime{0.5};
@@ -20,8 +21,8 @@ struct LaneChangeConfig {
     double minimumTargetAheadGap{15.0};
     double minimumTargetBehindGap{12.0};
     double minimumTargetTTC{3.0};
-    double maximumLaneChangeSpeed{6.0};
-    double returnWaitingSpeed{2.0};
+    double maximumLaneChangeSpeed{15.0 / 3.6};
+    double returnWaitingSpeed{15.0 / 3.6};
     double maximumObstacleLaneIntrusion{1.25};
     double lateralOffsetStep{0.2};
     double maximumLateralOffset{0.8};
@@ -44,6 +45,11 @@ struct LaneChangeData {
     LaneKey reconnectLane;
     bool reconnectLaneValid{};
     std::size_t reconnectGlobalIndex{};
+    // true면 현재 회피 차선이 다음 전역경로 road와 종방향으로
+    // 실제 연결됨을 확인한 것이다. false는 전역경로가 현재 road에서 끝날 때만 쓴다.
+    bool awaitExactReconnect{};
+    // 장애물 회피가 아니라 다음 road 연결 차선으로 정렬하는 기동.
+    bool roadConnectionManeuver{};
     std::uint8_t turnSignal{};
     std::uint8_t outwardTurnSignal{};
     std::uint8_t returnTurnSignal{};

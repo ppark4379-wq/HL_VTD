@@ -71,59 +71,52 @@ void addStopRequest(StopManagerData& manager, StopReason reason,
     manager.requests.push_back({reason, true, routeS, holdTime, sourceId});
 }
 
-std::vector<int> updatePersistentStoppedObjects(
+// 처음부터 멈춰 있는 물체는 고정 장애물로 보고 즉시 회피한다.
+// 반면 한 번이라도 움직이던 차량은 끼어들기/급정거에 대비해 먼저
+// 추종·긴급제동으로 반응하고, 짧은 시간 계속 정지했을 때만 회피
+// 대상으로 전환한다.
+std::vector<int> updateConfirmedStationaryObjects(
     PlanningProcessData& data, const WorldState& world, double dt) {
     std::vector<StationaryObjectState> current;
-    std::vector<int> eligible;
+    std::vector<int> confirmed;
     current.reserve(world.objects.size());
+
     for (const auto& object : world.objects) {
-        double previousDuration = 0.0;
-        bool hasEverMoved = false;
-        bool hasPreviousPosition = false;
-        double previousX = 0.0;
-        double previousY = 0.0;
         const auto previous = std::find_if(
             data.stationaryObjects.begin(), data.stationaryObjects.end(),
             [&](const StationaryObjectState& state) {
                 return state.id == object.raw.id;
             });
-        if (previous != data.stationaryObjects.end()) {
-            previousDuration = previous->duration;
-            hasEverMoved = previous->hasEverMoved;
-            hasPreviousPosition = previous->hasPosition;
-            previousX = previous->lastX;
-            previousY = previous->lastY;
-        }
+        const bool wasTracked = previous != data.stationaryObjects.end();
         const double elapsed = std::max(0.0, dt);
         const double displacementSpeed =
-            hasPreviousPosition && elapsed > 1e-3
-                ? std::hypot(object.raw.x - previousX,
-                             object.raw.y - previousY) / elapsed
+            wasTracked && previous->hasPosition && elapsed > 1e-3
+                ? std::hypot(object.raw.x - previous->lastX,
+                             object.raw.y - previous->lastY) / elapsed
                 : 0.0;
         const bool moving = std::abs(object.raw.speed) >= 0.5 ||
                             displacementSpeed >= 0.5;
-        hasEverMoved = hasEverMoved || moving;
         const bool stationary = std::abs(object.raw.speed) < 0.3 &&
-                                displacementSpeed < 0.3;
-        const double duration = stationary
-            ? previousDuration + elapsed
+                                (!wasTracked || displacementSpeed < 0.3);
+        const bool hasEverMoved = moving ||
+            (wasTracked && previous->hasEverMoved);
+        const double stationaryDuration = stationary
+            ? (wasTracked ? previous->stationaryDuration : 0.0) + elapsed
             : 0.0;
-        current.push_back({object.raw.id, duration,
+
+        current.push_back({object.raw.id, stationaryDuration,
                            static_cast<double>(object.raw.x),
                            static_cast<double>(object.raw.y), true,
                            hasEverMoved});
-        // 한 번 움직였던 객체는 일시 정차 차량일 가능성이 높으므로 더 긴
-        // 정지 이력이 있어야 blocked-lane 회피 대상으로 승격한다.
-        const double confirmationTime =
-            data.laneChangeConfig.stoppedLeadWaitTime *
-            (hasEverMoved ? 2.5 : 1.0);
         if (stationary &&
-            duration >= confirmationTime) {
-            eligible.push_back(static_cast<int>(object.raw.id));
+            (!hasEverMoved || stationaryDuration >=
+                                  data.laneChangeConfig
+                                      .stoppedDynamicConfirmationTime)) {
+            confirmed.push_back(static_cast<int>(object.raw.id));
         }
     }
     data.stationaryObjects = std::move(current);
-    return eligible;
+    return confirmed;
 }
 
 bool crosswalkHasRiskObject(const Crosswalk& crosswalk,
@@ -271,13 +264,35 @@ bool crossingObjectRequiresEmergency(
 // 위험해질 수 있다. 반응시간 동안 진행할 거리까지 빼고 필요한 감속도를
 // 계산해, 가용 비상제동의 75%를 넘으면 즉시 최종 safety brake를 요청한다.
 bool leadObjectRequiresEmergency(const WorldState& world,
+                                 const LocalPathData& selectedPath,
                                  const PlanningBehaviorConfig& config,
-                                 int ignoredObjectId,
                                  int& riskObjectId) {
+    if (!selectedPath.valid || selectedPath.points.empty()) return false;
     const double egoSpeed = std::max(0.0, world.egoSpeed);
     for (const auto& object : world.objects) {
-        if (!object.isAhead || !object.isOnEgoPath ||
-            static_cast<int>(object.raw.id) == ignoredObjectId) {
+        if (std::abs(object.raw.speed) < 0.3) {
+            continue;
+        }
+
+        const Waypoint* nearest = nullptr;
+        double nearestDistance = std::numeric_limits<double>::infinity();
+        for (const Waypoint& point : selectedPath.points) {
+            const double distance = std::hypot(
+                point.x - static_cast<double>(object.raw.x),
+                point.y - static_cast<double>(object.raw.y));
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearest = &point;
+            }
+        }
+        const double pathHalfWidth =
+            0.5 * std::max(3.0, world.egoLaneWidth) +
+            0.5 * std::max(0.0F, object.raw.width);
+        const double relativeS = nearest != nullptr
+            ? nearest->s - world.egoPathS
+            : -std::numeric_limits<double>::infinity();
+        if (nearest == nullptr || relativeS <= 0.0 ||
+            nearestDistance > pathHalfWidth) {
             continue;
         }
         const double leadSpeed = std::max(
@@ -288,7 +303,7 @@ bool leadObjectRequiresEmergency(const WorldState& world,
             egoSpeed * egoSpeed - leadSpeed * leadSpeed;
         if (speedEnergy <= 0.0) continue;
         const double usableDistance =
-            object.relativeS - config.minimumFollowDistance -
+            relativeS - config.minimumFollowDistance -
             egoSpeed * config.emergencyReactionTime;
         if (usableDistance <= 0.0 ||
             speedEnergy / (2.0 * usableDistance) >=
@@ -411,29 +426,6 @@ void updateStopRequests(PlanningProcessData& data,
         }
     }
 
-    for (const auto& object : world.objects) {
-        if (object.isAhead && object.isOnEgoPath &&
-            std::abs(object.raw.speed) < 0.3 && object.relativeS < 30.0) {
-            const double stopRouteS = std::max(
-                world.frontBumperPathS,
-                object.pathS - data.config.minimumFollowDistance);
-            addStopRequest(data.stopManager, StopReason::Obstacle,
-                           stopRouteS,
-                           static_cast<int>(object.raw.id));
-            std::ostringstream detail;
-            detail << "object=" << object.raw.id
-                   << " relative_s=" << object.relativeS
-                   << " object_path_s=" << object.pathS
-                   << " stop_route_s=" << stopRouteS
-                   << " front_bumper_path_s=" << world.frontBumperPathS
-                   << " minimum_follow_distance="
-                   << data.config.minimumFollowDistance
-                   << " stop_safety_margin=" << data.config.stopSafetyMargin;
-            traceDecision(trace, "obstacle_stop", "stop_request_created",
-                          detail.str());
-        }
-    }
-
     // 정지 목표가 횡단보도 안이면, 아직 진입하지 않은 경우에 한해 앞범퍼
     // 목표를 횡단보도 입구로 당긴다. 이미 진입했다면 안전 정지를 우선한다.
     for (auto& request : data.stopManager.requests) {
@@ -467,7 +459,34 @@ bool evaluateLaneChangeCandidate(PathSafetyResult& safety,
         remainingLength / predictionWorld.egoSpeed +
         config.collisionPredictionStep;
     checkCurrentCollisions(safety, world.egoObb, world.objects);
-    checkPredictedCollisions(safety, predictionWorld, candidate,
+    if (safety.collision) return false;
+
+    // 등속 예측을 수십 초까지 늘리면 움직이는 차량이 먼 미래에도 같은
+    // 속도·방향을 유지한다고 가정해 안전한 회피를 과도하게 막는다. 동적
+    // 객체는 설정된 근거리 horizon만, 실제로 경로를 막는 정적 객체는 남은
+    // 기동 전체를 검사한다.
+    WorldState dynamicWorld = predictionWorld;
+    dynamicWorld.objects.erase(
+        std::remove_if(dynamicWorld.objects.begin(),
+                       dynamicWorld.objects.end(),
+                       [](const WorldObjectState& object) {
+                           return std::abs(object.raw.speed) < 0.3;
+                       }),
+        dynamicWorld.objects.end());
+    checkPredictedCollisions(safety, dynamicWorld, candidate,
+                             config.collisionPredictionHorizon,
+                             config.collisionPredictionStep);
+    if (safety.predictedCollision) return false;
+
+    WorldState staticWorld = predictionWorld;
+    staticWorld.objects.erase(
+        std::remove_if(staticWorld.objects.begin(),
+                       staticWorld.objects.end(),
+                       [](const WorldObjectState& object) {
+                           return std::abs(object.raw.speed) >= 0.3;
+                       }),
+        staticWorld.objects.end());
+    checkPredictedCollisions(safety, staticWorld, candidate,
                              std::max(config.collisionPredictionHorizon,
                                       fullManeuverHorizon),
                              config.collisionPredictionStep);
@@ -483,6 +502,15 @@ bool crossedFinishLine(PlanningProcessData& data,
         crossed = data.hasPreviousRouteS &&
                   data.previousRouteS < zones.finish.routeS &&
                   world.egoPathS >= zones.finish.routeS;
+    } else if (world.egoPathValid &&
+               !data.pathPlanner.waypoints.empty()) {
+        // 도로 안 자유 차선 주행에서는 최종 checkpoint와 같은 종방향
+        // 위치에 도착해도 옆 차선 중심이라 좌표 거리가 차선 폭만큼
+        // 남는다. 마지막 route_s에 도달했으면 목적지를 통과한 것으로
+        // 판정해, 끝점을 지나친 뒤 recovery 정지에 빠지지 않게 한다.
+        crossed = world.egoPathS >=
+            data.pathPlanner.waypoints.back().s -
+                data.pathPlanner.config.goalTolerance;
     }
     if (world.egoPathValid) {
         data.previousRouteS = world.egoPathS;
@@ -506,42 +534,24 @@ void resetPlanningFrame(PlanningProcessData& data) {
     data.frame.pathSafety.riskObjectId = -1;
 }
 
-}  // namespace
-
-bool initializePlanning(PlanningProcessData& data,
-                        const PathPlannerConfig& plannerConfig,
-                        const PlanningBehaviorConfig& behaviorConfig,
-                        const LaneChangeConfig& laneChangeConfig,
-                        const std::string& referencePathCsv) {
-    data = {};
-    data.pathPlanner.config = plannerConfig;
-    data.config = behaviorConfig;
-    data.laneChangeConfig = laneChangeConfig;
-    return loadWaypointsCsv(data.pathPlanner.waypoints, referencePathCsv);
-}
-
-void runPlanningProcess(PlanningProcessData& data,
-                        const GtFrame& gt,
-                        const WorldState& world,
-                        const PathGeneratorData& map,
-                        double dt,
-                        DecisionTraceData* trace) {
-    resetPlanningFrame(data);
-
-    PathPlan tracking = runPurePursuit(data.pathPlanner, gt, world.egoSpeed);
-    data.frame.constraints.mapMatchValid = world.inputValid;
+// 실제로 추종할 경로가 확정된 뒤 그 경로의 곡률속도를 기본 제한으로 삼는다.
+// 회피 중 Ego는 원래 전역경로에서 수 m 떨어지므로, 전역경로의 route-recovery
+// 속도를 여기 사용하면 안전한 목표 차선에 안착한 뒤에도 약 7 km/h로 묶인다.
+bool updateSpeedConstraints(PlanningProcessData& data,
+                            const WorldState& world,
+                            const StaticZoneData& zones,
+                            double selectedPathSpeed,
+                            bool& schoolZoneActive) {
     data.frame.constraints.speedLimit = findZoneSpeedLimit(
-        map.staticZones, {world.ego.x, world.ego.y},
+        zones, {world.ego.x, world.ego.y},
         world.egoPathValid ? world.egoPathS : -1.0,
-        tracking.targetSpeed);
-    const bool schoolZoneActive = isSchoolZoneActive(
-        map.staticZones, {world.ego.x, world.ego.y},
+        selectedPathSpeed);
+    schoolZoneActive = isSchoolZoneActive(
+        zones, {world.ego.x, world.ego.y},
         world.egoPathValid ? world.egoPathS : -1.0);
-    // 제한구역 경계에서 갑자기 25 km/h를 명령하면 실제 차량은 구역 안에
-    // 들어간 뒤에야 감속한다. 각 보호구역 시작점까지의 남은 거리로 역산한
-    // 속도 프로파일을 미리 적용해, 경계에 도달할 때 목표속도 이하가 되게 한다.
+
     if (world.egoPathValid) {
-        for (const auto& zone : map.staticZones.speedZones) {
+        for (const auto& zone : zones.speedZones) {
             if (!zone.schoolZone || !zone.hasRouteRange ||
                 zone.routeSEnd < world.frontBumperPathS) {
                 continue;
@@ -563,11 +573,8 @@ void runPlanningProcess(PlanningProcessData& data,
             data.pathPlanner.config.schoolZoneSpeed);
     }
 
-    // 위험 객체가 있는 횡단보도에만 접근 감속을 적용한다. 처음부터 빈
-    // 횡단보도는 원래 경로 목표속도로 통과한다. 객체가 완전히 빠져나간 뒤에는
-    // 별도의 clearance 속도로 횡단보도를 빠져나가고 원래 속도로 복귀한다.
     bool crosswalkControlActive = false;
-    for (const auto& crosswalk : map.staticZones.crosswalks) {
+    for (const auto& crosswalk : zones.crosswalks) {
         auto active = std::find(data.activeCrosswalkIds.begin(),
                                 data.activeCrosswalkIds.end(), crosswalk.id);
         if (crosswalk.exitRouteS < world.egoPathS) {
@@ -583,10 +590,14 @@ void runPlanningProcess(PlanningProcessData& data,
         if (risk && active == data.activeCrosswalkIds.end()) {
             data.activeCrosswalkIds.push_back(crosswalk.id);
         }
-        if (!risk && !nearby && active == data.activeCrosswalkIds.end()) continue;
+        if (!risk && !nearby && active == data.activeCrosswalkIds.end()) {
+            continue;
+        }
         const double distance = crosswalk.entryRouteS - world.frontBumperPathS;
         if ((risk || nearby) &&
-            distance > data.config.crosswalkApproachDistance) continue;
+            distance > data.config.crosswalkApproachDistance) {
+            continue;
+        }
         const double limit = (risk || nearby)
                                  ? data.config.crosswalkApproachSpeed
                                  : data.config.crosswalkClearanceSpeed;
@@ -596,15 +607,113 @@ void runPlanningProcess(PlanningProcessData& data,
                 ? std::min(data.frame.constraints.speedLimit, limit)
                 : limit;
     }
+    return crosswalkControlActive;
+}
 
-    const std::vector<int> persistentStoppedObjectIds =
-        updatePersistentStoppedObjects(data, world, dt);
+}  // namespace
+
+bool initializePlanning(PlanningProcessData& data,
+                        const PathPlannerConfig& plannerConfig,
+                        const PlanningBehaviorConfig& behaviorConfig,
+                        const LaneChangeConfig& laneChangeConfig,
+                        const std::string& referencePathCsv) {
+    data = {};
+    data.pathPlanner.config = plannerConfig;
+    data.roadLanePlanner.config = plannerConfig;
+    data.config = behaviorConfig;
+    data.laneChangeConfig = laneChangeConfig;
+    return loadWaypointsCsv(data.pathPlanner.waypoints, referencePathCsv);
+}
+
+void runPlanningProcess(PlanningProcessData& data,
+                        const GtFrame& gt,
+                        const WorldState& world,
+                        const PathGeneratorData& map,
+                        double dt,
+                        DecisionTraceData* trace) {
+    resetPlanningFrame(data);
+
+    const PathPlan globalTracking =
+        runPurePursuit(data.pathPlanner, gt, world.egoSpeed);
+    const std::size_t nearestGlobalIndex = globalTracking.nearestIndex;
+    const bool roadLanePathValid = buildRoadIdTrackingPath(
+        data.roadLanePlanner, data.pathPlanner.config, world, map,
+        data.pathPlanner, nearestGlobalIndex, data.config.localPathHorizon,
+        trace);
+    PathPlan tracking = roadLanePathValid
+        ? runPurePursuit(data.roadLanePlanner, gt, world.egoSpeed)
+        : globalTracking;
+    if (roadLanePathValid && tracking.goalReached) {
+        // 현재 차선 지역경로의 끝은 도로 연결/재계획 지점이다.
+        // 전역경로의 최종 목적지가 아니므로 정지하지 않는다.
+        tracking.goalReached = false;
+        tracking.targetSpeed = chooseTargetSpeed(
+            tracking.maxCurvature, data.pathPlanner.config);
+    }
+    data.frame.constraints.mapMatchValid = world.inputValid;
+    bool schoolZoneActive = false;
+    bool crosswalkControlActive = false;
+    const std::vector<int> confirmedStationaryObjectIds =
+        updateConfirmedStationaryObjects(data, world, dt);
+
+    // 신호/횡단보도 정지 여부를 먼저 판정한다. 빨간불 전에 만든
+    // 회피 경로를 정지한 동안 보관했다가 녹색불에서 중간부터
+    // 추종하면 정지선에서 바로 크게 조향한다.
+    updateStopRequests(data, world, map.staticZones, dt, trace);
+
+    // 보관한 회피 경로가 실행 중 새로 관측된 정적 장애물에 의해
+    // 막히면, 충돌 직전까지 예전 경로를 고집하지 않고 현재 위치에서
+    // 다시 lattice를 탐색한다. 동적 객체는 경로를 즉시 바꾸면 위험하므로
+    // 기존 비상제동/간격 로직에 맡긴다. road 연결 정렬도 중간에
+    // 취소하면 다음 road를 놓칠 수 있으므로 장애물 회피에만 적용한다.
+    if (data.laneChange.phase == LaneChangePhase::Execute &&
+        !data.laneChange.roadConnectionManeuver) {
+        PathSafetyResult activeSafety;
+        const bool activePathSafe = evaluateLaneChangeCandidate(
+            activeSafety, data.laneChange, world, data.config,
+            data.laneChangeConfig.maximumLaneChangeSpeed);
+        const bool staticRisk = activeSafety.riskObjectId >= 0 &&
+            std::any_of(world.objects.begin(), world.objects.end(),
+                        [&](const WorldObjectState& object) {
+                            return static_cast<int>(object.raw.id) ==
+                                       activeSafety.riskObjectId &&
+                                   std::abs(object.raw.speed) < 0.3;
+                        });
+        constexpr double kMinimumStaticReplanTtc = 1.8;
+        if (!activePathSafe && !activeSafety.collision && staticRisk &&
+            activeSafety.predictedCollision &&
+            activeSafety.predictedCollisionTTC >= kMinimumStaticReplanTtc &&
+            world.egoLaneCenterDistance <= 0.75) {
+            std::ostringstream detail;
+            detail << "risk_object=" << activeSafety.riskObjectId
+                   << " predicted_ttc="
+                   << activeSafety.predictedCollisionTTC;
+            traceDecision(trace, "lane_change", "active_path_replanned",
+                          detail.str());
+            data.laneChange = {};
+        }
+    }
+    double pendingBlockerDistance = -1.0;
+    // 먼 신호 정지 요청보다 현재 도로의 장애물 회피를 먼저 계획한다.
+    // 아래에서 경로 종점이 정지선을 침범할 때만 실행을 막는다.
     tryPrepareObstacleLaneChange(
         data.laneChange, data.laneChangeConfig, data.config, world, map,
-        data.pathPlanner, tracking.nearestIndex,
-        &persistentStoppedObjectIds, trace);
-
-    updateStopRequests(data, world, map.staticZones, dt, trace);
+        data.pathPlanner, nearestGlobalIndex, &pendingBlockerDistance,
+        &confirmedStationaryObjectIds, trace);
+    // 장애물 회피 후보가 있으면 road 연결 정렬은 뒤로 미룬다.
+    // 평소에는 현재 차선을 유지하고 도로 마지막 구간에서만
+    // 다음 road로 연결되는 차선으로 옮긴다.
+    if (data.laneChange.phase == LaneChangePhase::None &&
+        pendingBlockerDistance < 0.0) {
+        tryPrepareRoadConnectionLaneChange(
+            data.laneChange, data.laneChangeConfig, data.config, world,
+            map, data.pathPlanner, nearestGlobalIndex, trace);
+    }
+    const bool laneChangeExecutionBlocked =
+        data.laneChange.phase == LaneChangePhase::None
+            ? hasLaneChangeExecutionBlocker(data.stopManager)
+            : hasLaneChangeExecutionBlocker(
+                  data.stopManager, data.laneChange.rejoinRouteS);
 
     PathSafetyResult maneuverSpeedSafety;
     const bool candidateSafeAtManeuverSpeed =
@@ -612,60 +721,61 @@ void runPlanningProcess(PlanningProcessData& data,
         evaluateLaneChangeCandidate(
             maneuverSpeedSafety, data.laneChange, world, data.config,
             data.laneChangeConfig.maximumLaneChangeSpeed);
+    if (data.laneChange.phase != LaneChangePhase::None && trace != nullptr &&
+        trace->enabled) {
+        std::ostringstream detail;
+        detail << "phase=" << static_cast<int>(data.laneChange.phase)
+               << " route_mode=" << static_cast<int>(data.laneChange.routeMode)
+               << " safe=" << candidateSafeAtManeuverSpeed
+               << " collision=" << maneuverSpeedSafety.collision
+               << " predicted_collision=" << maneuverSpeedSafety.predictedCollision
+               << " predicted_ttc=" << maneuverSpeedSafety.predictedCollisionTTC
+               << " risk_object=" << maneuverSpeedSafety.riskObjectId;
+        traceDecision(trace, "lane_change", "maneuver_speed_safety_checked",
+                      detail.str());
+    }
 
-    // 빠른 복귀(6 m/s)는 아직 충돌하지만 현재 속도에서
-    // 2 m/s로 감속해 복귀하면 앞차가 먼저 빠져나가 안전할 수 있다.
-    // 두 속도를 별도로 검증해, 느린 경로마저 충돌할 때만
-    // 고정 대기 지점에 정지시킨다.
-    PathSafetyResult waitingSpeedSafety;
-    const bool checkWaitingSpeed =
-        data.laneChange.phase == LaneChangePhase::Execute &&
-        data.laneChange.routeMode == LaneChangeRouteMode::ReturnToSource &&
-        !candidateSafeAtManeuverSpeed;
-    const bool candidateSafeAtWaitingSpeed =
-        candidateSafeAtManeuverSpeed ||
-        (checkWaitingSpeed &&
-         evaluateLaneChangeCandidate(
-             waitingSpeedSafety, data.laneChange, world, data.config,
-             data.laneChangeConfig.returnWaitingSpeed));
     const bool maneuverObstacleStillConfirmed =
         data.laneChange.phase == LaneChangePhase::None ||
-        std::find(persistentStoppedObjectIds.begin(),
-                  persistentStoppedObjectIds.end(),
-                  data.laneChange.obstacleId) !=
-            persistentStoppedObjectIds.end();
+        data.laneChange.roadConnectionManeuver ||
+        std::any_of(world.objects.begin(), world.objects.end(),
+                    [&](const WorldObjectState& object) {
+                        return static_cast<int>(object.raw.id) ==
+                                   data.laneChange.obstacleId &&
+                               std::abs(object.raw.speed) < 0.3;
+                    });
     advanceLaneChangePhase(data.laneChange, data.laneChangeConfig, world, dt,
-                           hasLaneChangeExecutionBlocker(
-                               data.stopManager,
-                               candidateSafeAtManeuverSpeed),
+                           laneChangeExecutionBlocked,
                            maneuverObstacleStillConfirmed,
                            candidateSafeAtManeuverSpeed,
                            trace);
 
+    // 기동에 진입한 뒤에는 정적 물체의 종방향 판정을 전역경로
+    // isOnEgoPath로 다시 하지 않는다. 복귀 구간이 멀리서 잠시 막혀도
+    // 현재 회피 차선은 안전할 수 있다. 실제 선택 경로의 정적 충돌은
+    // 아래 OBB 예측이 계속 검사한다.
     const bool safelyAvoidingObstacle =
         data.laneChange.phase != LaneChangePhase::None &&
-        candidateSafeAtWaitingSpeed;
+        !data.laneChange.roadConnectionManeuver;
     selectStopDecision(data.frame.stop, data.stopManager,
-                       world.frontBumperPathS, safelyAvoidingObstacle);
+                       world.frontBumperPathS);
 
     if (data.laneChange.phase == LaneChangePhase::Execute) {
         tracking = trackLaneChangePath(
-            data.laneChange, data.pathPlanner.config, gt,
-            data.laneChangeConfig.maximumLaneChangeSpeed, world.egoSpeed);
+            data.laneChange, data.pathPlanner.config, gt, world.egoSpeed);
         makeLaneChangeLocalPath(data.frame.localPath, data.laneChange);
     } else {
-        if (data.laneChange.phase == LaneChangePhase::Settle &&
-            data.laneChange.routeMode ==
-                LaneChangeRouteMode::KeepTargetLane &&
-            data.laneChange.reconnectLaneValid) {
-            data.pathPlanner.nearestIndex =
-                data.laneChange.reconnectGlobalIndex;
-            tracking = runPurePursuit(data.pathPlanner, gt, world.egoSpeed);
-        }
-        generateLocalPath(data.frame.localPath, data.pathPlanner,
+        const PathPlannerData& selectedPlanner = roadLanePathValid
+            ? data.roadLanePlanner : data.pathPlanner;
+        generateLocalPath(data.frame.localPath, selectedPlanner,
                           tracking.nearestIndex,
                           data.config.localPathHorizon);
     }
+    // 전역경로 또는 회피 지역경로 중 이번 프레임에 실제 선택된 경로를 기준으로
+    // 곡률/구역 제한속도를 계산한다.
+    crosswalkControlActive = updateSpeedConstraints(
+        data, world, map.staticZones, tracking.targetSpeed,
+        schoolZoneActive);
     if (!world.inputValid || world.respawnDetected) {
         data.behaviorState.health = SystemHealth::Recovery;
     }
@@ -680,25 +790,45 @@ void runPlanningProcess(PlanningProcessData& data,
     data.behaviorState.laneChange = data.laneChange.phase;
     data.frame.behavior.laneChange = data.laneChange.phase;
     data.frame.behavior.turnSignal = data.laneChange.turnSignal;
-    if (data.laneChange.phase == LaneChangePhase::Execute) {
+
+    // 확인된 정지 장애물이 있는데도 아직 안전한 차선변경 후보를 못 찾았으면
+    // (신호 대기, 도로표시 제약, 옆 차선 간격 부족 등으로 이번 프레임엔 회피가
+    // 안 되는 경우) 일반 Follow 감속만으로는 장애물에 도달했을 때 옆으로
+    // 옮길 거리(전환거리+통과여유)가 남아있는다는 보장이 없다. 회피가 실제로
+    // 가능해지는 순간 곧바로 완주할 수 있도록, 장애물까지 그 거리가 남을
+    // 때 회피 기동 속도(maximumLaneChangeSpeed)에 도달하게 미리 감속한다.
+    if (data.laneChange.phase == LaneChangePhase::None &&
+        pendingBlockerDistance >= 0.0) {
+        const double reserveDistance = data.laneChangeConfig.transitionLength +
+                                       data.laneChangeConfig.obstacleClearance;
+        const double distanceToSlow =
+            std::max(0.0, pendingBlockerDistance - reserveDistance);
+        const double maneuverSpeed = data.laneChangeConfig.maximumLaneChangeSpeed;
+        const double approachCap = std::sqrt(
+            maneuverSpeed * maneuverSpeed +
+            2.0 * data.config.comfortableDeceleration * distanceToSlow);
+        data.frame.behavior.targetSpeed =
+            std::min(data.frame.behavior.targetSpeed, approachCap);
+    }
+
+    const bool lateralShiftActive =
+        data.laneChange.phase == LaneChangePhase::Prepare ||
+        data.laneChange.phase == LaneChangePhase::Settle ||
+        (data.laneChange.phase == LaneChangePhase::Execute &&
+         (data.laneChange.routeMode == LaneChangeRouteMode::ReturnToSource ||
+          !world.egoPathValid ||
+          world.egoPathS < data.laneChange.startRouteS +
+                                   data.laneChangeConfig.transitionLength));
+    if (lateralShiftActive) {
         data.frame.behavior.targetSpeed = std::min(
             data.frame.behavior.targetSpeed,
             data.laneChangeConfig.maximumLaneChangeSpeed);
+    }
+    if (data.laneChange.phase == LaneChangePhase::Execute) {
         if (data.laneChange.waitingForReturn) {
             data.frame.behavior.targetSpeed = std::min(
                 data.frame.behavior.targetSpeed,
                 data.laneChangeConfig.returnWaitingSpeed);
-            if (!candidateSafeAtWaitingSpeed) {
-                const double distanceToWaitingPoint = std::max(
-                    0.0, data.laneChange.returnStartRouteS -
-                             world.frontBumperPathS -
-                             data.config.stopSafetyMargin);
-                const double waitingPointSpeed = std::sqrt(
-                    2.0 * data.config.comfortableDeceleration *
-                    distanceToWaitingPoint);
-                data.frame.behavior.targetSpeed = std::min(
-                    data.frame.behavior.targetSpeed, waitingPointSpeed);
-            }
         }
     }
 
@@ -712,6 +842,27 @@ void runPlanningProcess(PlanningProcessData& data,
                          ? data.laneChange.obstacleId
                          : -1);
     checkPredictedCollisions(data.frame.pathSafety, world,
+                             data.frame.localPath,
+                             data.config.collisionPredictionHorizon,
+                             data.config.collisionPredictionStep);
+    // 비상제동은 급정거·끼어들기 같은 동적 위험과 현재 실제
+    // 충돌에만 적용한다. 앞에 멈춰 있는 정적 장애물의 미래
+    // 충돌은 속도 0 명령으로 해결할 대상이 아니라 차선회피 대상이다.
+    WorldState dynamicEmergencyWorld = world;
+    dynamicEmergencyWorld.objects.erase(
+        std::remove_if(dynamicEmergencyWorld.objects.begin(),
+                       dynamicEmergencyWorld.objects.end(),
+                       [](const WorldObjectState& object) {
+                           return std::abs(object.raw.speed) < 0.3;
+                       }),
+        dynamicEmergencyWorld.objects.end());
+    PathSafetyResult dynamicEmergencySafety;
+    resetPathSafety(dynamicEmergencySafety);
+    checkCurrentCollisions(dynamicEmergencySafety, world.egoObb,
+                           dynamicEmergencyWorld.objects);
+    updateMinimumTTC(dynamicEmergencySafety,
+                     dynamicEmergencyWorld.objects, false);
+    checkPredictedCollisions(dynamicEmergencySafety, dynamicEmergencyWorld,
                              data.frame.localPath,
                              data.config.collisionPredictionHorizon,
                              data.config.collisionPredictionStep);
@@ -729,13 +880,24 @@ void runPlanningProcess(PlanningProcessData& data,
     const bool crossingEmergency = crossingObjectRequiresEmergency(
         world, data.pathPlanner.waypoints, data.config,
         physicalRiskObjectId);
+    // 급제동 선행차는 차선변경 중에도 검사하되, 원래 전역경로의
+    // isOnEgoPath가 아니라 이번 프레임에 실제 추종하는 지역경로를 쓴다.
+    // 따라서 이미 옆으로 피한 정적 장애물은 비상제동을 만들지 않는다.
     const bool leadEmergency = leadObjectRequiresEmergency(
-        world, data.config,
-        safelyAvoidingObstacle ? data.laneChange.obstacleId : -1,
-        physicalRiskObjectId);
-    const bool emergency = requiresEmergencyBrake(
-        data.frame.pathSafety, speedAwareEmergencyTTC) ||
+        world, data.frame.localPath, data.config, physicalRiskObjectId);
+    const bool rawEmergency = data.frame.pathSafety.collision ||
+        requiresEmergencyBrake(
+            dynamicEmergencySafety, speedAwareEmergencyTTC) ||
         crossingEmergency || leadEmergency;
+    if (rawEmergency) {
+        data.emergencyBrakeHoldRemaining =
+            data.config.emergencyMinimumHoldTime;
+    } else {
+        data.emergencyBrakeHoldRemaining = std::max(
+            0.0, data.emergencyBrakeHoldRemaining - std::max(0.0, dt));
+    }
+    const bool emergency = rawEmergency ||
+        data.emergencyBrakeHoldRemaining > 0.0;
     if (trace != nullptr && trace->enabled) {
         std::ostringstream detail;
         detail << "ego_road=" << world.egoRoadId
@@ -751,8 +913,6 @@ void runPlanningProcess(PlanningProcessData& data,
                << " target_lane=" << data.laneChange.targetLaneId
                << " maneuver_path_safe="
                << candidateSafeAtManeuverSpeed
-               << " waiting_speed_path_safe="
-               << candidateSafeAtWaitingSpeed
                << " stop_valid=" << data.frame.stop.valid
                << " stop_distance=" << data.frame.stop.distanceToStop
                << " min_ttc=" << data.frame.pathSafety.minimumTTC
@@ -763,6 +923,9 @@ void runPlanningProcess(PlanningProcessData& data,
                << data.frame.pathSafety.predictedCollisionTTC
                << " risk_object=" << data.frame.pathSafety.riskObjectId
                << " emergency=" << emergency
+               << " raw_emergency=" << rawEmergency
+               << " emergency_hold_remaining="
+               << data.emergencyBrakeHoldRemaining
                << " emergency_ttc_threshold=" << speedAwareEmergencyTTC
                << " physical_risk_object=" << physicalRiskObjectId
                << " target_speed=" << data.frame.behavior.targetSpeed;
@@ -773,7 +936,7 @@ void runPlanningProcess(PlanningProcessData& data,
 
     tracking.targetSpeed = data.frame.behavior.targetSpeed;
     tracking.goalReached = crossedFinishLine(
-        data, world, map.staticZones, tracking.goalReached);
+        data, world, map.staticZones, globalTracking.goalReached);
     data.pathPlanner.latestPlan = tracking;
 
     data.result.valid = tracking.valid && world.inputValid;

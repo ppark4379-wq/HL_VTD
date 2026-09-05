@@ -21,6 +21,7 @@ constexpr double kPredictionAheadRange = 60.0;
 constexpr double kPredictionBehindRange = -5.0;
 constexpr double kPredictionLateralRange = 5.0;
 constexpr double kOncomingLateralRange = 2.0;
+constexpr double kOncomingClosestApproachMargin = 0.5;
 
 // 회랑 밖이라도 물리적으로 가까우면 무조건 검사하는 반경.
 // 교차로에서 측면 도로로 접근하는 차량은 전역경로 횡거리가 매우 크므로
@@ -80,6 +81,45 @@ bool insideRouteCorridor(const WorldObjectState& object, double lateralRange) {
            std::abs(object.relativeD) <= lateralRange;
 }
 
+// 맞은편 차선 차량을 전부 직선 등속 예측에 넣으면 곡선에서 가짜 충돌이
+// 생긴다. 다만 상대속도 기준 최근접 거리가 두 차폭보다 작다면 단순 맞은편
+// 통행이 아니라 실제로 Ego 쪽으로 수렴하는 상황이다. 이 경우에는 넓은
+// 회랑 밖이어도 아래 OBB 미래 검사가 최종 판단하도록 후보에 포함한다.
+bool oncomingTrajectoryConverges(const WorldObjectState& object,
+                                 const WorldState& world,
+                                 double egoWidth,
+                                 double horizon) {
+    const double relativeX =
+        static_cast<double>(object.raw.x) - static_cast<double>(world.ego.x);
+    const double relativeY =
+        static_cast<double>(object.raw.y) - static_cast<double>(world.ego.y);
+    const double relativeVelocityX =
+        static_cast<double>(object.raw.speed) *
+            std::cos(static_cast<double>(object.raw.heading)) -
+        world.egoSpeed * std::cos(static_cast<double>(world.ego.heading));
+    const double relativeVelocityY =
+        static_cast<double>(object.raw.speed) *
+            std::sin(static_cast<double>(object.raw.heading)) -
+        world.egoSpeed * std::sin(static_cast<double>(world.ego.heading));
+    const double relativeSpeedSquared =
+        relativeVelocityX * relativeVelocityX +
+        relativeVelocityY * relativeVelocityY;
+    if (relativeSpeedSquared <= 1e-6) return false;
+
+    const double closestTime = std::clamp(
+        -(relativeX * relativeVelocityX +
+          relativeY * relativeVelocityY) /
+            relativeSpeedSquared,
+        0.0, horizon);
+    if (closestTime <= 1e-6) return false;
+    const double closestX = relativeX + relativeVelocityX * closestTime;
+    const double closestY = relativeY + relativeVelocityY * closestTime;
+    const double collisionWidth =
+        0.5 * (egoWidth + static_cast<double>(object.raw.width)) +
+        kOncomingClosestApproachMargin;
+    return std::hypot(closestX, closestY) <= collisionWidth;
+}
+
 // 미래 충돌검사를 적용할 객체를 고른다.
 //
 // 두 가지 기준을 OR로 묶는다.
@@ -91,13 +131,18 @@ bool insideRouteCorridor(const WorldObjectState& object, double lateralRange) {
 // 실제로 우리 차선 폭 안에 있을 때만(역주행·중앙선 침범) 검사한다.
 bool isPredictionCandidate(const WorldObjectState& object,
                            const WorldState& world,
-                           double radius) {
+                           double radius,
+                           double egoWidth,
+                           double horizon) {
     const double headingDifference = std::abs(normalizeAngle(
         static_cast<double>(object.raw.heading) -
         static_cast<double>(world.ego.heading)));
 
     if (headingDifference > kOncomingHeadingDifference) {
-        return insideRouteCorridor(object, kOncomingLateralRange);
+        if (insideRouteCorridor(object, kOncomingLateralRange)) return true;
+        return distanceToEgo(object, world) <= radius &&
+               oncomingTrajectoryConverges(
+                   object, world, egoWidth, horizon);
     }
     if (insideRouteCorridor(object, kPredictionLateralRange)) return true;
     return distanceToEgo(object, world) <= radius;
@@ -195,7 +240,8 @@ void checkPredictedCollisions(PathSafetyResult& output,
             egoPose.heading, ego.length, ego.width);
 
         for (const auto& object : world.objects) {
-            if (!isPredictionCandidate(object, world, radius)) continue;
+            if (!isPredictionCandidate(
+                    object, world, radius, ego.width, horizon)) continue;
             const double objectHeading =
                 static_cast<double>(object.raw.heading);
             const double travel =

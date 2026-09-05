@@ -30,16 +30,17 @@ planning:
   comfortable_deceleration: 1.5   # [m/s^2] 정지 계획용 감속도
                                   # 2.5로 두면 목표 지점에 4.5 m/s로 도달해
                                   # 정지선/횡단보도를 4 m 가까이 지나쳐 선다.
-  stop_safety_margin: 2.5          # [m] 정지선/장애물 앞 여유거리
+  stop_safety_margin: 2.5          # [m] 신호·횡단보도 정지점 앞 여유거리
   stop_hold_time: 1.0              # [s] 적색점멸 최소 정지시간
   stopped_speed_threshold_kph: 0.55 # [km/h] 정지로 인정할 속도
   follow_time_gap: 1.8             # [s] 선행 객체 추종 시간 간격
   minimum_follow_distance: 5.0     # [m] 최소 추종거리
   follow_gap_gain: 0.35            # [1/s] 간격 오차 기반 ACC 속도 보정
+  minimum_object_response_speed_kph: 15.0 # [km/h] 법규정지/비상제동 제외 객체 대응 최저속도
   # 50 km/h에서 위 두 값을 쓰면 5 + 1.8*13.9 = 약 30 m 전방부터
   # 옆 차선 차량도 주의속도로 감속한다. 끼어들기 후 제동거리를 남기기 위함.
   nearby_object_caution_kph: 15.0   # [km/h] 근접 전방 객체 주의속도
-  nearby_object_lateral_distance: 5.5 # [m] 옆 차선 포함 경로 횡방 탐색폭
+  nearby_object_lateral_distance: 7.0 # [m] 옆 차선에서 출발하는 끼어들기도 사전 감속
   # 같은 방향의 바로 옆 차선에 정차한 승용차급 객체는 갑작스러운 출발·끼어들기에
   # 대비해 가까운 구간에서만 미리 감속한다. 작은 콘과 큰 수목·구조물은 제외한다.
   stationary_adjacent_vehicle_caution_kph: 20.0 # [km/h] 정차 차량 옆 통과 주의속도
@@ -51,6 +52,7 @@ planning:
   emergency_ttc: 1.5               # [s] 긴급제동 TTC
   emergency_braking_deceleration: 4.0 # [m/s^2] 속도별 비상제동 문턱 계산
   emergency_reaction_time: 0.4     # [s] 인지·명령·차량 응답 여유
+  emergency_minimum_hold_time: 0.5 # [s] 순간 예측 누락에도 비상제동 유지
   collision_prediction_horizon: 3.0 # [s] OBB 예측 범위
   collision_prediction_step: 0.2   # [s] OBB 예측 간격
   # [m] 지역경로 길이. 미래 OBB 검사에서 Ego 예측 위치를 이 경로 위에서 찾으므로
@@ -72,21 +74,21 @@ planning:
   crosswalk_stop_line_search: 15.0  # [m] 횡단보도 앞 정지선 탐색 거리
 
 lane_change:
-  obstacle_trigger_minimum_distance: 20.0 # [m] 조향 가능한 종방향 여유를 확보
-  obstacle_trigger_maximum_distance: 60.0 # [m] 정적 장애물 탐색거리
-  # 주행하던 선행차가 계속 정지하면 영구 정지 대신 안전한 회피를 다시 검토한다.
-  stopped_lead_wait_time: 2.0             # [s] 정지 지속 후 회피 후보 승격
-  stopped_lead_minimum_distance: 5.0      # [m] 확인 지연 뒤에도 재계획할 최소 간격
-  stopped_ego_maximum_speed_kph: 2.0      # [km/h] 레거시 설정(판정 gating에는 미사용)
-  transition_length: 18.0                 # [m] 곡률/조향 급변을 낮춘 횡이동 길이
+  obstacle_trigger_minimum_distance: 5.0  # [m] 정적으로 판단되면 대기 없이 즉시 회피 검토
+  obstacle_trigger_maximum_distance: 70.0 # [m] 정적 장애물 탐색거리
+  # 끼어들어 정지한 차량은 잠깐 정지/추종한 뒤 정적 회피 대상으로 전환한다.
+  # 처음부터 정지해 있던 장애물은 이 대기 없이 즉시 회피를 검토한다.
+  stopped_dynamic_confirmation_time: 0.75 # [s]
+  road_connection_prepare_distance: 45.0 # [m] 다음 road 연결 차선으로 정렬하는 도로 마지막 구간
+  transition_length: 15.0                 # [m] 곡률/조향 급변을 낮춘 횡이동 길이
   obstacle_clearance: 10.0                # [m] 장애물 통과 뒤 복귀 여유
-  prepare_time: 0.5                       # [s] 이동 전 방향지시등 선행시간
+  prepare_time: 0.5                       # [s] 방향지시등 선행시간
   settle_time: 0.5                        # [s] 원래 경로 복귀 후 안정시간
-  minimum_target_ahead_gap: 15.0          # [m] 목표 차선 전방 최소 간격
-  minimum_target_behind_gap: 12.0         # [m] 목표 차선 후방 최소 간격
+  minimum_target_ahead_gap: 12.0          # [m] 목표 차선 전방 최소 간격
+  minimum_target_behind_gap: 9.0         # [m] 목표 차선 후방 최소 간격
   minimum_target_ttc: 3.0                 # [s] 목표 차선 최소 TTC
-  maximum_lane_change_speed_kph: 21.6     # 차선변경 중 목표속도 상한
-  return_waiting_speed_kph: 7.2           # 복귀 경로가 막혔을 때 감속 목표
+  maximum_lane_change_speed_kph: 15.0     # 빽빽한 연속 장애물에서도 다음 회피를 준비할 수 있도록 횡이동 중 감속
+  return_waiting_speed_kph: 15.0          # 복귀 경로가 잠시 막혔을 때 목표속도 상한
   # 장애물이 옆 차선을 이 값 이하로 침범했을 때만 중앙 밖 회피 후보를 만든다.
   maximum_obstacle_lane_intrusion: 1.55   # [m] 횡오프셋 허용 최대 침범량
   lateral_offset_step: 0.2                # [m] 0.2, 0.4, 0.6 ... 후보 간격

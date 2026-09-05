@@ -114,15 +114,11 @@ double longitudinalSpeedOf(const WorldObjectState& object,
 
 void selectStopDecision(StopDecision& output,
                         const StopManagerData& manager,
-                        double egoRouteS,
-                        bool ignoreObstacleStops) {
+                        double egoRouteS) {
     output = {};
     double nearestS = std::numeric_limits<double>::infinity();
     for (const auto& request : manager.requests) {
-        if (!request.active ||
-            (ignoreObstacleStops &&
-             request.reason == StopReason::Obstacle) ||
-            request.stopRouteS >= nearestS) {
+        if (!request.active || request.stopRouteS >= nearestS) {
             continue;
         }
         nearestS = request.stopRouteS;
@@ -190,9 +186,12 @@ void updateBehavior(BehaviorState& state,
         config.nearbyObjectLateralDistance,
         state.safelyAvoidedObjectId);
     if (nearby != nullptr) {
+        const double objectResponseFloor = std::min(
+            limitedCruise, config.minimumObjectResponseSpeed);
         const double nearbyTarget = std::min(
             {limitedCruise, config.nearbyObjectCautionSpeed,
-             std::max(0.0, longitudinalSpeedOf(*nearby, world))});
+             std::max(objectResponseFloor,
+                      longitudinalSpeedOf(*nearby, world))});
         if (nearbyTarget < targetSpeed) {
             targetSpeed = nearbyTarget;
             selectedMode = LonMode::Follow;
@@ -235,9 +234,15 @@ void updateBehavior(BehaviorState& state,
             // 허용한다. 목표 간격보다 가까우면 자연스럽게 선행차 속도 이하가
             // 되고, 멀면 점진적으로 순항속도까지 허용된다.
             const double gapError = lead->relativeS - desiredGap;
-            const double leadTarget = std::clamp(
+            double leadTarget = std::clamp(
                 leadSpeed + config.followGapGain * gapError,
                 0.0, limitedCruise);
+            // 법규 정지는 위에서 계산한 stop 속도가 그대로 우선한다.
+            // 선행 객체로 인한 ACC 제약만은 비상제동 전까지 15 km/h
+            // 아래로 내리지 않는다.
+            leadTarget = std::min(
+                limitedCruise,
+                std::max(leadTarget, config.minimumObjectResponseSpeed));
             if (leadTarget < targetSpeed) {
                 targetSpeed = leadTarget;
                 selectedMode = LonMode::Follow;
