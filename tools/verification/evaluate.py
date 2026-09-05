@@ -42,6 +42,11 @@ class OfficialItemResult:
     status: str
     penalty: int = 0
     detail: str = ""
+    severity_by_section: dict[str, int] = None
+
+    def __post_init__(self) -> None:
+        if self.severity_by_section is None:
+            self.severity_by_section = {}
 
 
 def non_negative_float(value: str) -> float:
@@ -129,11 +134,11 @@ def group_by_section(rows: list[dict[str, str]]) -> dict[str, list[dict[str, str
 def severity_result(number: int, severity_by_section: dict[str, int], detail: str) -> OfficialItemResult:
     penalty = sum(3 if severity == 1 else 6 for severity in severity_by_section.values())
     if not severity_by_section:
-        return OfficialItemResult(number, "PASS", 0, detail)
+        return OfficialItemResult(number, "PASS", 0, detail, dict(severity_by_section))
     maximum = max(severity_by_section.values())
     status = "MAJOR" if maximum == 2 else "MINOR"
     sections = ",".join(sorted(severity_by_section))
-    return OfficialItemResult(number, status, -penalty, f"sections={sections};{detail}")
+    return OfficialItemResult(number, status, -penalty, f"sections={sections};{detail}", dict(severity_by_section))
 
 
 def evaluate_speed_limit(
@@ -289,7 +294,18 @@ def evaluate_respawn(rows: list[dict[str, str]]) -> OfficialItemResult:
     return OfficialItemResult(
         15, "MAJOR" if excess else "PASS", penalty,
         "excess_respawns=" + str(sum(excess.values())),
+        {key: 2 for key in excess},
     )
+
+
+def evaluate_official_for(
+    rows: list[dict[str, str]],
+    speed_limit_kmh: float | None = None,
+    school_zone_limit_kmh: float | None = None,
+) -> list[OfficialItemResult]:
+    """Reusable entry point for callers (e.g. the dashboard) that don't have an argparse Namespace."""
+    args = argparse.Namespace(speed_limit_kmh=speed_limit_kmh, school_zone_limit_kmh=school_zone_limit_kmh)
+    return evaluate_official(rows, args)
 
 
 def evaluate_official(rows: list[dict[str, str]], args: argparse.Namespace) -> list[OfficialItemResult]:

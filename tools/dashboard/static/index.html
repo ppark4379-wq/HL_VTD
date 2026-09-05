@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HL_VTD 대회 검증 평가</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="topbar-title">
+      <span class="brand">HL_VTD</span>
+      <span class="brand-sub">대회용 검증 평가</span>
+    </div>
+    <div class="topbar-controls">
+      <label>시나리오
+        <select id="scenarioSelect"></select>
+      </label>
+      <label>실행(Run)
+        <select id="runSelect"></select>
+      </label>
+      <button id="liveToggle" class="btn btn-live">실시간 갱신: ON</button>
+      <span id="liveBadge" class="badge badge-idle">대기중</span>
+    </div>
+  </header>
+
+  <section class="stats-row" id="statsRow">
+    <div class="stat-card">
+      <div class="stat-label">현재 구간</div>
+      <div class="stat-value" id="statSection">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">경과 시간</div>
+      <div class="stat-value" id="statElapsed">0.0<span class="unit">초</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">접촉 위험 요소</div>
+      <div class="stat-value" id="statRisk">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">속도</div>
+      <div class="stat-value" id="statSpeed">0.0<span class="unit">km/h</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">종방향거리</div>
+      <div class="stat-value" id="statLongDist">0.0<span class="unit">m</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">후방시간(TTC)</div>
+      <div class="stat-value" id="statTtc">-<span class="unit">초</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">채점 시간</div>
+      <div class="stat-value" id="statScoredAt">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">신호 정보</div>
+      <div class="stat-value" id="statSignal">-</div>
+    </div>
+  </section>
+
+  <main class="main-grid">
+
+    <section class="panel checklist-panel">
+      <div class="panel-header">
+        <span>평가 항목 (2026 HL FMA 공식 15개 기준)</span>
+        <span id="scenarioMeta" class="panel-header-sub"></span>
+      </div>
+      <div class="checklist-scroll">
+        <table id="checklistTable" class="checklist-table">
+          <thead>
+            <tr id="checklistHead"><th class="col-item">항목</th></tr>
+          </thead>
+          <tbody id="checklistBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel viewer-panel">
+      <div class="panel-header">
+        <span>주행 궤적 재생</span>
+        <span id="frameReadout" class="panel-header-sub">frame 0 / 0</span>
+      </div>
+      <div class="viewer-canvas-wrap">
+        <canvas id="mapCanvas"></canvas>
+        <div class="viewer-overlay-top">
+          <span id="overlayTime">00:00.0</span>
+          <span id="overlaySignal" class="overlay-chip">신호 -</span>
+        </div>
+      </div>
+      <div class="playback-controls">
+        <button id="playBtn" class="btn">▶ 재생</button>
+        <input id="scrubber" type="range" min="0" max="0" value="0" step="1">
+        <select id="speedSelect">
+          <option value="1">x1</option>
+          <option value="2">x2</option>
+          <option value="4">x4</option>
+          <option value="8">x8</option>
+        </select>
+        <button id="jumpLiveBtn" class="btn">실시간으로</button>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="scorebar">
+    <div class="score-block">
+      <div class="score-label">종합 점수</div>
+      <div class="score-value" id="totalScore">-</div>
+    </div>
+    <div class="score-sub">
+      <span id="scoreViolations">위반 0건</span>
+      <span id="scoreUnavailable">미평가 0건</span>
+    </div>
+    <button id="reportBtn" class="btn btn-primary">리포트 확인</button>
+  </footer>
+
+  <div id="reportModal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span>평가 리포트</span>
+        <button id="closeReport" class="btn">닫기</button>
+      </div>
+      <pre id="reportContent" class="modal-content"></pre>
+    </div>
+  </div>
+
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
