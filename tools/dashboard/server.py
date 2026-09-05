@@ -15,6 +15,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
+import re
+import subprocess
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,6 +30,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 VERIFICATION_DIR = REPO_ROOT / "output" / "verification"
 CATALOG_PATH = REPO_ROOT / "scenario" / "scenario_catalog.csv"
+
+MAINRS_WINDOW_TITLE = "mainRS"
+MAINRS_FRAMERATE = 10
 
 sys.path.insert(0, str(REPO_ROOT / "tools" / "verification"))
 import evaluate  # noqa: E402  (경로 설정 이후 import)
@@ -205,6 +211,47 @@ def build_map_payload(scenario_id: str) -> dict:
             "category": row.get("category"), "notes": row.get("notes")}
 
 
+_WINDOW_LINE_RE = re.compile(
+    r'"(?P<title>[^"]*)":\s+\("(?P<class1>[^"]*)"\s+"(?P<class2>[^"]*)"\)\s+'
+    r'(?P<width>\d+)x(?P<height>\d+)\+-?\d+\+-?\d+'
+    r'(?:\s+\+(?P<absx>-?\d+)\+(?P<absy>-?\d+))?'
+)
+
+
+def find_mainrs_window() -> dict | None:
+    """VTD 가 시나리오 재생 시 띄우는 mainRS(OSG) 렌더 창의 화면 절대좌표/크기를 찾는다.
+
+    xdotool/wmctrl 이 설치되어 있지 않은 환경이라 xwininfo -tree 출력을 직접 파싱한다.
+    창 데코레이션(mutter-x11-frames)이 아니라 실제 렌더 표면(OSG/osgViewer)을 우선한다.
+    """
+    try:
+        result = subprocess.run(
+            ["xwininfo", "-root", "-tree"],
+            capture_output=True, text=True, timeout=3, check=True,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+
+    candidates = []
+    for line in result.stdout.splitlines():
+        match = _WINDOW_LINE_RE.search(line)
+        if not match or MAINRS_WINDOW_TITLE not in match.group("title"):
+            continue
+        width, height = int(match.group("width")), int(match.group("height"))
+        is_render_surface = "osg" in match.group("class1").lower() or "osg" in match.group("class2").lower()
+        candidates.append({
+            "width": width,
+            "height": height,
+            "x": int(match.group("absx")) if match.group("absx") else 0,
+            "y": int(match.group("absy")) if match.group("absy") else 0,
+            "is_render_surface": is_render_surface,
+        })
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: (not c["is_render_surface"], c["width"] * c["height"]))
+    return candidates[0]
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args) -> None:  # noqa: A002
         sys.stderr.write(f"[dashboard] {self.address_string()} {format % args}\n")
@@ -263,12 +310,77 @@ class Handler(BaseHTTPRequestHandler):
                     float(school_zone_limit) if school_zone_limit else None,
                 )
                 self._send_json(payload)
+            elif parsed.path == "/api/mainrs_status":
+                window = find_mainrs_window()
+                self._send_json({"found": window is not None, "window": window})
+            elif parsed.path == "/api/mainrs_stream":
+                self._stream_mainrs()
             else:
                 self._send_json({"error": "not found"}, status=404)
         except FileNotFoundError as error:
             self._send_json({"error": str(error)}, status=404)
         except ValueError as error:
             self._send_json({"error": str(error)}, status=400)
+
+    def _stream_mainrs(self) -> None:
+        """VTD의 mainRS 렌더 창을 화면 캡처해 MJPEG(multipart/x-mixed-replace)로 스트리밍한다.
+
+        브라우저는 <img src="/api/mainrs_stream"> 만으로 별도 JS 없이 계속 갱신되는
+        영상처럼 렌더링한다. 시나리오가 재생 중이 아니라 mainRS 창이 없으면 404.
+        """
+        window = find_mainrs_window()
+        if window is None:
+            self._send_json({"error": "mainRS window not found"}, status=404)
+            return
+
+        boundary = "hlvtdframe"
+        self.send_response(200)
+        self.send_header("Content-Type", f"multipart/x-mixed-replace; boundary={boundary}")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+        display = os.environ.get("DISPLAY", ":0")
+        cmd = [
+            "ffmpeg", "-loglevel", "error",
+            "-f", "x11grab",
+            "-video_size", f"{window['width']}x{window['height']}",
+            "-framerate", str(MAINRS_FRAMERATE),
+            "-i", f"{display}+{window['x']},{window['y']}",
+            "-f", "mjpeg", "-q:v", "7",
+            "pipe:1",
+        ]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        try:
+            buffer = b""
+            while True:
+                chunk = proc.stdout.read(4096)
+                if not chunk:
+                    break
+                buffer += chunk
+                while True:
+                    start = buffer.find(b"\xff\xd8")
+                    if start == -1:
+                        buffer = b""
+                        break
+                    end = buffer.find(b"\xff\xd9", start + 2)
+                    if end == -1:
+                        buffer = buffer[start:]
+                        break
+                    frame = buffer[start:end + 2]
+                    buffer = buffer[end + 2:]
+                    part = (
+                        f"--{boundary}\r\nContent-Type: image/jpeg\r\n"
+                        f"Content-Length: {len(frame)}\r\n\r\n"
+                    ).encode() + frame + b"\r\n"
+                    self.wfile.write(part)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            proc.kill()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
 
 
 def main() -> int:

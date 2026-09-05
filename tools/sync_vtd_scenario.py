@@ -7,6 +7,8 @@ PosAbsolute Scenario는 기존 checkpoints.csv의 목적지를 유지하고 Ego 
 갱신해 OpenDRIVE 경로를 다시 생성한다. scenario.yaml의
 route.preserve_checkpoint_coordinates가 true면 대회 제공 좌표 전체를 보존하고,
 route.linear_checkpoint_segments에 지정한 구간은 checkpoint 직선 형상을 보존한다.
+route.smooth_checkpoint_segments는 차선 graph로 연결할 수 없는 인접
+checkpoint 구간을 양쪽 경로의 방향을 이은 Bezier 곡선으로 연결한다.
 """
 
 from __future__ import annotations
@@ -65,6 +67,8 @@ class EgoAbsolutePosition:
 @dataclass(frozen=True)
 class RouteSyncOptions:
     linear_checkpoint_segments: tuple[int, ...] = ()
+    smooth_checkpoint_segments: tuple[int, ...] = ()
+    smooth_checkpoint_handle_m: float = 8.0
     preserve_checkpoint_coordinates: bool = False
 
 
@@ -340,8 +344,32 @@ def read_route_sync_options(package: Path) -> RouteSyncOptions:
                 "route.linear_checkpoint_segments에는 1 이상의 정수만 사용할 수 있습니다"
             )
         segments.append(value)
+    raw_smooth_segments = route.get("smooth_checkpoint_segments", [])
+    if not isinstance(raw_smooth_segments, list):
+        raise SyncError("route.smooth_checkpoint_segments는 정수 배열이어야 합니다")
+    smooth_segments = []
+    for value in raw_smooth_segments:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise SyncError(
+                "route.smooth_checkpoint_segments에는 1 이상의 정수만 사용할 수 있습니다"
+            )
+        smooth_segments.append(value)
+    smooth_handle = route.get("smooth_checkpoint_handle_m", 8.0)
+    if (
+        isinstance(smooth_handle, bool)
+        or not isinstance(smooth_handle, (int, float))
+        or not math.isfinite(float(smooth_handle))
+        or float(smooth_handle) <= 0.0
+    ):
+        raise SyncError("route.smooth_checkpoint_handle_m는 0보다 큰 수여야 합니다")
+    if set(segments) & set(smooth_segments):
+        raise SyncError(
+            "하나의 checkpoint 구간에 linear과 smooth 설정을 동시에 사용할 수 없습니다"
+        )
     return RouteSyncOptions(
         linear_checkpoint_segments=tuple(sorted(set(segments))),
+        smooth_checkpoint_segments=tuple(sorted(set(smooth_segments))),
+        smooth_checkpoint_handle_m=float(smooth_handle),
         preserve_checkpoint_coordinates=preserve_coordinates,
     )
 
@@ -423,6 +451,162 @@ def update_route_yaw_and_s(rows: list[dict[str, str]]) -> None:
                 previous_yaw = math.atan2(next_y - current_y, next_x - current_x)
         row["yaw"] = f"{previous_yaw:.8f}"
         row["s"] = f"{cumulative_s:.8f}"
+
+
+def write_checkpoint_slice(
+    rows: list[dict[str, str]], begin: int, end: int, output: Path
+) -> None:
+    with output.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(
+            stream, fieldnames=["seq", "x", "y"], lineterminator="\n"
+        )
+        writer.writeheader()
+        writer.writerows(
+            {"seq": index + 1, "x": row["x"], "y": row["y"]}
+            for index, row in enumerate(rows[begin:end])
+        )
+
+
+def bezier_bridge_rows(
+    start: dict[str, str],
+    end: dict[str, str],
+    requested_handle_m: float,
+    sample_interval_m: float = 0.5,
+) -> list[dict[str, str]]:
+    start_x, start_y = xy(start)
+    end_x, end_y = xy(end)
+    start_yaw = float(start["yaw"])
+    end_yaw = float(end["yaw"])
+    chord = math.hypot(end_x - start_x, end_y - start_y)
+    if chord <= 1e-6:
+        raise SyncError("smooth checkpoint 연결 끝점이 서로 같습니다")
+    handle = min(requested_handle_m, chord * 0.45)
+    control1 = (
+        start_x + handle * math.cos(start_yaw),
+        start_y + handle * math.sin(start_yaw),
+    )
+    control2 = (
+        end_x - handle * math.cos(end_yaw),
+        end_y - handle * math.sin(end_yaw),
+    )
+    control_length = (
+        handle
+        + math.hypot(control2[0] - control1[0], control2[1] - control1[1])
+        + handle
+    )
+    steps = max(2, math.ceil(control_length / sample_interval_m))
+    bridge = []
+    for step in range(1, steps):
+        progress = step / steps
+        inverse = 1.0 - progress
+        point_x = (
+            inverse ** 3 * start_x
+            + 3.0 * inverse ** 2 * progress * control1[0]
+            + 3.0 * inverse * progress ** 2 * control2[0]
+            + progress ** 3 * end_x
+        )
+        point_y = (
+            inverse ** 3 * start_y
+            + 3.0 * inverse ** 2 * progress * control1[1]
+            + 3.0 * inverse * progress ** 2 * control2[1]
+            + progress ** 3 * end_y
+        )
+        bridge.append({
+            "x": f"{point_x:.8f}",
+            "y": f"{point_y:.8f}",
+            "yaw": "0",
+            "s": "0",
+            # A bridge intentionally leaves the legal lane graph.  Zero lane
+            # metadata makes downstream code use its normal world matching.
+            "road_id": "0",
+            "lane_id": "0",
+            "road_s": "0",
+        })
+    return bridge
+
+
+def validate_smoothed_route(rows: list[dict[str, str]]) -> None:
+    maximum_curvature = 0.0
+    for current, following in zip(rows, rows[1:]):
+        current_x, current_y = xy(current)
+        following_x, following_y = xy(following)
+        spacing = math.hypot(following_x - current_x, following_y - current_y)
+        if spacing <= 1e-9 or spacing > 2.0:
+            raise SyncError(
+                f"smooth checkpoint 경로 간격이 허용 범위를 벗어났습니다: {spacing:.3f}m"
+            )
+        yaw_delta = (
+            float(following["yaw"]) - float(current["yaw"]) + math.pi
+        ) % (2.0 * math.pi) - math.pi
+        maximum_curvature = max(maximum_curvature, abs(yaw_delta) / spacing)
+    if maximum_curvature > 0.20:
+        raise SyncError(
+            "smooth checkpoint 경로의 최대 곡률이 허용치를 초과합니다: "
+            f"{maximum_curvature:.3f} 1/m"
+        )
+
+
+def generate_smooth_checkpoint_route(
+    checkpoints_path: Path,
+    route_path: Path,
+    lane_map_path: Path,
+    staging: Path,
+    config: SyncConfig,
+    bridge_segments: tuple[int, ...],
+    handle_m: float,
+) -> None:
+    _, checkpoints = read_xy_rows(checkpoints_path)
+    checkpoint_count = len(checkpoints)
+    if any(segment >= checkpoint_count for segment in bridge_segments):
+        raise SyncError(
+            "route.smooth_checkpoint_segments 값은 checkpoint 개수보다 작아야 합니다"
+        )
+    boundaries = (0,) + bridge_segments + (checkpoint_count,)
+    if any(end - begin < 2 for begin, end in zip(boundaries, boundaries[1:])):
+        raise SyncError(
+            "smooth checkpoint 구간 사이에는 차선 경로용 checkpoint가 "
+            "2개 이상 필요합니다"
+        )
+
+    route_parts: list[list[dict[str, str]]] = []
+    fieldnames: list[str] = []
+    for part_index, (begin, end) in enumerate(
+        zip(boundaries, boundaries[1:]), start=1
+    ):
+        part_checkpoints = staging / f"checkpoint_part_{part_index}.csv"
+        part_route = staging / f"route_part_{part_index}.csv"
+        write_checkpoint_slice(checkpoints, begin, end, part_checkpoints)
+        run_checked(
+            [
+                str(config.checkpoint_generator),
+                str(config.map_path),
+                str(part_checkpoints),
+                str(part_route),
+                str(lane_map_path),
+            ],
+            config.repo_root,
+        )
+        current_fieldnames, current_rows = read_xy_rows(part_route)
+        if not fieldnames:
+            fieldnames = current_fieldnames
+        route_parts.append(current_rows)
+
+    merged = list(route_parts[0])
+    for next_part in route_parts[1:]:
+        merged.extend(bezier_bridge_rows(merged[-1], next_part[0], handle_m))
+        merged.extend(next_part)
+    update_route_yaw_and_s(merged)
+    validate_smoothed_route(merged)
+    with route_path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(merged)
+    joined = ",".join(str(segment) for segment in bridge_segments)
+    print(
+        f"[sync] smoothed disconnected checkpoint segments: {joined} "
+        f"({len(merged)} route points)",
+        flush=True,
+    )
 
 
 def splice_linear_checkpoint_segments(
@@ -759,6 +943,7 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
 
         route_options = read_route_sync_options(destination)
         linear_segments = route_options.linear_checkpoint_segments
+        smooth_segments = route_options.smooth_checkpoint_segments
         destination.parent.mkdir(parents=True, exist_ok=True)
         staging = Path(
             tempfile.mkdtemp(prefix=f".{destination_stem}.sync-", dir=destination.parent)
@@ -778,34 +963,50 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
                 ego_absolute,
                 route_options.preserve_checkpoint_coordinates,
             )
-            run_checked(
-                [
-                    str(config.checkpoint_generator),
-                    str(config.map_path),
-                    str(staged_checkpoints),
-                    str(staged_route),
-                    str(staged_lane_map),
-                ],
-                config.repo_root,
-            )
-            if linear_segments:
+            if smooth_segments:
+                if linear_segments:
+                    raise SyncError(
+                        "smooth checkpoint 경로와 linear checkpoint 경로는 "
+                        "한 시나리오에서 함께 사용할 수 없습니다"
+                    )
+                generate_smooth_checkpoint_route(
+                    staged_checkpoints,
+                    staged_route,
+                    staged_lane_map,
+                    staging,
+                    config,
+                    smooth_segments,
+                    route_options.smooth_checkpoint_handle_m,
+                )
+            else:
                 run_checked(
                     [
-                        str(config.path_shape_generator),
+                        str(config.checkpoint_generator),
                         str(config.map_path),
                         str(staged_checkpoints),
-                        str(staged_path_shape_route),
+                        str(staged_route),
+                        str(staged_lane_map),
                     ],
                     config.repo_root,
                 )
-                splice_linear_checkpoint_segments(
-                    staged_checkpoints,
-                    staged_route,
-                    staged_path_shape_route,
-                    staged_merged_route,
-                    linear_segments,
-                )
-                os.replace(staged_merged_route, staged_route)
+                if linear_segments:
+                    run_checked(
+                        [
+                            str(config.path_shape_generator),
+                            str(config.map_path),
+                            str(staged_checkpoints),
+                            str(staged_path_shape_route),
+                        ],
+                        config.repo_root,
+                    )
+                    splice_linear_checkpoint_segments(
+                        staged_checkpoints,
+                        staged_route,
+                        staged_path_shape_route,
+                        staged_merged_route,
+                        linear_segments,
+                    )
+                    os.replace(staged_merged_route, staged_route)
             run_checked(
                 [
                     sys.executable,

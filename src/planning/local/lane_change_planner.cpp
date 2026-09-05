@@ -1409,6 +1409,30 @@ bool buildRoadIdTrackingPath(
     output.config = plannerConfig;
     if (!world.egoLaneValid || !world.egoPathValid) return false;
 
+    // Synthetic checkpoint connectors deliberately use road/lane id 0 because
+    // they bridge positions that the OpenDRIVE lane graph cannot connect.  A
+    // road-center tracking path would otherwise ignore that connector and keep
+    // following the current lane straight through the turn.  Select the CSV
+    // global path while such a connector is inside the local planning horizon.
+    if (!globalPath.waypoints.empty()) {
+        const std::size_t begin = std::min(
+            nearestGlobalIndex, globalPath.waypoints.size() - 1);
+        const double endS = globalPath.waypoints[begin].s +
+                            std::max(20.0, horizon);
+        for (std::size_t index = begin;
+             index < globalPath.waypoints.size() &&
+             globalPath.waypoints[index].s <= endS;
+             ++index) {
+            if (globalPath.waypoints[index].roadId == 0 ||
+                globalPath.waypoints[index].laneId == 0) {
+                traceDecision(trace, "road_corridor",
+                              "global_path_selected",
+                              "reason=synthetic_checkpoint_connector");
+                return false;
+            }
+        }
+    }
+
     const LaneKey start{world.egoRoadId, world.egoSectionIndex,
                         world.egoLaneId};
     const auto startSegment = map.laneSegments.find(start);

@@ -85,6 +85,17 @@ route.svg
 삭제된 엔티티와 해당 엔티티를 참조하는 manifest event는 함께 제거한다. 설명,
 평가 코드, 경로 옵션처럼 XML에서 결정할 수 없는 값은 변경하지 않는다.
 
+PosAbsolute checkpoint 중 일부 구간이 유효한 차선 graph로 연결되지 않는
+시나리오는 `scenario.yaml` route에 1부터 시작하는 구간 번호를 지정한다.
+도구는 양쪽의 정상 차선 경로를 각각 생성한 뒤 진입·진출 방향을
+Bezier 곡선으로 연결하고, 생성 경로의 간격과 곡률을 검증한다.
+
+```yaml
+route:
+  smooth_checkpoint_segments: [2]
+  smooth_checkpoint_handle_m: 8.0
+```
+
 Ego가 `PosAbsolute`이면 경로 끝점을 XML만으로 알 수 없으므로 XML만 복사하고
 기존 `checkpoints.csv`, `route.csv`, `route.svg`는 보존한다. 이 경우도 실패로
 처리하려면 `--require-route`를 사용한다.

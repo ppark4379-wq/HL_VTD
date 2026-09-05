@@ -80,17 +80,25 @@
 
     <section class="panel viewer-panel">
       <div class="panel-header">
-        <span>주행 궤적 재생</span>
+        <div class="view-tabs">
+          <button id="tabMainrs" class="view-tab active">mainRS 화면</button>
+          <button id="tabMap" class="view-tab">주행 궤적 지도</button>
+        </div>
         <span id="frameReadout" class="panel-header-sub">frame 0 / 0</span>
       </div>
       <div class="viewer-canvas-wrap">
-        <canvas id="mapCanvas"></canvas>
+        <img id="mainrsImg" alt="mainRS">
+        <div id="mainrsFallback" class="mainrs-fallback hidden">
+          <div class="mainrs-fallback-title">mainRS 화면을 찾을 수 없습니다</div>
+          <div class="mainrs-fallback-sub">VTD에서 시나리오를 재생 중인지, mainRS 창이 다른 창에 가려져 있지 않은지 확인하세요.</div>
+        </div>
+        <canvas id="mapCanvas" class="hidden"></canvas>
         <div class="viewer-overlay-top">
           <span id="overlayTime">00:00.0</span>
           <span id="overlaySignal" class="overlay-chip">신호 -</span>
         </div>
       </div>
-      <div class="playback-controls">
+      <div class="playback-controls" id="playbackControls">
         <button id="playBtn" class="btn">▶ 재생</button>
         <input id="scrubber" type="range" min="0" max="0" value="0" step="1">
         <select id="speedSelect">

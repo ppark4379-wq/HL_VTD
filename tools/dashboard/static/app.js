@@ -17,6 +17,8 @@ const state = {
   runIsLive: false,
   pollTimer: null,
   playTimer: null,
+  viewTab: "mainrs",
+  mainrsRetryTimer: null,
 };
 
 const el = (id) => document.getElementById(id);
@@ -398,6 +400,60 @@ function drawCanvas() {
 
 window.addEventListener("resize", drawCanvas);
 
+/* ---------- mainRS live view ---------- */
+
+function setViewTab(tab) {
+  state.viewTab = tab;
+  el("tabMainrs").classList.toggle("active", tab === "mainrs");
+  el("tabMap").classList.toggle("active", tab === "map");
+  el("mainrsImg").classList.add("hidden");
+  el("mainrsFallback").classList.toggle("hidden", tab !== "mainrs" || !el("mainrsFallback").dataset.show);
+  el("mapCanvas").classList.toggle("hidden", tab !== "map");
+  el("playbackControls").classList.toggle("hidden", tab !== "map");
+
+  if (tab === "mainrs") {
+    connectMainrsStream();
+  } else {
+    disconnectMainrsStream();
+  }
+}
+
+function connectMainrsStream() {
+  if (state.mainrsRetryTimer) { clearTimeout(state.mainrsRetryTimer); state.mainrsRetryTimer = null; }
+  const img = el("mainrsImg");
+  el("mainrsFallback").dataset.show = "";
+  el("mainrsFallback").classList.add("hidden");
+  img.src = `/api/mainrs_stream?_=${Date.now()}`;
+}
+
+function disconnectMainrsStream() {
+  if (state.mainrsRetryTimer) { clearTimeout(state.mainrsRetryTimer); state.mainrsRetryTimer = null; }
+  el("mainrsImg").src = "";
+}
+
+el("mainrsImg").addEventListener("error", () => {
+  if (state.viewTab !== "mainrs") return;
+  el("mainrsImg").classList.add("hidden");
+  el("mainrsFallback").dataset.show = "1";
+  el("mainrsFallback").classList.remove("hidden");
+  if (!state.mainrsRetryTimer) {
+    state.mainrsRetryTimer = setTimeout(() => {
+      state.mainrsRetryTimer = null;
+      if (state.viewTab === "mainrs") connectMainrsStream();
+    }, 3000);
+  }
+});
+
+el("mainrsImg").addEventListener("load", () => {
+  if (state.viewTab !== "mainrs") return;
+  el("mainrsImg").classList.remove("hidden");
+  el("mainrsFallback").dataset.show = "";
+  el("mainrsFallback").classList.add("hidden");
+});
+
+el("tabMainrs").addEventListener("click", () => setViewTab("mainrs"));
+el("tabMap").addEventListener("click", () => setViewTab("map"));
+
 /* ---------- playback ---------- */
 
 function stopPlayback() {
@@ -465,4 +521,5 @@ async function pollLoop() {
   setTimeout(pollLoop, 1500);
 }
 
+setViewTab("mainrs");
 loadScenarios().then(pollLoop);

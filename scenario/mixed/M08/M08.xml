@@ -124,16 +124,16 @@
         <PlayerActions Player="New Player01 Copy 04"/>
         <PlayerActions Player="New Player02">
             <Action Name="">
-                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="4.0000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="4.0000000000000000e+01" X="2.4296734912109375e+02" Y="1.4632081420898439e+02"/>
-                <SpeedChange Rate="2.0000000000000000e+02" Target="1.8055555555555554e+01" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="3.8000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="3.8000000000000000e+01" X="2.4296734912109375e+02" Y="1.4632081420898439e+02"/>
+                <SpeedChange Rate="2.0000000000000000e+02" Target="1.8611111111111111e+01" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
             </Action>
         </PlayerActions>
         <PlayerActions Player="New Player03">
             <Action Name="">
-                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="6.0000000000000000e+00" CounterVal="0" Pivot="New Player02"/>
-                <EditorPos Radius="6.0000000000000000e+00" X="3.5780102728709124e+02" Y="-1.0091060226618632e+02"/>
-                <SpeedChange Rate="2.0000000000000000e+02" Target="1.9444444444444443e+01" Force="true" ExecutionTimes="1" ActiveOnEnter="false" DelayTime="0.0000000000000000e+00"/>
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="2.0000000000000000e+00" CounterVal="0" Pivot="New Player02"/>
+                <EditorPos Radius="2.0000000000000000e+00" X="3.5780102728709124e+02" Y="-1.0091060226618632e+02"/>
+                <SpeedChange Rate="2.0000000000000000e+02" Target="1.8611111111111111e+01" Force="true" ExecutionTimes="1" ActiveOnEnter="false" DelayTime="0.0000000000000000e+00"/>
             </Action>
         </PlayerActions>
         <PlayerActions Player="New Player01 Copy 05"/>
@@ -146,29 +146,31 @@
             <Waypoint X="4.6126770019531250e+02" Y="-4.4249942779541016e+01" Options="0x00000000" Z="4.0152932467161222e+01" Weight="1.0000000000000000e+00" Yaw="3.5657870911845109e+00" Pitch="1.9687012068622702e-04" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
         </PathShape>
         <PathShape ShapeId="2" ShapeType="polyline" Closed="false" Name="PathShape02">
-            <Waypoint X="5.1016375732421875e+02" Y="-1.1192814636230469e+02" Options="0x00000000" Z="4.2060522879618908e+01" Weight="1.0000000000000000e+00" Yaw="4.0037613534073184e+00" Pitch="2.6195289132660841e-02" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
-            <Waypoint X="5.0698379516601562e+02" Y="-1.1563809204101562e+02" Options="0x00000000" Z="4.1932495744657686e+01" Weight="1.0000000000000000e+00" Yaw="5.9570316850869425e+00" Pitch="6.2485564239126852e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
-            <Waypoint X="5.1213232421875000e+02" Y="-1.1737949371337891e+02" Options="0x00000000" Z="4.2120780923706583e+01" Weight="1.0000000000000000e+00" Yaw="3.6360513867637403e+00" Pitch="6.2831827164406624e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
-            <Waypoint X="5.0342529296875000e+02" Y="-1.2207370758056641e+02" Options="0x00000000" Z="4.2120806550821058e+01" Weight="1.0000000000000000e+00" Yaw="3.6360513867637403e+00" Pitch="6.2831827164406624e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="5.1016375732421875e+02" Y="-1.1192814636230469e+02" Options="0x00000000" Z="4.2060522879618908e+01" Weight="1.0000000000000000e+00" Yaw="3.7298138409285664e+00" Pitch="1.4856737321639718e-02" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="5.0240014648437500e+02" Y="-1.1710633850097656e+02" Options="0x00000000" Z="4.1921868727338605e+01" Weight="1.0000000000000000e+00" Yaw="4.4939006820657414e-02" Pitch="6.2783892572536013e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="5.0909637451171875e+02" Y="-1.1680521392822266e+02" Options="0x00000000" Z="4.1954016873875268e+01" Weight="1.0000000000000000e+00" Yaw="3.8902063635660209e+00" Pitch="6.2616414916223997e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="5.0342529296875000e+02" Y="-1.2207370758056641e+02" Options="0x00000000" Z="4.2120806550821058e+01" Weight="1.0000000000000000e+00" Yaw="3.8902063635660209e+00" Pitch="6.2616414916223997e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
         </PathShape>
-        <Character CharacterType="female_child" Class="pedestrian" Appearance="" Name="New Character">
+        <Character CharacterType="female_child" Class="pedestrian" Appearance="Julia" Name="New Character">
             <StartPosAbs X="4.7098870849609375e+02" Y="-3.9694473266601562e+01" Z="4.0154564596442235e+01" Direction="3.6416879463450385e+00"/>
         </Character>
-        <Character CharacterType="wheelchair_adult" Class="pedestrian" Appearance="" Name="New Character Copy ">
+        <Character CharacterType="male_child" Class="pedestrian" Appearance="Martin" Name="New Character Copy ">
             <StartPosAbs X="5.1000344848632812e+02" Y="-1.1144819259643555e+02" Z="4.1903728568564389e+01" Direction="3.6416879463450385e+00"/>
         </Character>
         <CharacterActions Character="New Character">
             <Action Name="">
-                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="8.0000000000000000e+00" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="8.0000000000000000e+00" X="2.4296734912109375e+02" Y="1.4632081420898439e+02"/>
-                <Motion Move="walk" Rate="0.0000000000000000e+00" Speed="1.2000000476837158e+00" Force="false" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="2.3000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="2.3000000000000000e+01" X="2.4296734912109375e+02" Y="1.4632081420898439e+02"/>
+                <Motion Move="walk" Rate="0.0000000000000000e+00" Speed="1.2000000476837158e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <CharacterPath Loop="false" PathShape="1" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Beam="true" ClampToGround="false"/>
             </Action>
         </CharacterActions>
         <CharacterActions Character="New Character Copy ">
             <Action Name="">
-                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="8.0000000000000000e+00" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="8.0000000000000000e+00" X="2.4296734912109375e+02" Y="1.4632081420898439e+02"/>
-                <Motion Move="cycle" Rate="0.0000000000000000e+00" Speed="1.3500000238418579e+00" Force="false" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="2.3000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="2.3000000000000000e+01" X="2.4296734912109375e+02" Y="1.4632081420898439e+02"/>
+                <Motion Move="run" Rate="0.0000000000000000e+00" Speed="3.0000000000000000e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <CharacterPath Loop="false" PathShape="2" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Beam="true" ClampToGround="false"/>
             </Action>
         </CharacterActions>
     </MovingObjectsControl>
