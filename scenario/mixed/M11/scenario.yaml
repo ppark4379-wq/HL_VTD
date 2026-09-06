@@ -1,0 +1,154 @@
+schema_version: 1
+scenario:
+  id: M11
+  category: mixed
+  name: checkpoint_path_shape_route
+  description: VTD PathShape01의 8개 체크포인트를 이용한 LivingLAB 경로 추종을 검증
+  file: M11.xml
+  format: vtd_native
+  map: LivingLAB
+runtime:
+  simulator: VTD
+  simulator_version: '2025.2'
+  sync_source_before_run: /home/autonav/VIRES/VTD.2025.2/Data/Projects/Current/Scenarios/M11.xml
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+  preserve_checkpoint_coordinates: true
+  path_shape_lane_snap: true
+  trim_route_to_ego_start: true
+validation:
+  ego_control: external
+  start_position_tolerance_m: 5.0
+  start_heading_tolerance_deg: 10.0
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+entities:
+- name: Ego
+  type: vehicle
+  role: ego
+  initial_position:
+    x: 1295.383403945076
+    y: 647.1965090676454
+    z: 47.42239567892929
+    heading_rad: 4.79042583043661
+- name: New Player
+  type: vehicle
+  role: relevant_object
+  initial_path_shape:
+    path_shape_id: 4
+    start_s_m: 15.010000000000002
+    target_s_m: 57.30939146987177
+- name: New Player01
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1457.512451171875
+    y: 547.9099731445312
+    z: 57.450301375
+    heading_rad: 5.261022321241262
+- name: New Player02
+  type: vehicle
+  role: relevant_object
+  initial_route:
+    path_id: 1
+    start_s_m: 321.07404752724995
+    target_s_m: 615.3106352845699
+    start_lane: -1
+- name: New Player03
+  type: vehicle
+  role: relevant_object
+  initial_route:
+    path_id: 1
+    start_s_m: 334.8257513716745
+    target_s_m: 615.3106352845699
+    start_lane: -1
+- name: New Player04
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1463.7791748046875
+    y: 539.5462036132812
+    z: 57.450301375
+    heading_rad: 4.754200667397316
+- name: New Player05
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1462.48583984375
+    y: 480.6123962402344
+    z: 59.710857427688985
+    heading_rad: 4.7541975565867585
+- name: 'New Player05 Copy '
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1466.3792724609375
+    y: 473.5582275390625
+    z: 60.00616529759002
+    heading_rad: 4.7541975565867585
+- name: New Player05 Copy 01
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1462.71484375
+    y: 473.5582275390625
+    z: 60.00148992685778
+    heading_rad: 4.7541975565867585
+- name: New Player05 Copy 02
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1469.9522705078125
+    y: 460.9156799316406
+    z: 60.0969973
+    heading_rad: 4.7541975565867585
+- name: New Player05 Copy 03
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1459.7513427734375
+    y: 467.7730407714844
+    z: 60.09630939244774
+    heading_rad: 4.7541975565867585
+- name: New Player05 Copy 04
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1463.0521240234375
+    y: 467.23468017578125
+    z: 60.0969973
+    heading_rad: 4.7541975565867585
+- name: New Player05 Copy 05
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1463.680419921875
+    y: 453.8100280761719
+    z: 60.0969973
+    heading_rad: 4.7541975565867585
+- name: New Character
+  type: pedestrian
+  role: relevant_object
+  initial_position:
+    x: 1292.8365478515625
+    y: 611.6793823242188
+    z: 51.61726186195041
+    heading_rad: 0.0
+events: []
+expected_outcomes:
+- follow_reference_path
+- reach_route_end
+evaluation:
+  codes:
+  - internal.mixed_checkpoint_path_shape_route
+  required_metrics:
+  - ego_speed
+  - lateral_error
+  - collision
+  - route_progress
+  thresholds_status: pending

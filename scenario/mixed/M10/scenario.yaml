@@ -1,0 +1,178 @@
+schema_version: 1
+scenario:
+  id: M10
+  category: mixed
+  name: checkpoint_path_shape_route
+  description: VTD PathShape02의 10개 체크포인트를 이용한 LivingLAB 경로 추종을 검증
+  file: M10.xml
+  format: vtd_native
+  map: LivingLAB
+runtime:
+  simulator: VTD
+  simulator_version: '2025.2'
+  sync_source_before_run: /home/autonav/VIRES/VTD.2025.2/Data/Projects/Current/Scenarios/M10.xml
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+  preserve_checkpoint_coordinates: true
+  path_shape_lane_snap: true
+  trim_route_to_ego_start: true
+validation:
+  ego_control: external
+  start_position_tolerance_m: 5.0
+  start_heading_tolerance_deg: 10.0
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+entities:
+- name: Ego
+  type: vehicle
+  role: ego
+  initial_position:
+    x: 1229.5
+    y: -721.366
+    z: 69.4757
+    heading_rad: 3.8842302503133808
+- name: New Player
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1213.4364013671875
+    y: -733.8172607421875
+    z: 62.512554443068986
+    heading_rad: 3.8218809455911904
+- name: New Player01
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1198.65283203125
+    y: -755.2455444335938
+    z: 60.96104092795472
+    heading_rad: 3.8207655158726204
+- name: New Player02
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1124.2261962890625
+    y: -631.7669677734375
+    z: 64.48782729089658
+    heading_rad: 0.6644106128650211
+- name: New Player04
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1186.9874267578125
+    y: -578.109619140625
+    z: 70.33464949047996
+    heading_rad: 0.6667335160258414
+- name: New Player06
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1093.30810546875
+    y: -453.65496826171875
+    z: 67.43184605215257
+    heading_rad: 3.3378775600119326
+- name: New Player05
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1105.26953125
+    y: -721.8533935546875
+    z: 60.06333080876643
+    heading_rad: 2.2384026535822272
+- name: New Player07
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1115.3548583984375
+    y: -730.2505493164062
+    z: 60.11823898347681
+    heading_rad: 2.2384026535824506
+- name: New Player08
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1094.2742919921875
+    y: -703.5064086914062
+    z: 60.035
+    heading_rad: 2.238402653475481
+- name: 'New Player08 Copy '
+  type: vehicle
+  role: relevant_object
+  initial_route:
+    path_id: 2
+    start_s_m: 0.0
+    target_s_m: 112.76377401388403
+    start_lane: 2
+- name: New Player03
+  type: vehicle
+  role: relevant_object
+  initial_path_shape:
+    path_shape_id: 5
+    start_s_m: 0.01
+    target_s_m: 82.20030799190451
+- name: New Character
+  type: pedestrian
+  role: relevant_object
+  initial_position:
+    x: 1163.905029296875
+    y: -766.6567993164062
+    z: 60.617
+    heading_rad: 5.405951559836352
+- name: New Character01
+  type: pedestrian
+  role: relevant_object
+  initial_position:
+    x: 1185.1583251953125
+    y: -788.7342529296875
+    z: 60.617
+    heading_rad: 2.270322243347185
+- name: New Object
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1205.6163330078125
+    y: -745.8270874023438
+    z: 61.519202741710814
+    heading_rad: 5.343813161226102
+- name: New Object01
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1098.3291015625
+    y: -714.3001708984375
+    z: 60.035
+    heading_rad: 5.237166974151671
+- name: 'New Object01 Copy '
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1098.9964599609375
+    y: -713.90478515625
+    z: 60.035
+    heading_rad: 5.237166974151671
+- name: New Object01 Copy 01
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1099.7379150390625
+    y: -713.4598388671875
+    z: 60.035
+    heading_rad: 5.237166974151671
+events: []
+expected_outcomes:
+- follow_reference_path
+- reach_route_end
+evaluation:
+  codes:
+  - internal.mixed_checkpoint_path_shape_route
+  required_metrics:
+  - ego_speed
+  - lateral_error
+  - collision
+  - route_progress
+  thresholds_status: pending

@@ -11,7 +11,6 @@
     <PulkTraffic/>
     <TrafficControl>
         <Path Name="Path01" PathId="1">
-            <Waypoint PathOption="shortest" s="1.3164351717641052e+01" TrackId="2004"/>
             <Waypoint PathOption="shortest" s="1.2960384212297356e+01" TrackId="2003"/>
             <Waypoint PathOption="shortest" s="7.3386561154421770e-01" TrackId="1928"/>
         </Path>
@@ -39,7 +38,7 @@
             <Init>
                 <Speed Value="8.3333333333333339e+00"/>
                 <PosRoute/>
-                <PathRef StartS="1.1410431275842249e+01" EndAction="continue" TargetS="2.5768866142254330e+02" StartLane="3" PathId="1"/>
+                <PathRef StartS="1.4041000000000000e+02" EndAction="continue" TargetS="1.9480958335893865e+02" StartLane="-3" PathId="1"/>
             </Init>
         </Player>
         <Player>
@@ -47,7 +46,7 @@
             <Init>
                 <Speed Value="8.3333333333333339e+00"/>
                 <PosRoute/>
-                <PathRef StartS="6.1819387312504732e+00" EndAction="continue" TargetS="2.5768866142254330e+02" StartLane="3" PathId="1"/>
+                <PathRef StartS="1.3318000000000001e+02" EndAction="continue" TargetS="1.9480958335893865e+02" StartLane="-3" PathId="1"/>
             </Init>
         </Player>
         <Player>
@@ -55,7 +54,7 @@
             <Init>
                 <Speed Value="8.3333333333333339e+00"/>
                 <PosRoute/>
-                <PathRef StartS="8.6537736660545939e-01" EndAction="continue" TargetS="2.5768866142254330e+02" StartLane="3" PathId="1"/>
+                <PathRef StartS="1.2687000000000000e+02" EndAction="continue" TargetS="1.9480958335893865e+02" StartLane="-3" PathId="1"/>
             </Init>
         </Player>
         <Player>
@@ -63,7 +62,7 @@
             <Init>
                 <Speed Value="8.3333333333333339e+00"/>
                 <PosRoute/>
-                <PathRef StartS="6.1819387312504732e+00" EndAction="continue" TargetS="2.5768866142254330e+02" StartLane="2" PathId="1"/>
+                <PathRef StartS="1.2718000000000001e+02" EndAction="continue" TargetS="1.9480958335893865e+02" StartLane="-2" PathId="1"/>
             </Init>
         </Player>
         <Player>
@@ -71,7 +70,7 @@
             <Init>
                 <Speed Value="8.3333333333333339e+00"/>
                 <PosRoute/>
-                <PathRef StartS="1.1410431275842249e+01" EndAction="continue" TargetS="2.5768866142254330e+02" StartLane="2" PathId="1"/>
+                <PathRef StartS="1.3341000000000000e+02" EndAction="continue" TargetS="1.9480958335893865e+02" StartLane="-2" PathId="1"/>
             </Init>
         </Player>
         <Player>
@@ -79,7 +78,7 @@
             <Init>
                 <Speed Value="8.3333333333333339e+00"/>
                 <PosRoute/>
-                <PathRef StartS="8.6537736660545939e-01" EndAction="continue" TargetS="2.5768866142254330e+02" StartLane="2" PathId="1"/>
+                <PathRef StartS="1.3987000000000000e+02" EndAction="continue" TargetS="1.9480958335893865e+02" StartLane="-2" PathId="1"/>
             </Init>
         </Player>
         <Player>
@@ -87,7 +86,7 @@
             <Init>
                 <Speed Value="0.0000000000000000e+00"/>
                 <PosRoute/>
-                <PathRef StartS="9.2000000000000000e+01" EndAction="continue" TargetS="2.0106522352803296e+02" StartLane="-2" PathId="2"/>
+                <PathRef StartS="1.1900000000000000e+02" EndAction="continue" TargetS="2.0106522352803296e+02" StartLane="-2" PathId="2"/>
             </Init>
         </Player>
         <Player>
@@ -101,7 +100,14 @@
             <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player06"/>
             <Init>
                 <Speed Value="0.0000000000000000e+00"/>
-                <PosAbsolute X="8.1613903808593750e+02" Y="-8.8389904785156250e+02" Z="5.3790407694564713e+01" Direction="3.8073826535914819e+00" AlignToRoad="true"/>
+                <PosAbsolute X="8.1565716552734375e+02" Y="-8.8431207275390625e+02" Z="5.3843493778834116e+01" Direction="3.8073826535914819e+00" AlignToRoad="true"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player07"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosAbsolute X="6.5264117431640625e+02" Y="-7.3706408691406250e+02" Z="4.9896778750000003e+01" Direction="6.7161675005680088e-01" AlignToRoad="true"/>
             </Init>
         </Player>
         <PlayerActions Player="Ego"/>
@@ -122,14 +128,16 @@
         <PlayerActions Player="New Player01 Copy 02"/>
         <PlayerActions Player="New Player04">
             <Action Name="">
-                <PosAbsolute CounterID="" CounterComp="COMP_EQ" Radius="7.0000000000000000e+00" X="7.9469647216796875e+02" Y="-6.8331469726562500e+02" NetDist="false" CounterVal="0" Pivot="Ego"/>
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="2.1000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="2.1000000000000000e+01" X="5.2179081361304475e+02" Y="-7.0778173189915151e+02"/>
                 <LaneChange Direction="-1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Time="2.0000000000000000e+00"/>
-                <SpeedChange Rate="6.8000000000000000e+01" Target="0.0000000000000000e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="7.0000000000000000e+00"/>
-                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="7.0000000000000000e+00"/>
+                <SpeedChange Rate="6.8000000000000000e+01" Target="0.0000000000000000e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="8.0000000000000000e+00"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
             </Action>
         </PlayerActions>
         <PlayerActions Player="New Player05"/>
         <PlayerActions Player="New Player06"/>
+        <PlayerActions Player="New Player07"/>
     </TrafficControl>
     <MovingObjectsControl>
         <PathShape ShapeId="1" ShapeType="polyline" Closed="false" Name="PathShape01">
@@ -146,17 +154,29 @@
             <Waypoint X="8.4560406494140625e+02" Y="-8.5269812011718750e+02" Options="0x00000000" Z="5.3595999999999997e+01" Weight="1.0000000000000000e+00" Yaw="5.3844987578750416e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
             <Waypoint X="8.5325756835937500e+02" Y="-8.6231677246093750e+02" Options="0x00000000" Z="5.3595999999999997e+01" Weight="1.0000000000000000e+00" Yaw="5.3844987578750416e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
         </PathShape>
+        <PathShape ShapeId="3" ShapeType="polyline" Closed="false" Name="PathShape03">
+            <Waypoint X="5.3356463623046875e+02" Y="-7.2918115234375000e+02" Options="0x00000000" Z="5.1934999999999995e+01" Weight="1.0000000000000000e+00" Yaw="6.2803722239761539e-01" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="5.4437097167968750e+02" Y="-7.2133453369140625e+02" Options="0x00000000" Z="5.1934999999999995e+01" Weight="1.0000000000000000e+00" Yaw="6.2803722239761539e-01" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+        </PathShape>
+        <PathShape ShapeId="4" ShapeType="polyline" Closed="false" Name="PathShape04">
+            <Waypoint X="5.7541400146484375e+02" Y="-7.8038909912109375e+02" Options="0x00000000" Z="5.2923000000000002e+01" Weight="1.0000000000000000e+00" Yaw="6.5374416055517404e-01" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="5.8480242919921875e+02" Y="-7.7319635009765625e+02" Options="0x00000000" Z="5.2923000000000002e+01" Weight="1.0000000000000000e+00" Yaw="6.5374416055517404e-01" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+        </PathShape>
         <Character CharacterType="bicycle_adult" Class="pedestrian" Appearance="default" Name="New Character">
             <StartPosAbs X="5.3317822265625000e+02" Y="-7.2804382324218750e+02" Z="5.1934999999999995e+01" Direction="7.3689192464670494e-01"/>
         </Character>
         <Character CharacterType="male_adult" Class="pedestrian" Appearance="Christian" Name="New Character01">
             <StartPosAbs X="8.4559368896484375e+02" Y="-8.5264703369140625e+02" Z="5.3445999999999998e+01" Direction="5.4083630381183507e+00"/>
         </Character>
+        <Character CharacterType="male_adult" Class="pedestrian" Appearance="Christian" Name="New Character02">
+            <StartPosAbs X="5.7535998535156250e+02" Y="-7.8058142089843750e+02" Z="5.2773000000000003e+01" Direction="5.6671617713267475e-01"/>
+        </Character>
         <CharacterActions Character="New Character">
             <Action Name="">
                 <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.0000000000000000e+01" CounterVal="0" Pivot="Ego"/>
                 <EditorPos Radius="1.0000000000000000e+01" X="5.2179081361304475e+02" Y="-7.0778173189915151e+02"/>
                 <Motion Move="cycle" Rate="0.0000000000000000e+00" Speed="4.4388890266418457e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <CharacterPath Loop="false" PathShape="3" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Beam="true" ClampToGround="false"/>
             </Action>
         </CharacterActions>
         <CharacterActions Character="New Character01">
@@ -167,16 +187,28 @@
                 <CharacterPath Loop="false" PathShape="2" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Beam="true" ClampToGround="false"/>
             </Action>
         </CharacterActions>
+        <CharacterActions Character="New Character02">
+            <Action Name="">
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.0000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="1.0000000000000000e+01" X="5.2179081361304475e+02" Y="-7.0778173189915151e+02"/>
+                <Motion Move="walk" Rate="0.0000000000000000e+00" Speed="1.7000000476837158e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <CharacterPath Loop="false" PathShape="4" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Beam="true" ClampToGround="false"/>
+            </Action>
+        </CharacterActions>
         <Object Type="other" Name="New Object" Definition="RdMiscPylon03-32cm">
             <Scaling X="3.0000000000000000e+00" Y="3.0000000000000000e+00" Z="3.0000000000000000e+00"/>
             <StartPosAbs X="8.2107299804687500e+02" Y="-8.7561663818359375e+02" Z="5.3445999999999991e+01" Direction="6.6903121490869455e-01" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00"/>
         </Object>
         <Object Type="vegetation" Name="New Object01" Definition="VegTulips">
             <Scaling X="3.0000000000000000e+00" Y="3.0000000000000000e+00" Z="3.0000000000000000e+00"/>
-            <StartPosAbs X="8.0524029541015625e+02" Y="-8.8847174072265625e+02" Z="5.4744974314289252e+01" Direction="0.0000000000000000e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00"/>
+            <StartPosAbs X="8.0331298828125000e+02" Y="-8.9012365722656250e+02" Z="5.4953857830421505e+01" Direction="0.0000000000000000e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00"/>
+        </Object>
+        <Object Type="other" Name="New Object02" Definition="WorkBench01">
+            <StartPosAbs X="6.4608319091796875e+02" Y="-7.4714312744140625e+02" Z="4.9950934763003303e+01" Direction="5.6274615736998801e-01" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00"/>
         </Object>
         <ObjectActions Object="New Object"/>
         <ObjectActions Object="New Object01"/>
+        <ObjectActions Object="New Object02"/>
     </MovingObjectsControl>
     <LightSigns>
         <SignalController Id="1" DelayRef="-1" Delay="0.0000000000000000e+00">
@@ -422,12 +454,14 @@
         <SignalController Id="49" DelayRef="-1" Delay="0.0000000000000000e+00">
             <Phase Duration="1.5000000000000000e+01" Type="go"/>
             <Phase Duration="3.0000000000000000e+00" Type="attention"/>
-            <Phase Duration="1.8000000000000000e+01" Type="stop"/>
+            <Phase Duration="1.5000000000000000e+01" Type="blink"/>
+            <Phase Duration="1.5000000000000000e+01" Type="stop"/>
         </SignalController>
         <SignalController Id="50" DelayRef="-1" Delay="0.0000000000000000e+00">
             <Phase Duration="1.5000000000000000e+01" Type="go"/>
             <Phase Duration="3.0000000000000000e+00" Type="attention"/>
-            <Phase Duration="1.8000000000000000e+01" Type="stop"/>
+            <Phase Duration="1.5000000000000000e+01" Type="blink"/>
+            <Phase Duration="1.5000000000000000e+01" Type="stop"/>
         </SignalController>
         <SignalController Id="51" DelayRef="-1" Delay="0.0000000000000000e+00">
             <Phase Duration="1.8000000000000000e+01" Type="stop"/>
@@ -625,10 +659,9 @@
             <Phase Duration="1.3000000000000000e+01" Type="stop"/>
         </SignalController>
         <SignalController Id="90" DelayRef="-1" Delay="0.0000000000000000e+00">
-            <Phase Duration="1.0000000000000000e+01" Type="go"/>
+            <Phase Duration="8.0000000000000000e+01" Type="stop"/>
             <Phase Duration="3.0000000000000000e+00" Type="attention"/>
-            <Phase Duration="1.3000000000000000e+01" Type="blink"/>
-            <Phase Duration="1.3000000000000000e+01" Type="stop"/>
+            <Phase Duration="2.0000000000000000e+01" Type="go"/>
         </SignalController>
         <SignalController Id="91" DelayRef="-1" Delay="0.0000000000000000e+00">
             <Phase Duration="1.5000000000000000e+01" Type="go"/>
@@ -4839,13 +4872,13 @@
         </Signal>
         <Signal Id="291">
             <LightState>
-                <Light state="false"/>
-            </LightState>
-            <LightState>
-                <Light state="false"/>
-            </LightState>
-            <LightState>
                 <Light state="true"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
             </LightState>
         </Signal>
         <Signal Id="292">
@@ -4861,13 +4894,13 @@
         </Signal>
         <Signal Id="293">
             <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
+                <Light state="false"/>
+            </LightState>
+            <LightState>
                 <Light state="true"/>
-            </LightState>
-            <LightState>
-                <Light state="false"/>
-            </LightState>
-            <LightState>
-                <Light state="false"/>
             </LightState>
         </Signal>
         <Signal Id="294">

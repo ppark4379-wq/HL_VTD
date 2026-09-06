@@ -49,55 +49,55 @@ entities:
   role: relevant_object
   initial_route:
     path_id: 1
-    start_s_m: 11.41043127584225
-    target_s_m: 257.6886614225433
-    start_lane: 3
+    start_s_m: 140.41
+    target_s_m: 194.80958335893865
+    start_lane: -3
 - name: New Player02
   type: vehicle
   role: relevant_object
   initial_route:
     path_id: 1
-    start_s_m: 6.181938731250473
-    target_s_m: 257.6886614225433
-    start_lane: 3
+    start_s_m: 133.18
+    target_s_m: 194.80958335893865
+    start_lane: -3
 - name: New Player03
   type: vehicle
   role: relevant_object
   initial_route:
     path_id: 1
-    start_s_m: 0.8653773666054594
-    target_s_m: 257.6886614225433
-    start_lane: 3
+    start_s_m: 126.87
+    target_s_m: 194.80958335893865
+    start_lane: -3
 - name: 'New Player01 Copy '
   type: vehicle
   role: relevant_object
   initial_route:
     path_id: 1
-    start_s_m: 6.181938731250473
-    target_s_m: 257.6886614225433
-    start_lane: 2
+    start_s_m: 127.18
+    target_s_m: 194.80958335893865
+    start_lane: -2
 - name: New Player01 Copy 01
   type: vehicle
   role: relevant_object
   initial_route:
     path_id: 1
-    start_s_m: 11.41043127584225
-    target_s_m: 257.6886614225433
-    start_lane: 2
+    start_s_m: 133.41
+    target_s_m: 194.80958335893865
+    start_lane: -2
 - name: New Player01 Copy 02
   type: vehicle
   role: relevant_object
   initial_route:
     path_id: 1
-    start_s_m: 0.8653773666054594
-    target_s_m: 257.6886614225433
-    start_lane: 2
+    start_s_m: 139.87
+    target_s_m: 194.80958335893865
+    start_lane: -2
 - name: New Player04
   type: vehicle
   role: relevant_object
   initial_route:
     path_id: 2
-    start_s_m: 92.0
+    start_s_m: 119.0
     target_s_m: 201.06522352803296
     start_lane: -2
 - name: New Player05
@@ -110,12 +110,20 @@ entities:
     heading_rad: 3.805692653568272
 - name: New Player06
   type: vehicle
-  initial_position:
-    x: 816.1390380859375
-    y: -883.8990478515625
-    z: 53.79040769456471
-    heading_rad: 3.807382653591482
   role: relevant_object
+  initial_position:
+    x: 815.6571655273438
+    y: -884.3120727539062
+    z: 53.843493778834116
+    heading_rad: 3.807382653591482
+- name: New Player07
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 652.6411743164062
+    y: -737.0640869140625
+    z: 49.89677875
+    heading_rad: 0.6716167500568009
 - name: New Character
   type: pedestrian
   role: relevant_object
@@ -132,6 +140,14 @@ entities:
     y: -852.6470336914062
     z: 53.446
     heading_rad: 5.408363038118351
+- name: New Character02
+  type: pedestrian
+  role: relevant_object
+  initial_position:
+    x: 575.3599853515625
+    y: -780.5814208984375
+    z: 52.773
+    heading_rad: 0.5667161771326747
 - name: New Object
   type: obstacle
   role: relevant_object
@@ -146,16 +162,24 @@ entities:
     z: 3.0
 - name: New Object01
   type: obstacle
+  role: relevant_object
   initial_position:
-    x: 805.2402954101562
-    y: -888.4717407226562
-    z: 54.74497431428925
+    x: 803.31298828125
+    y: -890.1236572265625
+    z: 54.953857830421505
     heading_rad: 0.0
   scale:
     x: 3.0
     y: 3.0
     z: 3.0
+- name: New Object02
+  type: obstacle
   role: relevant_object
+  initial_position:
+    x: 646.0831909179688
+    y: -747.1431274414062
+    z: 49.9509347630033
+    heading_rad: 0.562746157369988
 events: []
 expected_outcomes:
 - follow_reference_path

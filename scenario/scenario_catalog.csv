@@ -34,3 +34,5 @@ M06,mixed,mixed/M06,internal.mixed_checkpoint_vehicle_cluster,packaged,M04 체�
 M07,mixed,mixed/M07,internal.mixed_pretest_checkpoint_vehicle_cluster,packaged,M05 체크포인트 경로의 다중 이륜차·차량 및 보행자 대응; XML 편집 중·실주행 검증 전
 M08,mixed,mixed/M08,internal.mixed_checkpoint_dense_vehicle_cluster,packaged,M06 체크포인트 경로의 밀집된 다중 정차·주행 차량 대응; XML 편집 중·실주행 검증 전
 M09,mixed,mixed/M09,internal.mixed_checkpoint_path_shape_route,packaged,VTD PathShape01 8개 체크포인트 경로 추종; 실주행 검증 전
+M10,mixed,mixed/M10,internal.mixed_checkpoint_path_shape_route,packaged,VTD PathShape02 10개 체크포인트 경로 추종; 실주행 검증 전
+M11,mixed,mixed/M11,internal.mixed_checkpoint_path_shape_route,packaged,VTD PathShape01 8개 체크포인트 경로 추종; 실주행 검증 전

@@ -153,6 +153,47 @@ def default_run_id() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 
 
+def sync_vtd_source_before_run(package: Path) -> bool:
+    manifest_path = package.resolve() / "scenario.yaml"
+    try:
+        manifest = load_manifest(manifest_path)
+    except (OSError, ValueError, RuntimeError) as error:
+        print(f"[run_scenario] cannot read source-sync setting: {error}",
+              file=sys.stderr)
+        return False
+    runtime = manifest.get("runtime", {})
+    if not isinstance(runtime, dict):
+        return True
+    raw_source = runtime.get("sync_source_before_run")
+    if raw_source is None:
+        return True
+    if not isinstance(raw_source, str) or not raw_source.strip():
+        print(
+            "[run_scenario] runtime.sync_source_before_run must be a path",
+            file=sys.stderr,
+        )
+        return False
+    source = Path(raw_source).expanduser().resolve()
+    if not source.is_file():
+        print(f"[run_scenario] VTD sync source not found: {source}",
+              file=sys.stderr)
+        return False
+    sync_tool = REPO_ROOT / "tools" / "sync_vtd_scenario.py"
+    print(f"[run_scenario] syncing VTD source before run: {source}", flush=True)
+    completed = subprocess.run(
+        [sys.executable, str(sync_tool), str(source)],
+        cwd=REPO_ROOT,
+        check=False,
+    )
+    if completed.returncode != 0:
+        print(
+            "[run_scenario] VTD source sync failed; run was not started.",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -486,6 +527,8 @@ def run_automated(
 
 def main() -> int:
     args = parse_args()
+    if not sync_vtd_source_before_run(args.package):
+        return 2
     report = validate_scenario(args.package)
     report.print()
     if report.exit_code != 0:

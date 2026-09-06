@@ -70,6 +70,8 @@ class RouteSyncOptions:
     smooth_checkpoint_segments: tuple[int, ...] = ()
     smooth_checkpoint_handle_m: float = 8.0
     preserve_checkpoint_coordinates: bool = False
+    path_shape_lane_snap: bool = False
+    trim_route_to_ego_start: bool = False
 
 
 @dataclass(frozen=True)
@@ -336,6 +338,12 @@ def read_route_sync_options(package: Path) -> RouteSyncOptions:
     preserve_coordinates = route.get("preserve_checkpoint_coordinates", False)
     if not isinstance(preserve_coordinates, bool):
         raise SyncError("route.preserve_checkpoint_coordinates는 bool이어야 합니다")
+    path_shape_lane_snap = route.get("path_shape_lane_snap", False)
+    if not isinstance(path_shape_lane_snap, bool):
+        raise SyncError("route.path_shape_lane_snap은 bool이어야 합니다")
+    trim_route_to_ego_start = route.get("trim_route_to_ego_start", False)
+    if not isinstance(trim_route_to_ego_start, bool):
+        raise SyncError("route.trim_route_to_ego_start는 bool이어야 합니다")
 
     segments = []
     for value in raw_segments:
@@ -366,11 +374,18 @@ def read_route_sync_options(package: Path) -> RouteSyncOptions:
         raise SyncError(
             "하나의 checkpoint 구간에 linear과 smooth 설정을 동시에 사용할 수 없습니다"
         )
+    if path_shape_lane_snap and (segments or smooth_segments):
+        raise SyncError(
+            "path_shape_lane_snap은 linear/smooth checkpoint 설정과 "
+            "함께 사용할 수 없습니다"
+        )
     return RouteSyncOptions(
         linear_checkpoint_segments=tuple(sorted(set(segments))),
         smooth_checkpoint_segments=tuple(sorted(set(smooth_segments))),
         smooth_checkpoint_handle_m=float(smooth_handle),
         preserve_checkpoint_coordinates=preserve_coordinates,
+        path_shape_lane_snap=path_shape_lane_snap,
+        trim_route_to_ego_start=trim_route_to_ego_start,
     )
 
 
@@ -451,6 +466,41 @@ def update_route_yaw_and_s(rows: list[dict[str, str]]) -> None:
                 previous_yaw = math.atan2(next_y - current_y, next_x - current_x)
         row["yaw"] = f"{previous_yaw:.8f}"
         row["s"] = f"{cumulative_s:.8f}"
+
+
+def trim_route_to_ego_start(
+    route_path: Path,
+    ego: EgoAbsolutePosition,
+    maximum_distance_m: float = 5.0,
+) -> None:
+    fieldnames, rows = read_xy_rows(route_path)
+    nearest_index = min(
+        range(len(rows)),
+        key=lambda index: (
+            (xy(rows[index])[0] - ego.x) ** 2
+            + (xy(rows[index])[1] - ego.y) ** 2
+        ),
+    )
+    nearest_x, nearest_y = xy(rows[nearest_index])
+    distance = math.hypot(nearest_x - ego.x, nearest_y - ego.y)
+    if distance > maximum_distance_m:
+        raise SyncError(
+            "Ego 중간 시작 위치가 경로에서 너무 멉니다: "
+            f"distance={distance:.3f}m"
+        )
+    trimmed = rows[nearest_index:]
+    if len(trimmed) < 2:
+        raise SyncError("Ego 중간 시작 위치 뒤에 남은 경로점이 부족합니다")
+    update_route_yaw_and_s(trimmed)
+    with route_path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(trimmed)
+    print(
+        f"[sync] route trimmed to Ego start: removed={nearest_index} "
+        f"distance={distance:.3f}m remaining={len(trimmed)}",
+        flush=True,
+    )
 
 
 def write_checkpoint_slice(
@@ -963,7 +1013,26 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
                 ego_absolute,
                 route_options.preserve_checkpoint_coordinates,
             )
-            if smooth_segments:
+            if route_options.path_shape_lane_snap:
+                run_checked(
+                    [
+                        str(config.checkpoint_generator),
+                        str(config.map_path),
+                        str(staged_lane_map),
+                    ],
+                    config.repo_root,
+                )
+                run_checked(
+                    [
+                        str(config.path_shape_generator),
+                        str(config.map_path),
+                        str(staged_checkpoints),
+                        str(staged_route),
+                        "--lane-snap",
+                    ],
+                    config.repo_root,
+                )
+            elif smooth_segments:
                 if linear_segments:
                     raise SyncError(
                         "smooth checkpoint 경로와 linear checkpoint 경로는 "
@@ -1007,6 +1076,8 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
                         linear_segments,
                     )
                     os.replace(staged_merged_route, staged_route)
+            if route_options.trim_route_to_ego_start:
+                trim_route_to_ego_start(staged_route, ego_absolute)
             run_checked(
                 [
                     sys.executable,
