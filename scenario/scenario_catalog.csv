@@ -36,3 +36,4 @@ M08,mixed,mixed/M08,internal.mixed_checkpoint_dense_vehicle_cluster,packaged,M06
 M09,mixed,mixed/M09,internal.mixed_checkpoint_path_shape_route,packaged,VTD PathShape01 8개 체크포인트 경로 추종; 실주행 검증 전
 M10,mixed,mixed/M10,internal.mixed_checkpoint_path_shape_route,packaged,VTD PathShape02 10개 체크포인트 경로 추종; 실주행 검증 전
 M11,mixed,mixed/M11,internal.mixed_checkpoint_path_shape_route,packaged,VTD PathShape01 8개 체크포인트 경로 추종; 실주행 검증 전
+M12,mixed,mixed/M12,internal.mixed_checkpoint_path_shape_route,packaged,VTD PathShape01 8개 체크포인트 경로 추종; 실주행 검증 전

@@ -103,6 +103,63 @@ void smoothLaneTransitions(std::vector<Waypoint>& route,
     }
 }
 
+bool excessiveCurvatureNearEnd(const std::vector<Waypoint>& route,
+                               std::size_t radius) {
+    if (route.size() < 3) return false;
+    constexpr double kMaximumCurvature = 0.20;
+    const std::size_t begin = route.size() > radius + 1
+        ? route.size() - radius - 1 : 0;
+    for (std::size_t index = begin; index + 1 < route.size(); ++index) {
+        const double spacing = std::hypot(
+            route[index + 1].x - route[index].x,
+            route[index + 1].y - route[index].y);
+        if (spacing <= 1e-9) continue;
+        const double curvature = std::abs(normalizeAngle(
+            route[index + 1].yaw - route[index].yaw)) / spacing;
+        if (curvature > kMaximumCurvature) return true;
+    }
+    return false;
+}
+
+void smoothEndpointTransition(std::vector<Waypoint>& route,
+                              double targetHeading,
+                              std::size_t radius) {
+    if (route.size() < 3 || radius < 2 ||
+        !excessiveCurvatureNearEnd(route, radius)) {
+        return;
+    }
+    const std::size_t begin = route.size() > radius + 1
+        ? route.size() - radius - 1 : 0;
+    const std::size_t end = route.size() - 1;
+    const Waypoint start = route[begin];
+    const Waypoint goal = route[end];
+    const double chord = std::hypot(goal.x - start.x, goal.y - start.y);
+    if (chord <= 1e-9) return;
+
+    const double handle = chord / 3.0;
+    const double control1X = start.x + handle * std::cos(start.yaw);
+    const double control1Y = start.y + handle * std::sin(start.yaw);
+    const double control2X = goal.x - handle * std::cos(targetHeading);
+    const double control2Y = goal.y - handle * std::sin(targetHeading);
+    const double denominator = static_cast<double>(end - begin);
+    for (std::size_t index = begin + 1; index < end; ++index) {
+        const double progress = static_cast<double>(index - begin) /
+                                denominator;
+        const double inverse = 1.0 - progress;
+        route[index].x =
+            inverse * inverse * inverse * start.x +
+            3.0 * inverse * inverse * progress * control1X +
+            3.0 * inverse * progress * progress * control2X +
+            progress * progress * progress * goal.x;
+        route[index].y =
+            inverse * inverse * inverse * start.y +
+            3.0 * inverse * inverse * progress * control1Y +
+            3.0 * inverse * progress * progress * control2Y +
+            progress * progress * progress * goal.y;
+    }
+    updateYawAndS(route);
+}
+
 std::vector<Waypoint> snapPathShapeToLaneCenters(PathGeneratorData& data) {
     std::vector<Waypoint> route;
     constexpr double kGuideInterval = 0.5;
@@ -139,6 +196,14 @@ std::vector<Waypoint> snapPathShapeToLaneCenters(PathGeneratorData& data) {
     smoothLaneTransitions(route, 16);
     removeDuplicates(route);
     updateYawAndS(route);
+    const Checkpoint& previousCheckpoint =
+        data.checkpoints[data.checkpoints.size() - 2];
+    const Checkpoint& finalCheckpoint = data.checkpoints.back();
+    smoothEndpointTransition(
+        route,
+        std::atan2(finalCheckpoint.y - previousCheckpoint.y,
+                   finalCheckpoint.x - previousCheckpoint.x),
+        60);
 
     double maximumLaneCenterDistance = 0.0;
     for (std::size_t index = 0; index < route.size(); ++index) {
