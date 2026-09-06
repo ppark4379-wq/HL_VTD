@@ -86,6 +86,7 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.behavior.crosswalkApproachSpeed > 0.0 &&
            config.behavior.crosswalkNearbyObjectDistance > 0.0 &&
            config.behavior.crosswalkClearanceSpeed > 0.0 &&
+           config.behavior.crosswalkClearanceHoldTime >= 0.0 &&
            config.behavior.signalStopSearchDistance > 0.0 &&
            config.behavior.emergencyTTC > 0.0 &&
            config.behavior.emergencyBrakingDeceleration > 0.0 &&
@@ -207,6 +208,8 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.crosswalkNearbyObjectDistance) &&
         setSpeedConfigValue(values, "planning.crosswalk_clearance_kph",
                        config.behavior.crosswalkClearanceSpeed) &&
+        setConfigValue(values, "planning.crosswalk_clearance_hold_time",
+                       config.behavior.crosswalkClearanceHoldTime) &&
         setConfigValue(values, "planning.crosswalk_stop_line_search",
                        config.behavior.crosswalkStopLineSearch) &&
         setConfigValue(values, "planning.crosswalk_pedestrian_prediction",

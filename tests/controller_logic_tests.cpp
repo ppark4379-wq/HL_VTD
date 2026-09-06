@@ -153,6 +153,34 @@ PathGeneratorData makeStraightTwoLaneMap() {
     return map;
 }
 
+PathGeneratorData makeStraightThreeLaneMap() {
+    PathGeneratorData map = makeStraightTwoLaneMap();
+    Road& road = map.roads.at(1);
+    LaneDefinition lane = road.sections.front().lanes.at(-2);
+    lane.id = -3;
+    road.sections.front().lanes.emplace(-3, lane);
+    map.laneGraph[{1, 0, -2}].push_back({1, 0, -3});
+    map.laneGraph[{1, 0, -3}].push_back({1, 0, -2});
+
+    LaneSegment segment;
+    segment.key = {1, 0, -3};
+    segment.startS = 0.0;
+    segment.endS = 100.0;
+    for (int index = 0; index <= 100; ++index) {
+        Waypoint point;
+        point.x = static_cast<double>(index);
+        point.y = -8.75;
+        point.yaw = 0.0;
+        point.roadS = static_cast<double>(index);
+        point.roadId = 1;
+        point.laneId = -3;
+        point.sectionIndex = 0;
+        segment.points.push_back(point);
+    }
+    map.laneSegments.emplace(segment.key, std::move(segment));
+    return map;
+}
+
 PathPlannerData makeStraightGlobalPath() {
     PathPlannerData planner;
     for (int index = 0; index <= 90; ++index) {
@@ -406,8 +434,29 @@ void testStaticZoneRouteAlignment() {
     crosswalk.polygon = {{30.0, -2.0}, {34.0, -2.0},
                          {34.0, 2.0}, {30.0, 2.0}};
     zones.crosswalks.push_back(crosswalk);
+    StopLine farLine;
+    farLine.id = 9998;
+    farLine.begin = {20.0, 100.0};
+    farLine.end = {24.0, 100.0};
+    zones.stopLines.push_back(farLine);
+    Crosswalk farCrosswalk;
+    farCrosswalk.id = 9999;
+    farCrosswalk.polygon = {{30.0, 100.0}, {34.0, 100.0},
+                            {34.0, 104.0}, {30.0, 104.0}};
+    zones.crosswalks.push_back(farCrosswalk);
     const auto path = makeStraightGlobalPath().waypoints;
-    assert(alignStaticZonesToRoute(zones, path));
+    if (!alignStaticZonesToRoute(zones, path)) {
+        std::cerr << "failed to align static zones\n";
+        std::abort();
+    }
+    if (zones.stopLines.size() != 2 || zones.crosswalks.size() != 2 ||
+        !zones.stopLines.front().routeRelevant ||
+        zones.stopLines.back().routeRelevant ||
+        !zones.crosswalks.front().routeRelevant ||
+        zones.crosswalks.back().routeRelevant) {
+        std::cerr << "route alignment deleted or activated wrong static data\n";
+        std::abort();
+    }
     assert(std::abs(zones.stopLines.front().routeS - 20.0) < 1e-6);
     assert(std::abs(zones.crosswalks.front().entryRouteS - 30.0) < 1e-6);
     assert(std::abs(zones.crosswalks.front().exitRouteS - 34.0) < 1e-6);
@@ -438,24 +487,40 @@ void testScenarioRoutesKeepTheirOwnCrosswalksAndSchoolZone() {
     };
     for (const Case testCase : {
              Case{"scenario/mixed/M03/route.csv", 6289, false},
-             Case{"scenario/mixed/M04/route.csv", 1090, true}}) {
+             Case{"scenario/mixed/M04/route.csv", 1090, true},
+             // M09는 교차로 sibling connector 1784를 타지만
+             // 물리적으로는 road 1781의 횟단보도 1692를 관통한다.
+             Case{"scenario/mixed/M09/route.csv", 1692, true}}) {
         MapRuntimeConfig config;
         std::vector<Waypoint> route;
         if (!loadMapRuntimeConfig(config, "config/maps/living_lab.yaml") ||
-            !loadWaypointsCsv(route, testCase.routePath) ||
-            !alignStaticZonesToRoute(config.zones, route)) {
+            !loadWaypointsCsv(route, testCase.routePath)) {
             std::cerr << "failed to align static zones for "
+                      << testCase.routePath << '\n';
+            std::abort();
+        }
+        const std::size_t loadedStopLineCount =
+            config.zones.stopLines.size();
+        const std::size_t loadedCrosswalkCount =
+            config.zones.crosswalks.size();
+        if (!alignStaticZonesToRoute(config.zones, route) ||
+            config.zones.stopLines.size() != loadedStopLineCount ||
+            config.zones.crosswalks.size() != loadedCrosswalkCount) {
+            std::cerr << "route alignment removed loaded static data for "
                       << testCase.routePath << '\n';
             std::abort();
         }
         const bool hasExpectedCrosswalk = std::any_of(
             config.zones.crosswalks.begin(), config.zones.crosswalks.end(),
             [&](const Crosswalk& crosswalk) {
-                return crosswalk.id == testCase.expectedCrosswalkId;
+                return crosswalk.id == testCase.expectedCrosswalkId &&
+                       crosswalk.routeRelevant;
             });
         const bool hasSchoolZone = std::any_of(
             config.zones.speedZones.begin(), config.zones.speedZones.end(),
-            [](const SpeedZone& zone) { return zone.schoolZone; });
+            [](const SpeedZone& zone) {
+                return zone.schoolZone && zone.routeRelevant;
+            });
         if (!hasExpectedCrosswalk ||
             hasSchoolZone != testCase.expectsSchoolZone) {
             std::cerr << "route-specific static zone regression for "
@@ -667,16 +732,23 @@ void testObstacleLaneChange() {
     assert(!tryPrepareObstacleLaneChange(
         blocked, config, safetyConfig, blockedWorld, map, globalPath, 10));
 
-    // 3초 밖이지만 회피 경로의 목표 차선 위에 있는 객체도 진입 전에 걸러야 한다.
+    // 목표 차선의 더 먼 장애물은 첫 회피를 폐기시키지 않는다.
+    // 현재 장애물보다 여유가 크면 먼저 안착한 뒤 새 차선에서
+    // 후속 장애물을 다시 계획한다.
     targetVehicle.raw.x = 45.0F;
     targetVehicle.pathS = 45.0;
     targetVehicle.obb = makeObb2D(45.0, -5.25, 0.0, 4.0, 2.0);
     WorldState farBlockedWorld = makeWorldWithObstacle();
     farBlockedWorld.objects.push_back(targetVehicle);
     LaneChangeData farBlocked;
-    assert(!tryPrepareObstacleLaneChange(
-        farBlocked, config, safetyConfig, farBlockedWorld,
-        map, globalPath, 10));
+    if (!tryPrepareObstacleLaneChange(
+            farBlocked, config, safetyConfig, farBlockedWorld,
+            map, globalPath, 10) ||
+        farBlocked.routeMode != LaneChangeRouteMode::KeepTargetLane ||
+        farBlocked.rejoinRouteS >= targetVehicle.pathS) {
+        std::cerr << "far target obstacle incorrectly rejected first avoidance\n";
+        std::abort();
+    }
 
     // 정지 이력을 기다리지 않고 현재 프레임에 정적인 객체면 즉시
     // 짧은 횡이동 경로를 OBB 검사한 뒤 회피한다.
@@ -717,6 +789,49 @@ void testObstacleLaneChange() {
         rematchedAvoidance, config, safetyConfig, mismatchedLane,
         map, globalPath, 10));
     assert(rematchedAvoidance.targetLaneId == -2);
+}
+
+void testBlockedAdjacentLanesPreferFartherObstacle() {
+    PathGeneratorData map = makeStraightThreeLaneMap();
+    PathPlannerData globalPath = makeStraightGlobalPath();
+    WorldState world = makeWorldWithObstacle();
+
+    const auto addLaneBlocker = [&](int id, int laneId, double x,
+                                    double y) {
+        WorldObjectState object;
+        object.raw.id = id;
+        object.raw.x = static_cast<float>(x);
+        object.raw.y = static_cast<float>(y);
+        object.raw.length = 4.0F;
+        object.raw.width = 2.0F;
+        object.obb = makeObb2D(x, y, 0.0, 4.0, 2.0);
+        object.laneValid = true;
+        object.roadId = 1;
+        object.laneId = laneId;
+        object.sectionIndex = 0;
+        object.pathValid = true;
+        object.pathS = x;
+        object.relativeS = x - world.egoPathS;
+        object.isAhead = true;
+        world.objects.push_back(object);
+    };
+    // 접근 가능한 두 회피 차선이 모두 막혀 있지만
+    // 2회 횡이동인 -3 차선의 장애물이 더 멀리 있다.
+    // 단순히 가까운 차선(-2)을 고르지 않고 전방 여유가
+    // 큰 차선을 선택해 후속 회피 공간을 확보해야 한다.
+    addLaneBlocker(8, -2, 42.0, -5.25);
+    addLaneBlocker(9, -3, 55.0, -8.75);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    if (!tryPrepareObstacleLaneChange(
+            laneChange, config, safetyConfig, world, map, globalPath, 10) ||
+        laneChange.targetLaneId != -3 ||
+        laneChange.routeMode != LaneChangeRouteMode::KeepTargetLane) {
+        std::cerr << "all-blocked lane ranking did not choose most clearance\n";
+        std::abort();
+    }
 }
 
 void testSolidLineForbidsObstacleLaneChange() {
@@ -1538,6 +1653,205 @@ void testM08DenseSecondBlockerUsesSafeLongitudinalSample() {
     }
 }
 
+void testM09DenseFutureRoadChecksEntireStaticManeuver() {
+    PathGeneratorData map;
+    if (!loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr", 0.5)) {
+        std::cerr << "failed to load LivingLAB map for dense M09 regression\n";
+        std::abort();
+    }
+    PathPlannerData globalPath;
+    if (!loadWaypointsCsv(globalPath.waypoints,
+                          "scenario/mixed/M09/route.csv")) {
+        std::cerr << "failed to load M09 route for dense obstacle regression\n";
+        std::abort();
+    }
+
+    // m09_full_fix frame 3950. 현재 차선의 object 11보다 옆 차선의
+    // object 16이 3.4 m 먼저 있다. 과거의 12초 정적 예측 horizon은
+    // object 16 직전에서 끝나 잘못된 조기 차선변경을 승인했다.
+    WorldState world;
+    world.ego.x = 874.124084F;
+    world.ego.y = -838.382935F;
+    world.ego.heading = -2.44506216F;
+    world.egoSpeed = 2.80346419;
+    const LaneMatch egoMatch = worldToLane(
+        map, world.ego.x, world.ego.y, world.ego.heading);
+    world.egoLaneValid = egoMatch.valid;
+    world.egoRoadId = egoMatch.roadId;
+    world.egoSectionIndex = egoMatch.sectionIndex;
+    world.egoLaneId = egoMatch.laneId;
+    world.egoRoadS = egoMatch.roadS;
+    world.egoLaneWidth = egoMatch.laneWidth;
+    world.egoLaneCenterDistance = egoMatch.distance;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoPathS = 556.372871;
+    world.egoPathD = 3.10229334;
+    world.frontBumperPathS = world.egoPathS + 3.8;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    const auto addStaticObject = [&](int id, double x, double y,
+                                     double heading, double length,
+                                     double width, double relativeS,
+                                     double relativeD, bool onPath) {
+        WorldObjectState object;
+        object.raw.id = id;
+        object.raw.x = static_cast<float>(x);
+        object.raw.y = static_cast<float>(y);
+        object.raw.heading = static_cast<float>(heading);
+        object.raw.speed = 0.0F;
+        object.raw.length = static_cast<float>(length);
+        object.raw.width = static_cast<float>(width);
+        object.obb = makeObb2D(x, y, heading, length, width);
+        const LaneMatch match = worldToLane(map, x, y, heading);
+        object.laneValid = match.valid;
+        object.roadId = match.roadId;
+        object.sectionIndex = match.sectionIndex;
+        object.laneId = match.laneId;
+        object.roadS = match.roadS;
+        object.pathValid = true;
+        object.pathS = world.egoPathS + relativeS;
+        object.pathD = world.egoPathD + relativeD;
+        object.relativeS = relativeS;
+        object.relativeD = relativeD;
+        object.isAhead = true;
+        object.isOnEgoPath = onPath;
+        world.objects.push_back(object);
+    };
+    addStaticObject(2, 852.3479, -851.416016, 3.80569911,
+                    4.39400005, 1.80799997, 25.1811, -3.15886, false);
+    addStaticObject(16, 821.072998, -875.616638, 0.669031203,
+                    0.900000036, 0.900000036, 64.7251, -3.5534, false);
+    addStaticObject(11, 815.6571655, -884.3120728, 3.80738265,
+                    4.39400005, 1.80799997, 68.1411, 0.0465695, true);
+
+    const auto nearest = std::lower_bound(
+        globalPath.waypoints.begin(), globalPath.waypoints.end(),
+        world.egoPathS,
+        [](const Waypoint& point, double s) { return point.s < s; });
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    if (!tryPrepareObstacleLaneChange(
+            laneChange, config, safetyConfig, world, map, globalPath,
+            static_cast<std::size_t>(std::distance(
+                globalPath.waypoints.begin(), nearest)))) {
+        std::cerr << "M09 dense future-road blockers produced no avoidance path\n";
+        std::abort();
+    }
+    // 정상 후보는 가까운 옆 차선 장애물보다 먼저 안착하는 조기 경로가
+    // 아니어야 한다. 실제 OBB 검사를 통과한 늦은 종방향 샘플이어야 한다.
+    if (laneChange.rejoinRouteS < world.egoPathS + 50.0) {
+        std::cerr << "M09 selected a lane shift before checking the closer target-lane blocker"
+                  << " completion_distance="
+                  << (laneChange.rejoinRouteS - world.egoPathS) << '\n';
+        std::abort();
+    }
+}
+
+void testM10StaggeredBlockersUseForwardLaneTopology() {
+    PathGeneratorData map;
+    if (!loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr", 0.5)) {
+        std::cerr << "failed to load LivingLAB map for M10 regression\n";
+        std::abort();
+    }
+    PathPlannerData globalPath;
+    if (!loadWaypointsCsv(globalPath.waypoints,
+                          "scenario/mixed/M10/route.csv")) {
+        std::cerr << "failed to load M10 route for obstacle regression\n";
+        std::abort();
+    }
+
+    // m10_avoidance_diagnosis frame 134. lane -2의 자전거를 피하려는
+    // 순간 다음 section의 lane -1에는 정차 차량이 24.5 m 앞에 있다.
+    // 과거 로직은 같은 section만 확인해 lane -1을 빈 차선으로 오인했고,
+    // 그곳에 안착한 뒤 남은 9.9 m에서는 다음 회피를 만들지 못했다.
+    WorldState world;
+    world.ego.x = 1215.07166F;
+    world.ego.y = -737.82135F;
+    world.ego.heading = 3.82659125F;
+    world.egoSpeed = 4.76115181;
+    const LaneMatch egoMatch = worldToLane(
+        map, world.ego.x, world.ego.y, world.ego.heading);
+    world.egoLaneValid = egoMatch.valid;
+    world.egoRoadId = egoMatch.roadId;
+    world.egoSectionIndex = egoMatch.sectionIndex;
+    world.egoLaneId = egoMatch.laneId;
+    world.egoRoadS = egoMatch.roadS;
+    world.egoLaneWidth = egoMatch.laneWidth;
+    world.egoLaneCenterDistance = egoMatch.distance;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoPathS = 19.0111198;
+    world.egoPathD = 1.20839201;
+    world.frontBumperPathS = world.egoPathS + 3.8;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    const auto addStaticObject = [&](int id, double x, double y,
+                                     double heading, double length,
+                                     double width, double pathS,
+                                     bool onPath) {
+        WorldObjectState object;
+        object.raw.id = id;
+        object.raw.x = static_cast<float>(x);
+        object.raw.y = static_cast<float>(y);
+        object.raw.heading = static_cast<float>(heading);
+        object.raw.speed = 0.0F;
+        object.raw.length = static_cast<float>(length);
+        object.raw.width = static_cast<float>(width);
+        object.obb = makeObb2D(x, y, heading, length, width);
+        // 자전거는 도로를 비스듬히 향해 있어 객체 heading 대신 Ego의
+        // 진행방향으로 물리 차선을 매칭한다.
+        const LaneMatch match = worldToLane(
+            map, x, y, world.ego.heading);
+        object.laneValid = match.valid;
+        object.roadId = match.roadId;
+        object.sectionIndex = match.sectionIndex;
+        object.laneId = match.laneId;
+        object.roadS = match.roadS;
+        object.pathValid = true;
+        object.pathS = pathS;
+        object.pathD = 0.0;
+        object.relativeS = pathS - world.egoPathS;
+        object.relativeD = 0.0;
+        object.isAhead = true;
+        object.isOnEgoPath = onPath;
+        world.objects.push_back(object);
+    };
+    addStaticObject(14, 1205.616333, -745.827087, 5.34381294,
+                    2.22000003, 0.200000003, 32.2013, true);
+    addStaticObject(3, 1198.65283, -755.245544, 3.82093191,
+                    4.39400005, 1.80799997, 43.4922, false);
+
+    const auto nearest = std::lower_bound(
+        globalPath.waypoints.begin(), globalPath.waypoints.end(),
+        world.egoPathS,
+        [](const Waypoint& point, double s) { return point.s < s; });
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    config.transitionLength = 15.0;
+    config.maximumLaneChangeSpeed = 15.0 / 3.6;
+    PlanningBehaviorConfig safetyConfig;
+    const std::vector<int> confirmed{3, 14};
+    if (!tryPrepareObstacleLaneChange(
+            laneChange, config, safetyConfig, world, map, globalPath,
+            static_cast<std::size_t>(std::distance(
+                globalPath.waypoints.begin(), nearest)),
+            nullptr, &confirmed)) {
+        std::cerr << "M10 staggered blockers produced no avoidance path\n";
+        std::abort();
+    }
+    if (laneChange.targetLaneId == -1) {
+        std::cerr << "M10 still selected the next-section occupied lane -1"
+                  << " followup=" << laneChange.followupObstacleId
+                  << " clearance=" << laneChange.followupObstacleClearance
+                  << '\n';
+        std::abort();
+    }
+}
+
 void testNearbyAdjacentVehicleCapsSpeedBeforeCutIn() {
     PlanningBehaviorConfig config;
     config.followTimeGap = 1.8;
@@ -1911,7 +2225,8 @@ void testMixedCheckpointRoutesHaveValidGeometry() {
     }
     for (const char* checkpoints : {
              "scenario/mixed/M03/checkpoints.csv",
-             "scenario/mixed/M04/checkpoints.csv"}) {
+             "scenario/mixed/M04/checkpoints.csv",
+             "scenario/mixed/M09/checkpoints.csv"}) {
         if (!loadCheckpointsCsv(map, checkpoints)) std::abort();
         const std::vector<Waypoint> route = makePath(map);
         std::string reason;
@@ -1937,6 +2252,7 @@ int main() {
     testBlockedReturnUsesWaitingSpeedUntilCollisionIsUrgent();
     testMovingReturnConflictCanClearAtWaitingSpeed();
     testObstacleLaneChange();
+    testBlockedAdjacentLanesPreferFartherObstacle();
     testSolidLineForbidsObstacleLaneChange();
     testAvoidanceLaneMustConnectToNextRoad();
     testRoadIdTrackingKeepsCurrentLaneInsideRoad();
@@ -1953,6 +2269,8 @@ int main() {
     testM05AvoidanceReconnectHasTrackableGeometry();
     testM08StaticBlockerChoosesFreeLaneBeforeRoadConnection();
     testM08DenseSecondBlockerUsesSafeLongitudinalSample();
+    testM09DenseFutureRoadChecksEntireStaticManeuver();
+    testM10StaggeredBlockersUseForwardLaneTopology();
     testNearbyAdjacentVehicleCapsSpeedBeforeCutIn();
     testLeadBrakingUsesRelativeStoppingDistance();
     testPreparedLaneChangeCancelsWhenBlockerMoves();

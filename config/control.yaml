@@ -69,6 +69,7 @@ planning:
   # 위험 객체가 횡단보도를 완전히 비운 뒤, Ego가 횡단보도를 빠져나갈 때까지
   # 적용한다. 처음부터 빈 횡단보도에는 속도 제한을 적용하지 않는다.
   crosswalk_clearance_kph: 25.0     # [km/h] 보행자 통과 후 횡단보도 통과속도
+  crosswalk_clearance_hold_time: 1.0 # [s] 보행자 체적이 완전히 빠진 후 추가 정지
   crosswalk_pedestrian_prediction: 4.0 # [s] 저속으로 진입하는 횡단 객체도 조기 판정
   # 횡단보도 위 정지는 감점이다. 입구가 아니라 그 앞 정지선에 선다.
   crosswalk_stop_line_search: 15.0  # [m] 횡단보도 앞 정지선 탐색 거리

@@ -96,6 +96,71 @@ RouteProjection projectToRoute(const Point2D& point,
     return result;
 }
 
+double crossProduct(const Point2D& origin,
+                    const Point2D& first,
+                    const Point2D& second) {
+    return (first.x - origin.x) * (second.y - origin.y) -
+           (first.y - origin.y) * (second.x - origin.x);
+}
+
+bool pointOnSegment(const Point2D& point,
+                    const Point2D& begin,
+                    const Point2D& end) {
+    constexpr double kTolerance = 1e-6;
+    return std::abs(crossProduct(begin, end, point)) <= kTolerance &&
+           point.x >= std::min(begin.x, end.x) - kTolerance &&
+           point.x <= std::max(begin.x, end.x) + kTolerance &&
+           point.y >= std::min(begin.y, end.y) - kTolerance &&
+           point.y <= std::max(begin.y, end.y) + kTolerance;
+}
+
+bool segmentsIntersect(const Point2D& firstBegin,
+                       const Point2D& firstEnd,
+                       const Point2D& secondBegin,
+                       const Point2D& secondEnd) {
+    const double firstSideBegin =
+        crossProduct(firstBegin, firstEnd, secondBegin);
+    const double firstSideEnd =
+        crossProduct(firstBegin, firstEnd, secondEnd);
+    const double secondSideBegin =
+        crossProduct(secondBegin, secondEnd, firstBegin);
+    const double secondSideEnd =
+        crossProduct(secondBegin, secondEnd, firstEnd);
+    if (((firstSideBegin > 0.0 && firstSideEnd < 0.0) ||
+         (firstSideBegin < 0.0 && firstSideEnd > 0.0)) &&
+        ((secondSideBegin > 0.0 && secondSideEnd < 0.0) ||
+         (secondSideBegin < 0.0 && secondSideEnd > 0.0))) {
+        return true;
+    }
+    return pointOnSegment(secondBegin, firstBegin, firstEnd) ||
+           pointOnSegment(secondEnd, firstBegin, firstEnd) ||
+           pointOnSegment(firstBegin, secondBegin, secondEnd) ||
+           pointOnSegment(firstEnd, secondBegin, secondEnd);
+}
+
+bool routeIntersectsPolygon(const std::vector<Waypoint>& route,
+                            const std::vector<Point2D>& polygon) {
+    if (route.size() < 2 || polygon.size() < 3) return false;
+    for (std::size_t routeIndex = 0;
+         routeIndex + 1 < route.size(); ++routeIndex) {
+        const Point2D begin{route[routeIndex].x, route[routeIndex].y};
+        const Point2D end{route[routeIndex + 1].x,
+                          route[routeIndex + 1].y};
+        if (containsPoint(polygon, begin) || containsPoint(polygon, end)) {
+            return true;
+        }
+        for (std::size_t polygonIndex = 0;
+             polygonIndex < polygon.size(); ++polygonIndex) {
+            if (segmentsIntersect(
+                    begin, end, polygon[polygonIndex],
+                    polygon[(polygonIndex + 1) % polygon.size()])) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 void appendZones(StaticZoneData& destination,
                  const StaticZoneData& source) {
     destination.speedZones.insert(destination.speedZones.end(),
@@ -361,38 +426,33 @@ bool alignStaticZonesToRoute(StaticZoneData& zones,
                              const std::vector<Waypoint>& route) {
     if (route.size() < 2) return false;
 
-    // generated YAML은 특정 시나리오 경로의 일부가 아니라 지도 전체 정적
-    // 시설을 담는다. 여기서 실제 경로의 road와 물리적으로 겹치는 시설만
-    // 남긴다. 그래야 M03/M04처럼 패키지별 route.csv를 써도 횡단보도가
-    // 누락되지 않고, 먼 평행도로의 시설이 경로 끝점에 잘못 투영되지 않는다.
+    // generated YAML은 지도 전체 정적 시설을 담는다. 원본 시설은 절대로
+    // 지우지 않고 현재 경로에 적용되는지만 routeRelevant로 표시한다.
+    // Junction에서는 서로 겹치는 connector의 road ID가 달라질 수 있으므로
+    // road ID는 힌트로만 쓰고 실제 좌표 투영/교차를 함께 검사한다.
     std::unordered_set<int> routeRoadIds;
     for (const auto& waypoint : route) {
         if (waypoint.roadId >= 0) routeRoadIds.insert(waypoint.roadId);
     }
 
-    std::vector<StopLine> alignedStopLines;
-    alignedStopLines.reserve(zones.stopLines.size());
-    for (auto line : zones.stopLines) {
-        if (line.roadId >= 0 &&
-            routeRoadIds.find(line.roadId) == routeRoadIds.end()) {
-            continue;
-        }
+    for (auto& line : zones.stopLines) {
         const Point2D center{0.5 * (line.begin.x + line.end.x),
                              0.5 * (line.begin.y + line.end.y)};
         const RouteProjection projection = projectToRoute(center, route);
-        if (!projection.valid || projection.distance > 5.0) continue;
-        line.routeS = projection.routeS;
-        alignedStopLines.push_back(std::move(line));
+        line.routeRelevant = projection.valid && projection.distance <= 5.0;
+        if (line.routeRelevant) line.routeS = projection.routeS;
     }
-    zones.stopLines = std::move(alignedStopLines);
 
-    std::vector<Crosswalk> alignedCrosswalks;
-    alignedCrosswalks.reserve(zones.crosswalks.size());
-    for (auto crosswalk : zones.crosswalks) {
-        if (crosswalk.roadId >= 0 &&
-            routeRoadIds.find(crosswalk.roadId) == routeRoadIds.end()) {
-            continue;
-        }
+    for (auto& crosswalk : zones.crosswalks) {
+        // Junction의 서로 겹치는 connecting road는 도로 ID가 달라도
+        // 같은 횟단보도를 물리적으로 통과한다. 체크포인트에서 선택된
+        // sibling road ID만 비교하면 실제 주행 경로 위 횟단보도가 삭제된다.
+        // road ID가 일치하지 않을 때는 경로 중심선이 폴리곤을
+        // 직접 관통하는 시설만 유지해 교차로의 다른 횟단보도 오검출은 막는다.
+        const bool sameRoad = crosswalk.roadId < 0 ||
+            routeRoadIds.find(crosswalk.roadId) != routeRoadIds.end();
+        const bool physicallyIntersected =
+            routeIntersectsPolygon(route, crosswalk.polygon);
         double entry = std::numeric_limits<double>::infinity();
         double exit = -std::numeric_limits<double>::infinity();
         double minimumDistance = std::numeric_limits<double>::infinity();
@@ -403,24 +463,25 @@ bool alignStaticZonesToRoute(StaticZoneData& zones,
             exit = std::max(exit, projection.routeS);
             minimumDistance = std::min(minimumDistance, projection.distance);
         }
-        if (!std::isfinite(entry) || !std::isfinite(exit) ||
-            minimumDistance > 15.0) {
-            continue;
+        crosswalk.routeRelevant =
+            std::isfinite(entry) && std::isfinite(exit) &&
+            minimumDistance <= 15.0 &&
+            (sameRoad || physicallyIntersected);
+        if (crosswalk.routeRelevant) {
+            crosswalk.entryRouteS = entry;
+            crosswalk.exitRouteS = exit;
         }
-        crosswalk.entryRouteS = entry;
-        crosswalk.exitRouteS = exit;
-        alignedCrosswalks.push_back(std::move(crosswalk));
     }
-    zones.crosswalks = std::move(alignedCrosswalks);
 
     // 측정 기준점은 구간의 시작/끝 및 중간 표본이다. 현재 경로 가까이에
     // 투영되는 점만 모아 route_s 순으로 정렬하고, 큰 공백에서 서로 다른
     // 보호구역으로 나눈다. XODR track id와 OpenDRIVE road id가 다른 지도라
     // 좌표 기반 투영을 사용한다.
-    zones.speedZones.erase(
-        std::remove_if(zones.speedZones.begin(), zones.speedZones.end(),
-                       [](const SpeedZone& zone) { return zone.schoolZone; }),
-        zones.speedZones.end());
+    // 기준점으로 계산한 구간은 원본 지도 정보가 아닌 파생 캐시다. 재정렬할
+    // 때도 벡터에서 제거하지 않고 비활성화한 뒤 같은 ID 슬롯을 갱신한다.
+    for (auto& zone : zones.speedZones) {
+        if (zone.derivedFromReferencePoints) zone.routeRelevant = false;
+    }
     std::vector<double> schoolRoutePoints;
     for (const auto& point : zones.schoolZoneReferencePoints) {
         const RouteProjection projection =
@@ -445,10 +506,22 @@ bool alignStaticZonesToRoute(StaticZoneData& zones,
         zone.routeSEnd = schoolRoutePoints[end];
         zone.hasRouteRange = true;
         zone.schoolZone = true;
+        zone.routeRelevant = true;
+        zone.derivedFromReferencePoints = true;
         // 한 점만 매칭된 경로에서는 그 점을 구간 경계라고 단정할 수 없다.
         // 오검출 방지를 위해 실제 길이를 가진 구간만 활성화한다.
         if (zone.routeSEnd - zone.routeSBegin >= 10.0) {
-            zones.speedZones.push_back(std::move(zone));
+            const auto existing = std::find_if(
+                zones.speedZones.begin(), zones.speedZones.end(),
+                [&](const SpeedZone& candidate) {
+                    return candidate.derivedFromReferencePoints &&
+                           candidate.id == zone.id;
+                });
+            if (existing == zones.speedZones.end()) {
+                zones.speedZones.push_back(std::move(zone));
+            } else {
+                *existing = std::move(zone);
+            }
         }
         begin = end + 1;
     }
@@ -465,7 +538,7 @@ bool isSchoolZoneActive(const StaticZoneData& zones,
                         const Point2D& position,
                         double routeS) {
     for (const auto& zone : zones.speedZones) {
-        if (!zone.schoolZone) continue;
+        if (!zone.routeRelevant || !zone.schoolZone) continue;
         const bool insidePolygon =
             !zone.polygon.empty() && containsPoint(zone.polygon, position);
         const bool insideRouteRange =
@@ -482,7 +555,7 @@ double findZoneSpeedLimit(const StaticZoneData& zones,
                           double fallbackLimit) {
     double limit = fallbackLimit;
     for (const auto& zone : zones.speedZones) {
-        if (zone.speedLimit <= 0.0) continue;
+        if (!zone.routeRelevant || zone.speedLimit <= 0.0) continue;
         const bool insidePolygon =
             !zone.polygon.empty() && containsPoint(zone.polygon, position);
         const bool insideRouteRange =

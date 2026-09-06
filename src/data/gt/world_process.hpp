@@ -1,6 +1,7 @@
 #pragma once
 
 #include "data/gt/gt_structs.hpp"
+#include "data/map/map_matcher.hpp"
 #include "data/map/map_structs.hpp"
 #include "data/vehicle/vehicle_structs.hpp"
 
@@ -19,6 +20,7 @@ struct WorldProcessData {
     double previousReceiveTime{};
     double filteredSpeed{};
     bool hasPreviousFrame{};
+    MapMatchState egoMapMatch;
 };
 
 void runWorldProcess(WorldProcessData& data,

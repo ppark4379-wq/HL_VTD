@@ -341,59 +341,54 @@ std::vector<LaneMatch> expandToNearbyDrivingLanes(
     double x,
     double y,
     const std::vector<LaneMatch>& containing) {
-    constexpr double kMaximumNearbyLaneDistance = 5.5;
+    // 대회 checkpoint는 정확히 밟아야 할 차로 좌표가 아니라 진행 corridor를
+    // 알려 주는 근사 좌표다. 따라서 좌표가 포함된 road/section 안에서만
+    // 옆 차로를 찾으면, 교차로에서 잘못 찍힌 connector road가 강제되고
+    // 실제로 연결되지 않는 checkpoint 조합이 된다. 주변의 모든 driving
+    // lane을 후보로 열고, 뒤 DP가 checkpoint 전체를 합법적으로 연결하는
+    // road/lane 조합을 고르게 한다.
+    constexpr double kMaximumNearbyLaneDistance = 8.5;
     std::vector<LaneMatch> candidates = containing;
-    for (const LaneMatch& base : containing) {
-        const auto road = data.roads.find(base.roadId);
-        if (road == data.roads.end() || base.sectionIndex < 0 ||
-            base.sectionIndex >= static_cast<int>(road->second.sections.size())) {
+    for (const auto& [key, segment] : data.laneSegments) {
+        if (key.laneId == 0 || segment.points.empty()) continue;
+        const auto roadIt = data.roads.find(key.roadId);
+        if (roadIt == data.roads.end() || key.sectionIndex < 0 ||
+            key.sectionIndex >=
+                static_cast<int>(roadIt->second.sections.size())) {
             continue;
         }
-        const LaneSection& section = road->second.sections[base.sectionIndex];
-        const RoadPose reference = roadToWorld(road->second, base.roadS);
-        for (const auto& [laneId, lane] : section.lanes) {
-            if (laneId == 0 || lane.type != "driving" ||
-                (laneId > 0) != (base.laneId > 0)) {
-                continue;
-            }
-            const LaneKey key{base.roadId, base.sectionIndex, laneId};
-            const auto segment = data.laneSegments.find(key);
-            if (segment == data.laneSegments.end() ||
-                segment->second.points.empty()) {
-                continue;
-            }
-            const double offset = laneOffset(
-                road->second, section, laneId, base.roadS);
-            const double centerX =
-                reference.x - offset * std::sin(reference.yaw);
-            const double centerY =
-                reference.y + offset * std::cos(reference.yaw);
-            const double distance = std::hypot(x - centerX, y - centerY);
-            if (distance > kMaximumNearbyLaneDistance) continue;
-
-            const bool duplicate = std::any_of(
-                candidates.begin(), candidates.end(),
-                [&](const LaneMatch& candidate) {
-                    return candidate.roadId == key.roadId &&
-                           candidate.sectionIndex == key.sectionIndex &&
-                           candidate.laneId == key.laneId;
-                });
-            if (duplicate) continue;
-
-            const auto nearest = std::min_element(
-                segment->second.points.begin(), segment->second.points.end(),
-                [&](const Waypoint& left, const Waypoint& right) {
-                    return std::abs(left.roadS - base.roadS) <
-                           std::abs(right.roadS - base.roadS);
-                });
-            const std::size_t pointIndex = static_cast<std::size_t>(
-                std::distance(segment->second.points.begin(), nearest));
-            const double width = evaluatePiecewise(
-                lane.widths, base.roadS, 0.0);
-            candidates.push_back({true, key.roadId, key.laneId,
-                                  key.sectionIndex, base.roadS, distance,
-                                  width, pointIndex});
+        const LaneSection& section = roadIt->second.sections[key.sectionIndex];
+        const auto laneIt = section.lanes.find(key.laneId);
+        if (laneIt == section.lanes.end() || laneIt->second.type != "driving") {
+            continue;
         }
+
+        const auto nearest = std::min_element(
+            segment.points.begin(), segment.points.end(),
+            [&](const Waypoint& left, const Waypoint& right) {
+                return distanceSquared(x, y, left.x, left.y) <
+                       distanceSquared(x, y, right.x, right.y);
+            });
+        const double distance =
+            std::hypot(x - nearest->x, y - nearest->y);
+        if (distance > kMaximumNearbyLaneDistance) continue;
+
+        const bool duplicate = std::any_of(
+            candidates.begin(), candidates.end(),
+            [&](const LaneMatch& candidate) {
+                return candidate.roadId == key.roadId &&
+                       candidate.sectionIndex == key.sectionIndex &&
+                       candidate.laneId == key.laneId;
+            });
+        if (duplicate) continue;
+
+        const std::size_t pointIndex = static_cast<std::size_t>(
+            std::distance(segment.points.begin(), nearest));
+        const double width = evaluatePiecewise(
+            laneIt->second.widths, nearest->roadS, 0.0);
+        candidates.push_back({true, key.roadId, key.laneId,
+                              key.sectionIndex, nearest->roadS, distance,
+                              width, pointIndex});
     }
     std::sort(candidates.begin(), candidates.end(), compareLaneMatchDistance);
     return candidates;

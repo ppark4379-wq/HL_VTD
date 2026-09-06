@@ -42,7 +42,8 @@ void checkPredictedCollisions(PathSafetyResult& output,
                               const WorldState& world,
                               const LocalPathData& localPath,
                               double horizon,
-                              double step);
+                              double step,
+                              bool checkAllObjects = false);
 
 // 현재 충돌이거나 충돌/TTC가 비상제동 임계 이내일 때만 true.
 // 차선 복귀 후보가 멀리서 막힌 사실은 복귀 속도를 낮추거나

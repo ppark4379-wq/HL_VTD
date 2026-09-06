@@ -16,4 +16,5 @@ void matchWorldPosition(MapMatchState& state,
                         const PathGeneratorData& map,
                         double x,
                         double y,
-                        std::optional<double> heading = std::nullopt);
+                        std::optional<double> heading = std::nullopt,
+                        std::optional<LaneMatch> routePreferred = std::nullopt);

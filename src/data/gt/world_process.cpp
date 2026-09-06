@@ -18,6 +18,7 @@ bool finiteEgo(const EgoState& ego) {
 bool objectInsideAnyCrosswalk(const WorldObjectState& object,
                               const StaticZoneData& zones) {
     for (const auto& crosswalk : zones.crosswalks) {
+        if (!crosswalk.routeRelevant) continue;
         if (containsPoint(crosswalk.polygon,
                           {object.raw.x, object.raw.y})) {
             return true;
@@ -105,7 +106,32 @@ void runWorldProcess(WorldProcessData& data,
             data.config.respawnJumpDistance) {
         expectedRouteS = data.state.egoPathS;
     }
+    const bool respawnJump = data.hasPreviousFrame &&
+        std::hypot(gt.ego.x - data.previousX, gt.ego.y - data.previousY) >
+            data.config.respawnJumpDistance;
+    if (respawnJump) resetMapMatchState(data.egoMapMatch);
+
     data.state = makeWorldState(gt, map, globalPath, expectedRouteS);
+    LaneMatch routePreferred;
+    routePreferred.valid = data.state.egoLaneValid;
+    routePreferred.roadId = data.state.egoRoadId;
+    routePreferred.laneId = data.state.egoLaneId;
+    routePreferred.sectionIndex = data.state.egoSectionIndex;
+    routePreferred.roadS = data.state.egoRoadS;
+    routePreferred.distance = data.state.egoLaneCenterDistance;
+    routePreferred.laneWidth = data.state.egoLaneWidth;
+    matchWorldPosition(data.egoMapMatch, map, gt.ego.x, gt.ego.y,
+                       static_cast<double>(gt.ego.heading), routePreferred);
+    const LaneMatch& stableMatch = data.egoMapMatch.lastMatch;
+    data.state.egoLaneValid = stableMatch.valid;
+    if (stableMatch.valid) {
+        data.state.egoRoadId = stableMatch.roadId;
+        data.state.egoLaneId = stableMatch.laneId;
+        data.state.egoSectionIndex = stableMatch.sectionIndex;
+        data.state.egoRoadS = stableMatch.roadS;
+        data.state.egoLaneWidth = stableMatch.laneWidth;
+        data.state.egoLaneCenterDistance = stableMatch.distance;
+    }
     updateEgoMotion(data, gt, receiveTime, frameDt);
     data.state.egoSpeed = data.filteredSpeed;
     data.state.inputValid = finiteEgo(gt.ego) && data.state.egoLaneValid &&

@@ -16,6 +16,10 @@
 
 namespace {
 
+bool hasForwardLaneConnection(const PathGeneratorData& map,
+                              const LaneKey& start,
+                              const LaneKey& goal);
+
 double smoothStep(double value) {
     const double t = std::clamp(value, 0.0, 1.0);
     // 위치뿐 아니라 속도와 가속도까지 양 끝에서 0이 되는 quintic blend.
@@ -29,6 +33,7 @@ void resetLaneChange(LaneChangeData& state) {
 
 const WorldObjectState* findBlockingObstacle(
     const WorldState& world, const LaneChangeConfig& config,
+    const PathGeneratorData& map,
     const std::vector<int>* confirmedStationaryObjectIds,
     DecisionTraceData* trace) {
     const WorldObjectState* result = nullptr;
@@ -42,6 +47,17 @@ const WorldObjectState* findBlockingObstacle(
             object.roadId == world.egoRoadId &&
             object.sectionIndex == world.egoSectionIndex &&
             object.laneId == world.egoLaneId;
+        // lane section 경계에서 차선 번호가 바뀌거나 차선이 넓어지고
+        // 좁아져도, 현재 물리 차선의 종방향 successor라면 같은 전방
+        // 주행 회랑이다. exact section/lane 비교만 하면 다음 section의
+        // 연속 장애물을 회피 완료 직전까지 보지 못한다.
+        const bool onCurrentLaneContinuation =
+            world.egoLaneValid && object.laneValid &&
+            object.roadId == world.egoRoadId &&
+            hasForwardLaneConnection(
+                map,
+                {world.egoRoadId, world.egoSectionIndex, world.egoLaneId},
+                {object.roadId, object.sectionIndex, object.laneId});
         const double longitudinalDistance = object.relativeS;
         bool physicallyAhead = false;
         if (onCurrentPhysicalLane) {
@@ -50,7 +66,9 @@ const WorldObjectState* findBlockingObstacle(
                 : world.egoRoadS - object.roadS;
             physicallyAhead = physicalLongitudinalDistance > 0.0;
         }
-        const bool onTrackedLane = object.isOnEgoPath || onCurrentPhysicalLane;
+        const bool onTrackedLane = object.isOnEgoPath ||
+                                   onCurrentPhysicalLane ||
+                                   onCurrentLaneContinuation;
         const bool ahead = object.isAhead || physicallyAhead;
         const bool stationaryConfirmed =
             std::abs(object.raw.speed) < 0.3 &&
@@ -378,6 +396,91 @@ bool hasForwardLaneConnection(const PathGeneratorData& map,
     return false;
 }
 
+const WorldObjectState* nearestStaticObjectOnForwardLane(
+    const WorldState& world,
+    const PathGeneratorData& map,
+    const LaneKey& startLane,
+    double afterPathS,
+    int ignoredObjectId = -1) {
+    const WorldObjectState* nearest = nullptr;
+    double nearestPathS = std::numeric_limits<double>::infinity();
+    for (const WorldObjectState& object : world.objects) {
+        if (static_cast<int>(object.raw.id) == ignoredObjectId ||
+            std::abs(object.raw.speed) >= 0.3 ||
+            !object.laneValid || !object.pathValid ||
+            object.pathS <= afterPathS + 1e-6) {
+            continue;
+        }
+        const LaneKey objectLane{
+            object.roadId, object.sectionIndex, object.laneId};
+        if (!hasForwardLaneConnection(map, startLane, objectLane)) continue;
+        if (object.pathS < nearestPathS) {
+            nearest = &object;
+            nearestPathS = object.pathS;
+        }
+    }
+    return nearest;
+}
+
+double forwardStaticClearance(const WorldState& world,
+                              const PathGeneratorData& map,
+                              const LaneKey& startLane,
+                              double afterPathS,
+                              int ignoredObjectId = -1) {
+    const WorldObjectState* obstacle = nearestStaticObjectOnForwardLane(
+        world, map, startLane, afterPathS, ignoredObjectId);
+    return obstacle == nullptr
+        ? std::numeric_limits<double>::infinity()
+        : obstacle->pathS - afterPathS;
+}
+
+LaneKey laneKeyAtPathS(const std::vector<Waypoint>& path, double routeS) {
+    if (path.empty()) return {};
+    const auto nearest = std::min_element(
+        path.begin(), path.end(),
+        [&](const Waypoint& lhs, const Waypoint& rhs) {
+            return std::abs(lhs.s - routeS) < std::abs(rhs.s - routeS);
+        });
+    return {nearest->roadId, nearest->sectionIndex, nearest->laneId};
+}
+
+bool findForwardLaneRouteToLane(const PathGeneratorData& map,
+                                const LaneKey& start,
+                                const LaneKey& goal,
+                                std::vector<LaneKey>& route) {
+    std::queue<LaneKey> pending;
+    std::map<LaneKey, bool> visited;
+    std::map<LaneKey, LaneKey> previous;
+    pending.push(start);
+    visited[start] = true;
+    while (!pending.empty()) {
+        const LaneKey current = pending.front();
+        pending.pop();
+        if (current == goal) {
+            route.clear();
+            for (LaneKey key = goal;; key = previous.at(key)) {
+                route.push_back(key);
+                if (key == start) break;
+            }
+            std::reverse(route.begin(), route.end());
+            return true;
+        }
+        const auto neighbors = map.laneGraph.find(current);
+        if (neighbors == map.laneGraph.end()) continue;
+        for (const LaneKey& next : neighbors->second) {
+            const bool lateralLaneChange =
+                current.roadId == next.roadId &&
+                current.sectionIndex == next.sectionIndex &&
+                current.laneId != next.laneId;
+            if (lateralLaneChange || visited.count(next)) continue;
+            visited[next] = true;
+            previous[next] = current;
+            pending.push(next);
+        }
+    }
+    return false;
+}
+
 void appendUnique(std::vector<Waypoint>& output, const Waypoint& point) {
     if (!output.empty() &&
         std::hypot(output.back().x - point.x,
@@ -557,9 +660,9 @@ bool buildKeepTargetPath(std::vector<Waypoint>& output,
                          double& shiftCompleteRouteS,
                          double transitionLength,
                          double desiredCompletionDistance,
-                         int targetLaneId,
                          bool targetOnLeft,
                          int laneHops,
+                         const LaneKey* requiredForwardLane,
                          const LaneChangeConfig& config,
                          const WorldState& world,
                          const PathGeneratorData& map,
@@ -572,16 +675,24 @@ bool buildKeepTargetPath(std::vector<Waypoint>& output,
     // 두 차선 이상 회피에서 from/to만 한 번에 비교하면 중간
     // 경계의 roadMark를 잘못 읽는다. 아래에서 blend가 각 경계를
     // 실제로 통과하는 road_s마다 모든 경계를 개별 검사한다.
-    if (!targetLaneHasSafeGap(world, world.egoRoadId,
-                              world.egoSectionIndex, targetLaneId,
-                              config, trace)) return false;
-
-    // 현재 차선의 종방향 successor를 따라 현재 road 끝까지 펼친다.
-    // 실선이면 그대로 진행하다가 처음 나오는 충분한 점선
-    // 구간에서 획이동을 시작한다.
-    std::vector<LaneKey> sourceRoute{{world.egoRoadId,
-                                      world.egoSectionIndex,
-                                      world.egoLaneId}};
+    // 현재 차선의 종방향 successor를 따라 다음 corridor road까지 펼친다.
+    // 기존에는 현재 road 끝에서 잘라 버려, 도로 경계를 걸쳐 완성할 수 있는
+    // 지그재그 회피도 남은 길이 부족으로 폐기됐다. 횡방향 경계 통과가 점선
+    // 구간에서 시작됐는지는 아래 웨이포인트별 검사로 계속 보장한다.
+    const LaneKey sourceStart{world.egoRoadId, world.egoSectionIndex,
+                              world.egoLaneId};
+    std::vector<LaneKey> sourceRoute{sourceStart};
+    LaneKey requestedNextRoadLane;
+    std::size_t requestedNextRoadIndex{};
+    LaneKey reachedRoadLane;
+    std::vector<LaneKey> routeToNextRoad;
+    if (findNextGlobalRoadLane(requestedNextRoadLane, requestedNextRoadIndex,
+                               globalPath, map, nearestGlobalIndex,
+                               world.egoRoadId) &&
+        findForwardLaneRoute(map, sourceStart, requestedNextRoadLane.roadId,
+                             routeToNextRoad, reachedRoadLane)) {
+        sourceRoute = std::move(routeToNextRoad);
+    }
     for (std::size_t guard = 0; guard < road.sections.size() + 2; ++guard) {
         const LaneKey current = sourceRoute.back();
         const auto edges = map.laneGraph.find(current);
@@ -589,8 +700,8 @@ bool buildKeepTargetPath(std::vector<Waypoint>& output,
         const auto next = std::find_if(
             edges->second.begin(), edges->second.end(),
             [&](const LaneKey& key) {
-                return key.roadId == world.egoRoadId &&
-                       !(key.sectionIndex == current.sectionIndex &&
+                return !(key.roadId == current.roadId &&
+                         key.sectionIndex == current.sectionIndex &&
                          key.laneId != current.laneId) &&
                        std::find(sourceRoute.begin(), sourceRoute.end(), key) ==
                            sourceRoute.end();
@@ -633,8 +744,18 @@ bool buildKeepTargetPath(std::vector<Waypoint>& output,
     std::size_t shiftBegin = sourcePoints.size();
     std::size_t shiftEnd = sourcePoints.size();
     double bestCompletionScore = std::numeric_limits<double>::infinity();
+    // Prepare 동안에는 방향지시등만 켜고 현재 차선으로 계속 전진한다.
+    // 후보를 현재 위치부터 횡이동하도록 만들면 Execute 전환 시 이미 옆으로
+    // 이동했어야 할 경로 중간을 쫓으며 조향이 튄다. 준비시간 동안 예상되는
+    // 전진거리 뒤에서부터 횡이동을 시작하도록 경로 자체에 직선 prefix를 둔다.
+    const double minimumShiftBeginProgress =
+        std::max(0.0, std::abs(world.egoSpeed) * config.prepareTime);
     for (std::size_t candidateBegin = 0;
          candidateBegin + 1 < sourcePoints.size(); ++candidateBegin) {
+        if (sourceProgress[candidateBegin] + 1e-6 <
+            minimumShiftBeginProgress) {
+            continue;
+        }
         double distance = 0.0;
         double previousProgress = 0.0;
         bool valid = true;
@@ -646,10 +767,16 @@ bool buildKeepTargetPath(std::vector<Waypoint>& output,
                     sourcePoints[index].y - sourcePoints[index - 1].y);
             }
             const Waypoint& point = sourcePoints[index];
-            const int sectionIndex = sectionIndexAt(road, point.roadS);
-            const LaneSection& localSection = road.sections[sectionIndex];
+            const auto localRoadFound = map.roads.find(point.roadId);
+            if (localRoadFound == map.roads.end()) {
+                valid = false;
+                break;
+            }
+            const Road& localRoad = localRoadFound->second;
+            const int sectionIndex = sectionIndexAt(localRoad, point.roadS);
+            const LaneSection& localSection = localRoad.sections[sectionIndex];
             const auto localTarget = drivingLaneOnSide(
-                road, localSection, point.laneId, point.roadS, point.yaw,
+                localRoad, localSection, point.laneId, point.roadS, point.yaw,
                 targetOnLeft, laneHops);
             const double progress = smoothStep(
                 distance / transitionLength);
@@ -697,15 +824,18 @@ bool buildKeepTargetPath(std::vector<Waypoint>& output,
         }
         Waypoint point = source;
         if (index >= shiftBegin) {
-            const int sectionIndex = sectionIndexAt(road, source.roadS);
-            const LaneSection& localSection = road.sections[sectionIndex];
+            const auto localRoadFound = map.roads.find(source.roadId);
+            if (localRoadFound == map.roads.end()) return false;
+            const Road& localRoad = localRoadFound->second;
+            const int sectionIndex = sectionIndexAt(localRoad, source.roadS);
+            const LaneSection& localSection = localRoad.sections[sectionIndex];
             const auto localTarget = drivingLaneOnSide(
-                road, localSection, source.laneId, source.roadS, source.yaw,
+                localRoad, localSection, source.laneId, source.roadS, source.yaw,
                 targetOnLeft, laneHops);
             if (!localTarget) return false;
-            const RoadPose reference = roadToWorld(road, source.roadS);
+            const RoadPose reference = roadToWorld(localRoad, source.roadS);
             const double offset = laneOffset(
-                road, localSection, *localTarget, source.roadS);
+                localRoad, localSection, *localTarget, source.roadS);
             const double targetX = reference.x - offset * std::sin(reference.yaw);
             const double targetY = reference.y + offset * std::cos(reference.yaw);
             const double blend = smoothStep(
@@ -713,11 +843,21 @@ bool buildKeepTargetPath(std::vector<Waypoint>& output,
             point.x += blend * (targetX - source.x);
             point.y += blend * (targetY - source.y);
             if (blend >= 0.5) point.laneId = *localTarget;
-            completedTarget = {world.egoRoadId, sectionIndex, *localTarget};
+            completedTarget = {source.roadId, sectionIndex, *localTarget};
         }
         appendUnique(output, point);
     }
     const std::size_t shiftCompletionIndex = output.size() - 1;
+
+    // 현재 section이 1차로여도 앞 section에서 회피 차선이 새로 생길 수
+    // 있다. 이 경우 현재 위치의 존재하지 않는 target lane을 검사하지 말고,
+    // 실제 횡이동이 끝나는 road/section/lane의 간격을 검사한다.
+    if (!targetLaneHasSafeGap(world, completedTarget.roadId,
+                              completedTarget.sectionIndex,
+                              completedTarget.laneId,
+                              config, trace)) {
+        return false;
+    }
 
     const auto targetSegment = map.laneSegments.find(completedTarget);
     if (targetSegment == map.laneSegments.end()) return false;
@@ -738,17 +878,22 @@ bool buildKeepTargetPath(std::vector<Waypoint>& output,
         appendUnique(output, targetSegment->second.points[index]);
     }
 
-    LaneKey requestedRoadLane;
-    reconnectLaneValid = findNextGlobalRoadLane(
-        requestedRoadLane, reconnectGlobalIndex, globalPath, map,
-        nearestGlobalIndex, world.egoRoadId);
     awaitExactReconnect = false;
     std::vector<LaneKey> forwardRoute;
     LaneKey reachedLane;
-    if (reconnectLaneValid && findForwardLaneRoute(
-            map, completedTarget, requestedRoadLane.roadId,
-            forwardRoute, reachedLane)) {
-        reconnectLane = reachedLane;
+    if (requiredForwardLane != nullptr) {
+        // 먼 미래 road의 장애물을 보고 현재 road에서 미리 횟이동할
+        // 때는 '같은 방향의 옆 차선'만으로는 부족하다. 중간
+        // connector의 lane 번호가 바뀌기 때문에, 완료 차선이 장애물
+        // road의 정확한 회피 차선으로 종방향 연결되는지 검증한다.
+        if (!findForwardLaneRouteToLane(
+                map, completedTarget, *requiredForwardLane, forwardRoute)) {
+            traceDecision(trace, "target_lane", "keep_route_rejected",
+                          "reason=shift_lane_does_not_reach_exact_obstacle_avoidance_lane");
+            return false;
+        }
+        reconnectLane = *requiredForwardLane;
+        reconnectLaneValid = true;
         awaitExactReconnect = true;
         for (std::size_t routeIndex = 1;
              routeIndex < forwardRoute.size(); ++routeIndex) {
@@ -759,9 +904,29 @@ bool buildKeepTargetPath(std::vector<Waypoint>& output,
             }
         }
     } else {
-        reconnectLaneValid = false;
-        traceDecision(trace, "target_lane", "keep_current_road_only",
-                      "reason=obstacle_avoidance_precedes_next_road_alignment");
+        LaneKey requestedRoadLane;
+        reconnectLaneValid = findNextGlobalRoadLane(
+            requestedRoadLane, reconnectGlobalIndex, globalPath, map,
+            nearestGlobalIndex, world.egoRoadId);
+        if (reconnectLaneValid && findForwardLaneRoute(
+                map, completedTarget, requestedRoadLane.roadId,
+                forwardRoute, reachedLane)) {
+            reconnectLane = reachedLane;
+            awaitExactReconnect = true;
+            for (std::size_t routeIndex = 1;
+                 routeIndex < forwardRoute.size(); ++routeIndex) {
+                const auto segment =
+                    map.laneSegments.find(forwardRoute[routeIndex]);
+                if (segment == map.laneSegments.end()) return false;
+                for (const Waypoint& point : segment->second.points) {
+                    appendUnique(output, point);
+                }
+            }
+        } else {
+            reconnectLaneValid = false;
+            traceDecision(trace, "target_lane", "keep_current_road_only",
+                          "reason=obstacle_avoidance_precedes_next_road_alignment");
+        }
     }
     updateCandidateGeometry(output, world.egoPathS);
     shiftCompleteRouteS = output[shiftCompletionIndex].s;
@@ -860,8 +1025,11 @@ bool buildReturnCandidatePath(std::vector<Waypoint>& output,
     // 끊긴다. 실제 주행 관점에서도 미리 45 m 전부터 나갈 이유가 없다.
     const double transitionDistance =
         config.transitionLength * std::sqrt(static_cast<double>(laneHops));
+    const double earliestShiftStartS =
+        world.egoPathS + std::max(0.0, std::abs(world.egoSpeed)) *
+                                 config.prepareTime;
     const double shiftStartS = std::max(
-        {world.egoPathS, targetLaneStartS,
+        {earliestShiftStartS, targetLaneStartS,
          obstacle.pathS - transitionDistance});
     const double availableShift = obstacle.pathS - shiftStartS;
     // 끼어들어 멈춘 차량 뒤에서 이미 저속/정지한 경우에도 고정 18 m를
@@ -1189,7 +1357,6 @@ bool candidatePathIsSafe(const std::vector<Waypoint>& points,
     const double remainingLength =
         std::max(0.0, points.back().s - world.egoPathS);
     constexpr double kMaximumManeuverLength = 250.0;
-    constexpr double kMaximumPredictionHorizon = 12.0;
     if (remainingLength > kMaximumManeuverLength) {
         std::ostringstream detail;
         detail << "remaining_length=" << remainingLength
@@ -1202,10 +1369,13 @@ bool candidatePathIsSafe(const std::vector<Waypoint>& points,
     const double fullManeuverHorizon =
         remainingLength / predictionWorld.egoSpeed +
         config.collisionPredictionStep;
+    // 정적 장애물은 움직이지 않으므로 등속 예측 오차가 누적되지 않는다.
+    // 여기까지 12초로 자르면 70 m 앞 장애물을 피하는 경로가 그보다 가까운
+    // 옆 차선 장애물을 검사하기 전에 승인될 수 있다. 후보로 잘라 둔 기동
+    // 구간 전체를 검사해, 장애물이 빽빽한 곳에서는 실제로 둘 사이를 통과하는
+    // 종방향 샘플만 선택한다. 동적 객체 horizon은 아래에서 기존 3초를 유지한다.
     const double predictionHorizon =
-        std::min(kMaximumPredictionHorizon,
-                 std::max(config.collisionPredictionHorizon,
-                          fullManeuverHorizon));
+        std::max(config.collisionPredictionHorizon, fullManeuverHorizon);
 
     PathSafetyResult safety;
     resetPathSafety(safety);
@@ -1237,7 +1407,7 @@ bool candidatePathIsSafe(const std::vector<Waypoint>& points,
             staticWorld.objects.end());
         checkPredictedCollisions(safety, staticWorld, candidate,
                                  predictionHorizon,
-                                 config.collisionPredictionStep);
+                                 config.collisionPredictionStep, true);
     }
     {
         std::ostringstream detail;
@@ -1612,12 +1782,16 @@ bool tryPrepareRoadConnectionLaneChange(
         double shiftCompleteRouteS{};
         const bool targetOnLeft =
             turnSignalTowardLane(world, map, targetLaneId) == 1U;
+        const int laneHops = std::abs(targetLaneId - world.egoLaneId);
+        const double connectionTransitionLength =
+            config.transitionLength *
+            std::sqrt(static_cast<double>(std::max(1, laneHops)));
         if (!buildKeepTargetPath(candidate, reconnectLane, reconnectIndex,
                                  reconnectValid, awaitReconnect,
                                  shiftCompleteRouteS,
-                                 config.transitionLength, -1.0,
-                                 targetLaneId, targetOnLeft,
-                                 std::abs(targetLaneId - world.egoLaneId),
+                                 connectionTransitionLength, -1.0,
+                                 targetOnLeft,
+                                 laneHops, nullptr,
                                  config, world, map, globalPath,
                                  nearestGlobalIndex, trace) ||
             !reconnectValid || !awaitReconnect ||
@@ -1674,15 +1848,15 @@ bool tryPrepareObstacleLaneChange(
     if (state.phase != LaneChangePhase::None || !world.egoLaneValid ||
         !world.egoPathValid) return false;
     const WorldObjectState* detectedObstacle = findBlockingObstacle(
-        world, config, confirmedStationaryObjectIds, trace);
-    if (detectedObstacle != nullptr && pendingBlockerDistance != nullptr) {
-        *pendingBlockerDistance = detectedObstacle->relativeS;
-    }
+        world, config, map, confirmedStationaryObjectIds, trace);
     if (detectedObstacle == nullptr) return false;
     const WorldObjectState routeMatchedObstacle = detectedObstacle->laneValid
         ? *detectedObstacle
         : matchBlockingObstacleToRoute(
               *detectedObstacle, map, globalPath, nearestGlobalIndex, trace);
+    if (pendingBlockerDistance != nullptr) {
+        *pendingBlockerDistance = routeMatchedObstacle.relativeS;
+    }
     const WorldObjectState* obstacle = &routeMatchedObstacle;
 
     // 후보 차선은 Ego가 아니라 "장애물이 놓인 차선"의 양옆이다. 장애물 앞
@@ -1729,14 +1903,38 @@ bool tryPrepareObstacleLaneChange(
                 obstacle->roadS, obstacleDrivingYaw, targetOnLeft,
                 laneHops);
             if (lane) {
+                const LaneKey targetLane{
+                    obstacle->roadId, obstacle->sectionIndex, *lane};
+                // 같은 section/lane id만 비교하면 바로 다음 section에서
+                // 번호가 바뀐 장애물을 놓치고 막힌 차선을 빈 차선으로
+                // 평가한다. 횡방향 edge를 제외한 lane successor 그래프를
+                // 따라가며 실제 전방 연결 위의 첫 정적 장애물을 찾는다.
+                // 두 칸 이상 옮길 때는 최종 차선뿐 아니라 반드시 통과하는
+                // 중간 차선도 모두 회피 회랑이다. 각 차선의 전방 여유 중
+                // 최솟값을 후보 점수로 써, 중간 차선 장애물을 건너뛰지 않는다.
                 double clearance = std::numeric_limits<double>::infinity();
-                for (const WorldObjectState& object : world.objects) {
-                    if (!object.laneValid || !object.pathValid ||
-                        object.roadId != obstacle->roadId ||
-                        object.sectionIndex != obstacle->sectionIndex ||
-                        object.laneId != *lane) continue;
-                    const double gap = object.pathS - world.egoPathS;
-                    if (gap > 0.0) clearance = std::min(clearance, gap);
+                int crossedLaneId = obstacleLaneId;
+                bool completeCorridor = true;
+                for (int hop = 0; hop < laneHops; ++hop) {
+                    const auto crossedLane = adjacentDrivingLaneOnSide(
+                        obstacleRoad, obstacleSection, crossedLaneId,
+                        obstacle->roadS, obstacleDrivingYaw, targetOnLeft);
+                    if (!crossedLane) {
+                        completeCorridor = false;
+                        break;
+                    }
+                    crossedLaneId = *crossedLane;
+                    const LaneKey crossedKey{
+                        obstacle->roadId, obstacle->sectionIndex,
+                        crossedLaneId};
+                    clearance = std::min(
+                        clearance,
+                        forwardStaticClearance(
+                            world, map, crossedKey, world.egoPathS,
+                            static_cast<int>(obstacle->raw.id)));
+                }
+                if (!completeCorridor || crossedLaneId != targetLane.laneId) {
+                    continue;
                 }
                 laneCandidates.push_back(
                     {*lane, targetOnLeft, laneHops, clearance});
@@ -1744,16 +1942,38 @@ bool tryPrepareObstacleLaneChange(
         }
     }
 
-    // 장애물 회피 단계에서는 전역경로 차선을 보지 않는다. 먼저
-    // 가장 가까운 안전 차선으로 피하고, 같은 횟수면 전방 여유가
-    // 더 큰 차선을 선택한다. 먼 차선을 우선하면 앞의 첫 장애물
-    // 하나를 피하려고 여러 차선을 한 번에 횡단하게 된다.
+    // 장애물 회피 단계에서는 전역경로 차선을 보지 않는다.
+    // 빈 차선이 하나라도 있으면 빈 차선 중 최소 횡이동을
+    // 선택한다. 접근 가능한 차선이 모두 막혀 있으면
+    // 횡이동 횟수보다 다음 장애물까지의 전방 여유를
+    // 우선해 가장 멀리 진행할 수 있는 차선으로 피한다.
+    // 다음 장애물은 안착 즉시 새 차선에서 다시 계획한다.
     std::stable_sort(laneCandidates.begin(), laneCandidates.end(),
         [](const LaneCandidate& lhs, const LaneCandidate& rhs) {
-            if (lhs.laneHops != rhs.laneHops)
-                return lhs.laneHops < rhs.laneHops;
-            return lhs.forwardClearance > rhs.forwardClearance;
+            const bool lhsClear = std::isinf(lhs.forwardClearance);
+            const bool rhsClear = std::isinf(rhs.forwardClearance);
+            if (lhsClear != rhsClear) return lhsClear;
+            if (!lhsClear &&
+                std::abs(lhs.forwardClearance - rhs.forwardClearance) > 1e-6) {
+                return lhs.forwardClearance > rhs.forwardClearance;
+            }
+            return lhs.laneHops < rhs.laneHops;
         });
+
+    for (const LaneCandidate& candidate : laneCandidates) {
+        std::ostringstream detail;
+        detail << "lane=" << candidate.laneId
+               << " side=" << (candidate.targetOnLeft ? "left" : "right")
+               << " hops=" << candidate.laneHops
+               << " topology_clearance=" << candidate.forwardClearance;
+        traceDecision(trace, "lane_change", "target_candidate_ranked",
+                      detail.str());
+    }
+
+    LaneChangeData bestProgressCandidate;
+    bool hasBestProgressCandidate = false;
+    double bestPostShiftClearance = -1.0;
+    double bestForwardClearance = -1.0;
 
     for (const LaneCandidate& laneCandidate : laneCandidates) {
         const int targetObstacleLaneId = laneCandidate.laneId;
@@ -1762,6 +1982,9 @@ bool tryPrepareObstacleLaneChange(
         const std::optional<int> targetEgoLane = drivingLaneOnSide(
             egoRoad, egoSection, world.egoLaneId, world.egoRoadS,
             world.ego.heading, *targetOnLeft, laneHops);
+        const bool targetMayAppearAhead =
+            obstacle->roadId != world.egoRoadId ||
+            obstacle->sectionIndex != world.egoSectionIndex;
         {
             std::ostringstream detail;
             detail << "obstacle=" << obstacle->raw.id
@@ -1782,11 +2005,24 @@ bool tryPrepareObstacleLaneChange(
                           "reason=physical_side_has_no_adjacent_lane_at_obstacle");
             continue;
         }
+        const bool canBuildKeepTarget =
+            targetEgoLane.has_value() || targetMayAppearAhead;
+        if (!canBuildKeepTarget) {
+            traceDecision(
+                trace, "lane_change", "target_candidate_rejected",
+                "reason=keep_target_has_no_adjacent_lane_in_current_section; checking_return_candidate");
+        }
         const int targetEgoLaneId =
             targetEgoLane.value_or(targetObstacleLaneId);
+        const LaneKey obstacleTargetKey{
+            obstacle->roadId, obstacle->sectionIndex,
+            targetObstacleLaneId};
+        // 앞쪽 lane section에서 새 차선이 생기는 경우에는 현재 section에
+        // target lane이 아직 없다. 물리적 회피 방향은 이미 장애물
+        // section에서 확정됐으므로 그 방향으로 지시등을 미리 켠다.
         const std::uint8_t signal = targetEgoLane
             ? turnSignalTowardLane(world, map, *targetEgoLane)
-            : 0U;
+            : (targetMayAppearAhead ? (*targetOnLeft ? 1U : 2U) : 0U);
         struct LongitudinalVariant {
             double transitionLength{};
             double desiredCompletionDistance{-1.0};
@@ -1794,6 +2030,7 @@ bool tryPrepareObstacleLaneChange(
         };
         const double mediumLength = std::min(config.transitionLength, 15.0);
         const double compactLength = std::min(config.transitionLength, 12.0);
+        const double tightLength = std::min(config.transitionLength, 6.0);
         std::vector<LongitudinalVariant> variants;
         // 고정된 3개 완료점만 검사하면 지그재그 장애물 사이의 좁은
         // 빈 구간을 건너뛴다. 차선변경을 끝낼 수 있는 범위를 3 m
@@ -1803,8 +2040,14 @@ bool tryPrepareObstacleLaneChange(
         const auto appendVariants = [&](double transitionLength,
                                         const char* family) {
             const std::size_t familyBegin = variants.size();
+            // 완료점을 장애물 6 m 앞에서 강제로 끊으면, 두 차선의 장애물이
+            // 엇갈린 슬라럼에서 답이 사라진다. 목표 차선의 앞 장애물을 지난
+            // 뒤 현재 차선 장애물 직전에 안착하는 대각 경로가 필요할 수 있다.
+            // 장애물 뒤쪽까지도 격자로 생성하고 실제 차량/장애물 OBB가 전체
+            // 기동에서 겹치지 않는 후보만 아래 안전검사로 남긴다.
             const double lastCompletion = std::max(
-                transitionLength, obstacle->relativeS - 6.0);
+                transitionLength,
+                obstacle->relativeS + config.obstacleClearance);
             constexpr double kCompletionStep = 3.0;
             int sampleIndex = 0;
             for (double completion = transitionLength;
@@ -1826,6 +2069,12 @@ bool tryPrepareObstacleLaneChange(
         if (compactLength + 1e-6 < mediumLength) {
             appendVariants(compactLength, "compact");
         }
+        // 연속 장애물 사이가 좁을 때만 마지막 수단으로 검사한다.
+        // 속도는 maximumLaneChangeSpeed로 제한되고, 실제 OBB 충돌 및
+        // 생성 경로 곡률 검사를 모두 통과해야 선택된다.
+        if (tightLength + 1e-6 < compactLength) {
+            appendVariants(tightLength, "tight");
+        }
         std::vector<Waypoint> selectedCandidate;
         LaneKey selectedReconnectLane;
         std::size_t selectedReconnectIndex{};
@@ -1833,34 +2082,41 @@ bool tryPrepareObstacleLaneChange(
         double selectedShiftCompleteRouteS{};
         std::string selectedVariant;
         for (const LongitudinalVariant& variant : variants) {
-            if (!targetEgoLane || signal == 0) break;
+            if (!canBuildKeepTarget || signal == 0) break;
             std::vector<Waypoint> candidate;
             LaneKey reconnectLane;
             std::size_t reconnectIndex{};
             bool reconnectLaneValid{};
             bool awaitExactReconnect{};
             double shiftCompleteRouteS{};
+            // 같은 road여도 lane section이 다르면 중간에서 차선이 늘거나
+            // 줄며 lane id가 바뀌다. 완성 차선이 장애물 위치의 정확한
+            // 회피 차선으로 종방향 연결되는지까지 검증한다.
+            const LaneKey* requiredForwardLane = targetMayAppearAhead
+                ? &obstacleTargetKey
+                : nullptr;
             if (!buildKeepTargetPath(
                     candidate, reconnectLane, reconnectIndex,
                     reconnectLaneValid, awaitExactReconnect,
                     shiftCompleteRouteS, variant.transitionLength,
                     variant.desiredCompletionDistance,
-                    *targetEgoLane, *targetOnLeft, laneHops,
+                    *targetOnLeft, laneHops,
+                    requiredForwardLane,
                     config, world, map, globalPath, nearestGlobalIndex,
                     trace)) {
                 continue;
             }
-            // 장애물 회피는 현재 횟이동과 안착 직후까지만
-            // 하나의 기동으로 검증한다. 다음 road까지 긴 경로를 한 번에
-            // 잠그면 수십 m 뒤의 다음 정적 장애물 하나 때문에 첫
-            // 회피까지 거부된다. 안착 후에는 실제 목표 차선을 기준으로
-            // 다음 장애물을 새로 탐색한다.
-            // 다음 지그재그 장애물까지 한 번에 포함해 현재 회피 자체를
-            // 거부하지 않되, 안착 직후 새 차선에서 바로 재계획할 수
-            // 있도록 짧은 전방 구간은 반드시 안전성을 확인한다.
-            constexpr double kPostShiftReplanLookahead = 12.0;
+            // 현재 회피와 안착 접선까지만 이 후보에서 검증한다. 다음
+            // 지그재그 장애물까지 미리 포함하면 협소한 빈 공간으로 들어가는
+            // 현재 회피마저 모두 폐기된다. 대신 기동 상태가 실제로 끝날 때까지
+            // maximumLaneChangeSpeed를 유지해 안착 즉시 다음 회피를 수행할 거리를 남긴다.
+            constexpr double kPostShiftTrackingTail = 2.0;
+            const double safetyPrefixEnd = obstacle->roadId == world.egoRoadId
+                ? shiftCompleteRouteS + kPostShiftTrackingTail
+                : std::max(shiftCompleteRouteS + kPostShiftTrackingTail,
+                           obstacle->pathS + kPostShiftTrackingTail);
             candidate = maneuverPathPrefix(
-                candidate, shiftCompleteRouteS + kPostShiftReplanLookahead);
+                candidate, safetyPrefixEnd);
             {
                 std::ostringstream detail;
                 detail << "variant=" << variant.name
@@ -1883,35 +2139,84 @@ bool tryPrepareObstacleLaneChange(
             break;
         }
         if (!selectedVariant.empty()) {
-            state = {};
-            state.phase = LaneChangePhase::Prepare;
-            state.routeMode = LaneChangeRouteMode::KeepTargetLane;
-            state.obstacleId = static_cast<int>(obstacle->raw.id);
-            state.sourceRoadId = world.egoRoadId;
-            state.sourceLaneId = world.egoLaneId;
-            state.sourceSectionIndex = world.egoSectionIndex;
-            state.targetLaneId = targetEgoLaneId;
+            LaneChangeData prepared;
+            prepared.phase = LaneChangePhase::Prepare;
+            prepared.routeMode = LaneChangeRouteMode::KeepTargetLane;
+            prepared.obstacleId = static_cast<int>(obstacle->raw.id);
+            prepared.sourceRoadId = world.egoRoadId;
+            prepared.sourceLaneId = world.egoLaneId;
+            prepared.sourceSectionIndex = world.egoSectionIndex;
+            prepared.targetLaneId = targetEgoLaneId;
             // 장애물 회피는 현재 road의 목표 차선에 안착하면 끝낸다.
             // 다음 road의 exact lane에 도달할 때까지 상태를 유지하면
             // 그 사이 등장하는 두 번째·세 번째 장애물을 재계획할 수 없다.
             // 다음 road 연결 차선 정렬은 roadConnectionManeuver가 도로
             // 마지막 구간에서 따로 처리한다.
-            state.reconnectLane = selectedReconnectLane;
-            state.reconnectLaneValid = selectedReconnectLaneValid;
-            state.reconnectGlobalIndex = selectedReconnectIndex;
-            state.awaitExactReconnect = false;
-            state.roadConnectionManeuver = false;
-            state.turnSignal = signal;
-            state.outwardTurnSignal = signal;
-            state.startRouteS = world.egoPathS;
-            state.rejoinRouteS = selectedShiftCompleteRouteS;
-            state.path = std::move(selectedCandidate);
+            prepared.reconnectLane = selectedReconnectLane;
+            prepared.reconnectLaneValid = selectedReconnectLaneValid;
+            prepared.reconnectGlobalIndex = selectedReconnectIndex;
+            prepared.awaitExactReconnect = false;
+            prepared.roadConnectionManeuver = false;
+            prepared.turnSignal = signal;
+            prepared.outwardTurnSignal = signal;
+            prepared.startRouteS = world.egoPathS;
+            prepared.rejoinRouteS = selectedShiftCompleteRouteS;
+
+            // 첫 횡이동만 충돌하지 않는다고 즉시 확정하지 않는다. 안착
+            // 차선의 종방향 successor를 따라 다음 정적 장애물을 찾고,
+            // 다음 12 m급 회피를 준비할 거리가 남는 후보를 우선한다.
+            // 모든 차선이 이 여유보다 짧으면 후보를 폐기하지 않고 아래에서
+            // 가장 긴 여유를 가진 안전한 1단계 후보를 선택한다.
+            const LaneKey completedLane = laneKeyAtPathS(
+                selectedCandidate, selectedShiftCompleteRouteS);
+            prepared.shiftCompletedLane = completedLane;
+            prepared.shiftCompletedLaneValid = true;
+            const WorldObjectState* followup =
+                nearestStaticObjectOnForwardLane(
+                    world, map, completedLane,
+                    selectedShiftCompleteRouteS,
+                    static_cast<int>(obstacle->raw.id));
+            const double postShiftClearance = followup == nullptr
+                ? std::numeric_limits<double>::infinity()
+                : followup->pathS - selectedShiftCompleteRouteS;
+            const double followupReserve =
+                std::min(config.transitionLength, 12.0) +
+                config.maximumLaneChangeSpeed * config.prepareTime;
+            if (followup != nullptr) {
+                prepared.followupObstacleId =
+                    static_cast<int>(followup->raw.id);
+                prepared.followupObstacleClearance = postShiftClearance;
+            }
+            prepared.path = std::move(selectedCandidate);
             std::ostringstream detail;
             detail << "mode=keep_target_lane phase=prepare variant="
-                   << selectedVariant;
-            traceDecision(trace, "lane_change", "candidate_selected",
+                   << selectedVariant
+                   << " post_shift_clearance=" << postShiftClearance
+                   << " followup_reserve=" << followupReserve
+                   << " followup_object=" << prepared.followupObstacleId;
+            if (!std::isfinite(postShiftClearance) ||
+                postShiftClearance + 1e-6 >= followupReserve) {
+                state = std::move(prepared);
+                traceDecision(trace, "lane_change", "candidate_selected",
+                              detail.str());
+                return true;
+            }
+
+            detail << " result=held_as_best_progress_fallback";
+            traceDecision(trace, "lane_change", "candidate_sequence_checked",
                           detail.str());
-            return true;
+            const bool fartherAfterShift =
+                !hasBestProgressCandidate ||
+                postShiftClearance > bestPostShiftClearance + 1e-6 ||
+                (std::abs(postShiftClearance - bestPostShiftClearance) <= 1e-6 &&
+                 laneCandidate.forwardClearance > bestForwardClearance);
+            if (fartherAfterShift) {
+                prepared.bestProgressFallback = true;
+                bestProgressCandidate = std::move(prepared);
+                hasBestProgressCandidate = true;
+                bestPostShiftClearance = postShiftClearance;
+                bestForwardClearance = laneCandidate.forwardClearance;
+            }
         }
 
         traceDecision(trace, "lane_change", "return_candidate_started",
@@ -2000,8 +2305,18 @@ bool tryPrepareObstacleLaneChange(
         }
         return true;
     }
+    if (hasBestProgressCandidate) {
+        state = std::move(bestProgressCandidate);
+        std::ostringstream detail;
+        detail << "mode=keep_target_lane phase=prepare"
+               << " post_shift_clearance=" << bestPostShiftClearance
+               << " result=best_safe_progress_when_all_lanes_blocked";
+        traceDecision(trace, "lane_change", "candidate_selected",
+                      detail.str());
+        return true;
+    }
     traceDecision(trace, "lane_change", "no_safe_candidate",
-                  "all reachable lane candidates were rejected");
+                  "no geometrically trackable collision-free lateral progress exists");
     return false;
 }
 
@@ -2026,20 +2341,39 @@ void advanceLaneChangePhase(LaneChangeData& state,
             return;
         }
         if (executionBlocked) {
-            std::ostringstream detail;
-            detail << "execution_blocked=" << executionBlocked
-                   << " candidate_path_safe=" << candidatePathSafe;
-            traceDecision(trace, "lane_change", "prepare_cancelled",
-                          detail.str());
-            traceDecision(trace, "lane_change", "phase_transition",
-                          "prepare->none reason=traffic_stop_active_replan_after_release");
-            resetLaneChange(state);
-            return;
+            if (state.roadConnectionManeuver) {
+                std::ostringstream detail;
+                detail << "execution_blocked=" << executionBlocked
+                       << " candidate_path_safe=" << candidatePathSafe;
+                traceDecision(trace, "lane_change", "prepare_cancelled",
+                              detail.str());
+                traceDecision(trace, "lane_change", "phase_transition",
+                              "prepare->none reason=traffic_stop_active_replan_after_release");
+                resetLaneChange(state);
+                return;
+            }
+            // 정적 장애물이 정지선 가까이에 있으면 신호/보행자 정지는
+            // 종방향 제어가 그대로 수행하되, 충돌을 피하기 위한 횡이동은
+            // 정지점까지 계속한다. 여기서 경로를 취소하면 매 프레임 같은
+            // 후보를 재생성하다 장애물 정면에 멈추게 된다.
+            traceDecision(trace, "lane_change",
+                          "traffic_stop_with_avoidance_retained",
+                          "longitudinal stop remains active while lateral avoidance proceeds");
         }
         if (!candidatePathSafe) {
             traceDecision(trace, "lane_change", "phase_transition",
                           "prepare->none reason=candidate_became_unsafe");
             resetLaneChange(state);
+            return;
+        }
+        if (state.roadConnectionManeuver &&
+            std::abs(world.egoSpeed) >
+                config.maximumLaneChangeSpeed + 0.25) {
+            // 여러 차선을 건너는 도로 연결 정렬은 감속이 실제로
+            // 끝난 뒤에만 실행한다. 지시등은 이 동안 계속 유지된다.
+            state.phaseElapsed = 0.0;
+            traceDecision(trace, "road_corridor", "prepare_speed_hold",
+                          "execute_delayed_until_vehicle_reaches_lane_change_speed");
             return;
         }
         state.phaseElapsed += std::max(0.0, dt);

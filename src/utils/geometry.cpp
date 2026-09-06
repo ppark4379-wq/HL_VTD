@@ -34,6 +34,46 @@ bool overlapsOnAxis(const Obb2D& first, const Obb2D& second,
     return firstMax >= secondMin && secondMax >= firstMin;
 }
 
+double cross(const Point2D& first, const Point2D& second,
+             const Point2D& third) {
+    return (second.x - first.x) * (third.y - first.y) -
+           (second.y - first.y) * (third.x - first.x);
+}
+
+bool pointOnSegment(const Point2D& point, const Point2D& begin,
+                    const Point2D& end) {
+    constexpr double kEpsilon = 1e-9;
+    return std::abs(cross(begin, end, point)) <= kEpsilon &&
+           point.x >= std::min(begin.x, end.x) - kEpsilon &&
+           point.x <= std::max(begin.x, end.x) + kEpsilon &&
+           point.y >= std::min(begin.y, end.y) - kEpsilon &&
+           point.y <= std::max(begin.y, end.y) + kEpsilon;
+}
+
+bool segmentsIntersect(const Point2D& firstBegin, const Point2D& firstEnd,
+                       const Point2D& secondBegin,
+                       const Point2D& secondEnd) {
+    constexpr double kEpsilon = 1e-9;
+    const double firstSideBegin = cross(firstBegin, firstEnd, secondBegin);
+    const double firstSideEnd = cross(firstBegin, firstEnd, secondEnd);
+    const double secondSideBegin = cross(secondBegin, secondEnd, firstBegin);
+    const double secondSideEnd = cross(secondBegin, secondEnd, firstEnd);
+    if (((firstSideBegin > kEpsilon && firstSideEnd < -kEpsilon) ||
+         (firstSideBegin < -kEpsilon && firstSideEnd > kEpsilon)) &&
+        ((secondSideBegin > kEpsilon && secondSideEnd < -kEpsilon) ||
+         (secondSideBegin < -kEpsilon && secondSideEnd > kEpsilon))) {
+        return true;
+    }
+    return (std::abs(firstSideBegin) <= kEpsilon &&
+            pointOnSegment(secondBegin, firstBegin, firstEnd)) ||
+           (std::abs(firstSideEnd) <= kEpsilon &&
+            pointOnSegment(secondEnd, firstBegin, firstEnd)) ||
+           (std::abs(secondSideBegin) <= kEpsilon &&
+            pointOnSegment(firstBegin, secondBegin, secondEnd)) ||
+           (std::abs(secondSideEnd) <= kEpsilon &&
+            pointOnSegment(firstEnd, secondBegin, secondEnd));
+}
+
 }  // namespace
 
 Obb2D makeObb2D(double centerX, double centerY, double heading,
@@ -73,6 +113,41 @@ bool intersects(const Obb2D& first, const Obb2D& second) {
         if (!overlapsOnAxis(first, second, axis)) return false;
     }
     return true;
+}
+
+bool intersects(const std::vector<Point2D>& polygon, const Obb2D& obb) {
+    if (polygon.size() < 3) return false;
+    if (std::any_of(obb.corners.begin(), obb.corners.end(),
+                    [&](const Point2D& corner) {
+                        return containsPoint(polygon, corner);
+                    })) {
+        return true;
+    }
+    const std::vector<Point2D> obbPolygon(obb.corners.begin(),
+                                          obb.corners.end());
+    if (std::any_of(polygon.begin(), polygon.end(),
+                    [&](const Point2D& point) {
+                        return containsPoint(obbPolygon, point);
+                    })) {
+        return true;
+    }
+    for (std::size_t polygonIndex = 0;
+         polygonIndex < polygon.size(); ++polygonIndex) {
+        const Point2D& polygonBegin = polygon[polygonIndex];
+        const Point2D& polygonEnd =
+            polygon[(polygonIndex + 1) % polygon.size()];
+        for (std::size_t obbIndex = 0; obbIndex < obb.corners.size();
+             ++obbIndex) {
+            const Point2D& obbBegin = obb.corners[obbIndex];
+            const Point2D& obbEnd =
+                obb.corners[(obbIndex + 1) % obb.corners.size()];
+            if (segmentsIntersect(polygonBegin, polygonEnd,
+                                  obbBegin, obbEnd)) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 bool containsPoint(const std::vector<Point2D>& polygon,

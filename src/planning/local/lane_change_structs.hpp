@@ -58,6 +58,18 @@ struct LaneChangeData {
     double returnStartRouteS{};
     double rejoinRouteS{};
     bool waitingForReturn{};
+    // 첫 횡이동이 실제로 끝나는 물리 차선. 후속 회피 재계획은 Ego가
+    // 이 차선에 안착한 뒤에만 허용해, 출발 차선에서 계획을 반복 초기화하지 않는다.
+    LaneKey shiftCompletedLane;
+    bool shiftCompletedLaneValid{};
+    // 현재 횡이동이 끝난 직후 같은 종방향 차선 연결 위에서 만날
+    // 다음 정적 장애물. Execute 중 차선 중심에 먼저 안착하면 현재
+    // 기동 종료를 기다리지 않고 다음 회피 후보로 원자적으로 교체한다.
+    int followupObstacleId{-1};
+    double followupObstacleClearance{-1.0};
+    // 모든 목표 차선에 후속 장애물이 가까운 경우에도 후보를 없애지 않고
+    // 가장 멀리 진행 가능한 안전한 1단계 경로를 선택했는지 표시한다.
+    bool bestProgressFallback{};
     std::size_t nearestIndex{};
     std::vector<Waypoint> path;
 };

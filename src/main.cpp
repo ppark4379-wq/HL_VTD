@@ -14,6 +14,7 @@
 #include "data/vehicle/vehicle_config.hpp"
 #include "planning/global/reference_path_generator.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -241,14 +242,26 @@ void printNetworkConfig(
 
 void printMapReadiness(const StaticZoneData& zones,
                        double schoolZoneTargetSpeed) {
+    const auto activeStopLines = std::count_if(
+        zones.stopLines.begin(), zones.stopLines.end(),
+        [](const StopLine& line) { return line.routeRelevant; });
+    const auto activeCrosswalks = std::count_if(
+        zones.crosswalks.begin(), zones.crosswalks.end(),
+        [](const Crosswalk& crosswalk) { return crosswalk.routeRelevant; });
+    const auto activeSpeedZones = std::count_if(
+        zones.speedZones.begin(), zones.speedZones.end(),
+        [](const SpeedZone& zone) { return zone.routeRelevant; });
     std::cout << "[map] static features: stop_lines=" << zones.stopLines.size()
+              << " (route_active=" << activeStopLines << ')'
               << " crosswalks=" << zones.crosswalks.size()
+              << " (route_active=" << activeCrosswalks << ')'
               << " speed_zones=" << zones.speedZones.size()
+              << " (route_active=" << activeSpeedZones << ')'
               << " school_zone_reference_points="
               << zones.schoolZoneReferencePoints.size()
               << " flashing_red_ids="
               << zones.flashingRedControllerIds.size() << '\n';
-    if (zones.speedZones.empty()) {
+    if (activeSpeedZones == 0) {
         std::cout << "[config-warning] current route has no protection/speed zone";
         if (!zones.schoolZoneReferencePoints.empty()) {
             std::cout << " (" << zones.schoolZoneReferencePoints.size()
@@ -257,7 +270,8 @@ void printMapReadiness(const StaticZoneData& zones,
         std::cout << '\n';
     }
     for (const auto& zone : zones.speedZones) {
-        if (!zone.schoolZone || !zone.hasRouteRange) continue;
+        if (!zone.routeRelevant || !zone.schoolZone ||
+            !zone.hasRouteRange) continue;
         std::cout << "[map] school zone: route_s=["
                   << zone.routeSBegin << ", " << zone.routeSEnd
                   << "] map_limit=" << zone.speedLimit * 3.6

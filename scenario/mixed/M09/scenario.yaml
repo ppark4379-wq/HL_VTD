@@ -15,9 +15,11 @@ route:
   mode: packaged
   compatible_routes: []
   preserve_checkpoint_coordinates: true
-  smooth_checkpoint_segments:
-  - 2
-  smooth_checkpoint_handle_m: 8.0
+  # 지도 lane graph의 실제 connector를 사용한다. 아래 기존 인공 보간값은
+  # road_id=0/lane_id=0 구간을 만들 수 있어 비활성화하되 이력은 보존한다.
+  # smooth_checkpoint_segments:
+  # - 2
+  # smooth_checkpoint_handle_m: 8.0
 validation:
   ego_control: external
   start_position_tolerance_m: 5.0

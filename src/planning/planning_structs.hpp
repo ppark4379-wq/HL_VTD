@@ -83,6 +83,9 @@ struct PlanningBehaviorConfig {
     // 한 번 정지 원인이 된 객체가 횡단보도를 완전히 비운 뒤, Ego가
     // 횡단보도를 빠져나갈 때까지 적용하는 통과속도.
     double crosswalkClearanceSpeed{6.9};     // [m/s]
+    // 보행자의 전체 OBB가 횡단보도를 빠져나간 뒤에도 이 시간만큼
+    // 정지를 유지해 경계 프레임 튤로 조기 출발하는 것을 막는다.
+    double crosswalkClearanceHoldTime{1.0};  // [s]
     // 횡단보도 밖이라도 이 시간 뒤 예상 위치가 안이면 점유로 본다.
     double crosswalkPedestrianPrediction{4.0}; // [s]
     // 횡단보도 앞 이 거리 안의 정지선을 정지 목표로 삼는다.
@@ -162,6 +165,12 @@ struct StationaryObjectState {
     bool hasEverMoved{};
 };
 
+struct CrosswalkOccupancyState {
+    int id{-1};
+    bool occupied{};
+    double clearanceHoldRemaining{};
+};
+
 struct PlanningProcessData {
     PathPlannerData pathPlanner;
     // pathPlanner는 checkpoint의 road corridor/구역 route_s를 보존한다.
@@ -177,9 +186,9 @@ struct PlanningProcessData {
     std::vector<StationaryObjectState> stationaryObjects;
     PlanningFrameData frame;
     PlanningResult result;
-    // 객체 위험을 한 번이라도 확인한 횡단보도. 객체가 빠져나간 뒤에도
+    // 횡단보도 점유·해제 유지 상태. 점유 해제 후에도 잠시 정지하고,
     // Ego가 횡단보도를 완전히 통과할 때까지 clearance 속도를 적용한다.
-    std::vector<int> activeCrosswalkIds;
+    std::vector<CrosswalkOccupancyState> crosswalkStates;
     double emergencyBrakeHoldRemaining{};
     double previousRouteS{};
     bool hasPreviousRouteS{};

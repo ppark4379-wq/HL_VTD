@@ -219,7 +219,8 @@ void checkPredictedCollisions(PathSafetyResult& output,
                               const WorldState& world,
                               const LocalPathData& localPath,
                               double horizon,
-                              double step) {
+                              double step,
+                              bool checkAllObjects) {
     if (output.collision) return;
     if (!localPath.valid || !world.egoPathValid) return;
     if (step <= 0.0 || horizon <= 0.0) return;
@@ -240,7 +241,12 @@ void checkPredictedCollisions(PathSafetyResult& output,
             egoPose.heading, ego.length, ego.width);
 
         for (const auto& object : world.objects) {
-            if (!isPredictionCandidate(
+            // 일반 주행은 현재 route corridor/근접 반경으로 계산량과 오탐을
+            // 제한한다. 반면 이미 만든 차선변경 경로를 검증할 때는 그 경로가
+            // 여러 차선을 지나므로, 원래 Ego 차선 기준 corridor 밖의 정적
+            // 장애물도 빠짐없이 검사해야 한다.
+            if (!checkAllObjects &&
+                !isPredictionCandidate(
                     object, world, radius, ego.width, horizon)) continue;
             const double objectHeading =
                 static_cast<double>(object.raw.heading);
