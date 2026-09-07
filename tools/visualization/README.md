@@ -34,7 +34,8 @@ Replace `humble` with the installed ROS2 distribution.
 
 - Wide transparent yellow: free-driving mission corridor
 - Thin bright yellow: final gateway lanes
-- Red spheres: checkpoints
+- Pink circular outlines: checkpoints
+- Yellow lines: the full precomputed lane network (including geometry-only candidates; not all lines are executable paths)
 - White/yellow map lines: lane boundaries, stop lines, road center lines
 - Cyan box/arrow: Ego
 - Purple/orange/red boxes: nearby/on-path/colliding objects

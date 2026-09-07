@@ -1,0 +1,25 @@
+{
+  "source_sha256": "5a369c7b0609fc98b0034680473465db4273dd396ffb37980996cea70ec6ca2f",
+  "numbering": "Original unresolved/locations.json reviewed by user; numbers remain stable",
+  "events": [
+    {"number":1,"lane":"146:0:2","kind":"split","action":"connect","note":"공유 분기점을 횡단보도 통과 후에 배치"},
+    {"number":2,"lane":"211:1:2","kind":"split","action":"hold","note":"회전교차로 보류"},
+    {"number":3,"lane":"211:3:-1","kind":"split","action":"hold","note":"회전교차로 보류"},
+    {"number":4,"lane":"310:1:-2","kind":"split","action":"connect","note":"XODR 진행방향상 분기; 하나의 공유 점에서 연결"},
+    {"number":5,"lane":"429:4:-2","kind":"split","action":"connect","note":"사용자 후속 지시: 기하 연결 생성, 실선 사용 판단은 플래닝에 위임"},
+    {"number":6,"lane":"1769:3:2","kind":"split","action":"connect","note":"공유 점 분기"},
+    {"number":7,"lane":"2192:0:4","kind":"split","action":"connect","note":"분기 연결"},
+    {"number":8,"lane":"2312:0:4","kind":"split","action":"connect","note":"분기 연결"},
+    {"number":9,"lane":"2396:2:2","kind":"split","action":"connect","note":"공유 점 분기"},
+    {"number":10,"lane":"2470:2:-4","kind":"split","action":"connect","note":"폭 변화 구간의 공유 점 분기"},
+    {"number":11,"lane":"2470:5:3","kind":"merge","action":"connect","note":"공유 점 합류"},
+    {"number":12,"lane":"2564:5:-2","kind":"split","action":"connect","note":"공유 점 분기"},
+    {"number":13,"lane":"2575:1:-2","kind":"split","action":"connect","note":"공유 점 분기"},
+    {"number":14,"lane":"2810:5:1","kind":"merge","action":"exclude","note":"중앙부 극소폭 조각 제외"},
+    {"number":15,"lane":"2810:5:1","kind":"split","action":"exclude","note":"중앙부 극소폭 조각 제외"},
+    {"number":16,"lane":"2816:2:1","kind":"merge","action":"exclude","note":"중앙부 극소폭 조각 제외"},
+    {"number":17,"lane":"2816:2:1","kind":"split","action":"exclude","note":"중앙부 극소폭 조각 제외"},
+    {"number":18,"lane":"2818:4:-1","kind":"merge","action":"connect","note":"음수 lane의 +s 방향 확인 후 공유 점 합류"},
+    {"number":19,"lane":"2819:1:-1","kind":"split","action":"exclude","note":"기존 분기 유지, 추가 분기 후보 제외"}
+  ]
+}

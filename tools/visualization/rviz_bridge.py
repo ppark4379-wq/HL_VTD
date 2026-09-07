@@ -220,12 +220,14 @@ class HLVtdRvizBridge(Node):
                 markers.append(
                     self.line_marker(layer, points, 0.55, (1.0, 0.93, 0.05, 0.88))
                 )
+            elif layer == "precomputed_network":
+                markers.append(self.line_marker(layer, points, 0.12, (1.0, 1.0, 0.0, 0.9)))
             elif layer == "checkpoint" and points:
-                sphere = self.base_marker(layer, Marker.SPHERE)
-                sphere.pose.position = ros_point(points[0])
-                sphere.scale.x = sphere.scale.y = sphere.scale.z = 0.9
-                rgba(sphere, 1.0, 0.05, 0.05, 1.0)
-                markers.append(sphere)
+                x, y = points[0][:2]
+                ring = [[x + 1.2 * math.cos(i * 2 * math.pi / 48),
+                         y + 1.2 * math.sin(i * 2 * math.pi / 48), 0.35]
+                        for i in range(49)]
+                markers.append(self.line_marker(layer, ring, 0.18, (1.0, 0.15, 0.65, 1.0)))
             elif layer == "traffic_signal" and points:
                 controller_text = style.removeprefix("controller=")
                 try:

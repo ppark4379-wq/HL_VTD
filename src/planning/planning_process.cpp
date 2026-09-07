@@ -6,6 +6,7 @@
 #include "planning/collision/collision_checker.hpp"
 #include "planning/local/local_path_planner.hpp"
 #include "planning/local/lane_change_planner.hpp"
+#include "planning/local/corridor_lattice.hpp"
 #include "planning/local/path_planner.hpp"
 #include "utils/geometry.hpp"
 #include "utils/math_utils.hpp"
@@ -89,7 +90,10 @@ bool trackingPathUsable(const PathPlannerData& planner,
             sensedWorld.egoLaneId};
         const LaneKey pathLane{
             pathPoint.roadId, pathPoint.sectionIndex, pathPoint.laneId};
-        if (!longitudinallyAdjacent(map, sensedLane, pathLane)) return false;
+        if (!longitudinallyAdjacent(map, sensedLane, pathLane) &&
+            !corridorHasLongitudinalConnection(map, sensedLane, pathLane)) {
+            return false;
+        }
     }
 
     remainingDistance = planner.waypoints.back().s - projected.egoPathS;
@@ -1038,7 +1042,7 @@ void runPlanningProcess(PlanningProcessData& data,
             pendingBlockerDistance = replacementBlockerDistance;
         }
     }
-    // Gateway route에 서로 다른 section의 횟이동이 연속하면
+    // Gateway route에 서로 다른 section의 횡이동이 연속하면
     // 이전 단계의 settle 종료를 기다리는 동안 다음 점선 구간을
     // 지나칠 수 있다. 이전 기동은 Gateway 정렬뿐 아니라 장애물
     // 회피일 수도 있다. 기동의 종류와 무관하게 현재 목표 차선
@@ -1046,33 +1050,28 @@ void runPlanningProcess(PlanningProcessData& data,
     // committed path를 원자적으로 이어 간다. 이 조건은 road/lane
     // ID를 특정하지 않고 모든 corridor leg에 동일하게 적용된다.
     if (data.laneChange.phase != LaneChangePhase::None &&
+        data.laneChange.shiftCompletedLaneValid &&
         world.egoLaneValid &&
-        world.egoLaneId == data.laneChange.targetLaneId &&
+        world.egoRoadId == data.laneChange.shiftCompletedLane.roadId &&
+        world.egoSectionIndex ==
+            data.laneChange.shiftCompletedLane.sectionIndex &&
+        world.egoLaneId == data.laneChange.shiftCompletedLane.laneId &&
         world.egoLaneCenterDistance <= 0.75) {
         LaneChangeData chainedGateway;
         const bool gatewayReady = tryPrepareRoadConnectionLaneChange(
                 chainedGateway, data.laneChangeConfig, data.config,
                 world, map, maneuverReference, nearestManeuverIndex,
                 trace, &data.missionCorridor);
-        // 장애물을 피해 옮 차선에 안착하자마자 반대 방향의
-        // Gateway 정렬을 적용하면, 아직 지나지 않은 원인 장애물
-        // 차선으로 즉시 복귀하게 된다. 이전 회피가 완료되기 전에는
-        // 같은 방향으로 더 정렬하는 Gateway 단계만 연속 연결한다.
-        // 반대 방향 정렬은 기존 회피가 종료되고 장애물 스캔이
-        // 다시 수행된 뒤의 일반 Gateway 계획에 맡긴다.
-        const bool continuesAwayFromObstacle =
-            data.laneChange.roadConnectionManeuver ||
-            data.laneChange.outwardTurnSignal == 0U ||
-            chainedGateway.turnSignal == data.laneChange.outwardTurnSignal;
-        if (gatewayReady && continuesAwayFromObstacle) {
+        // Gateway 후보 자체가 전체 기동과 settling tail의 장애물
+        // 여유를 통과해야 한다. 따라서 회피 기동 도중이라도 목표
+        // 차선 중심에 안착했고 안전한 Gateway 단계가 있으면 방향과
+        // 무관하게 바로 연결한다. 막힌 차선으로의 복귀는 후보 안전
+        // 검사에서 탈락하므로 별도의 방향 휴리스틱을 두지 않는다.
+        if (gatewayReady) {
             traceDecision(trace, "road_corridor",
                           "gateway_stage_chained",
                           "next_lateral_stage_committed_before_settle");
             data.laneChange = std::move(chainedGateway);
-        } else if (gatewayReady) {
-            traceDecision(trace, "road_corridor",
-                          "gateway_stage_deferred",
-                          "reason=would_reverse_into_unpassed_obstacle_lane");
         }
     }
     // 보관한 회피 경로가 실행 중 새 정적 장애물에 막혀도 기존 경로부터
@@ -1099,6 +1098,11 @@ void runPlanningProcess(PlanningProcessData& data,
         // rejoinRouteS를 모두 지난 뒤에야 재계획하던 한 프레임/한 기동
         // 지연을 없앤다. 2~3단계를 포함한 연속 장애물도 각 안전한 차선
         // 중심 구간에서 경로를 원자적으로 계속 이어 간다.
+        const double followupDistance =
+            data.laneChange.followupObstacleClearance >= 0.0
+                ? std::max(0.0, data.laneChange.rejoinRouteS - world.egoPathS) +
+                      data.laneChange.followupObstacleClearance
+                : std::numeric_limits<double>::infinity();
         const bool anticipatedFollowupReady =
             data.laneChange.followupObstacleId >= 0 &&
             data.laneChange.shiftCompletedLaneValid &&
@@ -1107,8 +1111,9 @@ void runPlanningProcess(PlanningProcessData& data,
             world.egoSectionIndex ==
                 data.laneChange.shiftCompletedLane.sectionIndex &&
             world.egoLaneId == data.laneChange.shiftCompletedLane.laneId &&
-            world.egoPathS >= data.laneChange.rejoinRouteS - 3.0 &&
             world.egoLaneCenterDistance <= 0.75 &&
+            followupDistance <=
+                data.laneChangeConfig.obstacleTriggerMaximumDistance &&
             std::any_of(world.objects.begin(), world.objects.end(),
                         [&](const WorldObjectState& object) {
                             return static_cast<int>(object.raw.id) ==
@@ -1137,6 +1142,7 @@ void runPlanningProcess(PlanningProcessData& data,
                    << " followup_object="
                    << data.laneChange.followupObstacleId
                    << " risk_object=" << activeSafety.riskObjectId
+                   << " followup_distance=" << followupDistance
                    << " predicted_ttc="
                    << activeSafety.predictedCollisionTTC;
             LaneChangeData replacement;
@@ -1165,9 +1171,10 @@ void runPlanningProcess(PlanningProcessData& data,
         data.laneChange, data.laneChangeConfig, data.config, world, map,
         maneuverReference, nearestManeuverIndex, &pendingBlockerDistance,
         &confirmedStationaryObjectIds, trace, &data.missionCorridor);
-    // 장애물 회피 후보가 있으면 road 연결 정렬은 뒤로 미룬다.
-    // 평소에는 현재 차선을 유지하고 도로 마지막 구간에서만
-    // 다음 road로 연결되는 차선으로 옮긴다.
+    // 아직 확정 기동이 없을 때는 눈앞 장애물 후보를 먼저 확정한다.
+    // 장애물 기동 중 안전하게 차선 중심에 안착하면 위의 chaining이
+    // gateway 정렬을 동시에 이어 갈 수 있다. 다만 장애물을 찾았는데
+    // 안전 후보가 없는 프레임에는 gateway가 그 실패를 덮지 않는다.
     if (data.laneChange.phase == LaneChangePhase::None &&
         pendingBlockerDistance < 0.0) {
         tryPrepareRoadConnectionLaneChange(

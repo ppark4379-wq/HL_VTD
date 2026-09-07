@@ -50,6 +50,11 @@ bool setConfigValue(const std::map<std::string, double>& values,
     return true;
 }
 
+bool setOptionalConfigValue(const std::map<std::string, double>& values,
+                            const std::string& key, double& output) {
+    return values.count(key)==0 || setConfigValue(values,key,output);
+}
+
 // km/h로 적힌 설정을 내부 단위인 m/s로 바꿔 읽는다.
 // 속도만 km/h를 쓰고 거리·시간·가속도는 m, s, m/s^2 그대로 둔다.
 // 사람이 채점 기준(km/h)과 직접 비교할 수 있는 값만 km/h로 표기한다.
@@ -102,6 +107,14 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.laneChange.stoppedDynamicConfirmationTime >= 0.0 &&
            config.laneChange.roadConnectionPrepareDistance > 0.0 &&
            config.laneChange.transitionLength > 0.0 &&
+           config.laneChange.latticeShortDistance >= 6.0 &&
+           config.laneChange.latticeMediumDistance > config.laneChange.latticeShortDistance &&
+           config.laneChange.latticeLongDistance > config.laneChange.latticeMediumDistance &&
+           config.laneChange.latticeLaneCost >= 0.0 &&
+           config.laneChange.latticeCurvatureCost >= 0.0 &&
+           config.laneChange.latticeProgressCost >= 0.0 &&
+           config.laneChange.latticeObstacleClearance >= 0.0 &&
+           config.laneChange.gatewayReserveDistance >= 0.0 &&
            config.laneChange.minimumTargetTTC > 0.0 &&
            config.laneChange.maximumObstacleLaneIntrusion >= 0.0 &&
            config.laneChange.lateralOffsetStep > 0.0 &&
@@ -251,6 +264,14 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.laneChange.lateralOffsetStep) &&
         setConfigValue(values, "lane_change.maximum_lateral_offset",
                        config.laneChange.maximumLateralOffset) &&
+        setOptionalConfigValue(values, "lane_change.lattice_short_distance",config.laneChange.latticeShortDistance) &&
+        setOptionalConfigValue(values, "lane_change.lattice_medium_distance",config.laneChange.latticeMediumDistance) &&
+        setOptionalConfigValue(values, "lane_change.lattice_long_distance",config.laneChange.latticeLongDistance) &&
+        setOptionalConfigValue(values, "lane_change.lattice_lane_cost",config.laneChange.latticeLaneCost) &&
+        setOptionalConfigValue(values, "lane_change.lattice_curvature_cost",config.laneChange.latticeCurvatureCost) &&
+        setOptionalConfigValue(values, "lane_change.lattice_progress_cost",config.laneChange.latticeProgressCost) &&
+        setOptionalConfigValue(values, "lane_change.lattice_obstacle_clearance",config.laneChange.latticeObstacleClearance) &&
+        setOptionalConfigValue(values, "lane_change.gateway_reserve_distance",config.laneChange.gatewayReserveDistance) &&
         setConfigValue(values, "lane_change.minimum_lane_edge_clearance",
                        config.laneChange.minimumLaneEdgeClearance) &&
         setConfigValue(values, "speed_pd.kp",

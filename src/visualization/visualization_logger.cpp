@@ -1,6 +1,7 @@
 #include "visualization/visualization_logger.hpp"
 
 #include "planning/global/reference_path_generator.hpp"
+#include "planning/local/corridor_lattice.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -372,6 +373,25 @@ void initializeVisualizationLogger(
     writeLaneCenters(output, map);
     writeLaneBoundaries(output, map);
     writeStaticFeatures(output, map);
+    if(map.corridorRuntime) {
+        const auto& network=map.corridorRuntime->network;
+        for(const auto& [key,lane]:network.lanes) {
+            if(lane.topologyStatus=="excluded_by_review") continue;
+            int run=0,index=0;
+            for(auto id:lane.pointIds) {
+                const auto& p=network.points[id];
+                if(p.replacedByTransition>=0) {++run;index=0;continue;}
+                const std::string group=std::to_string(key.roadId)+":"+std::to_string(key.sectionIndex)+":"+std::to_string(key.laneId)+":"+std::to_string(run);
+                writeStaticPoint(output,"precomputed_network",group,key.roadId,key.sectionIndex,key.laneId,index++,p.pose.x,p.pose.y,.18,"yellow","geometric_candidate");
+                if(p.nextPoint<0) {++run;index=0;}
+            }
+        }
+        for(std::size_t i=0;i<network.transitions.size();++i) {
+            const auto& t=network.transitions[i];int index=0;
+            for(const auto& p:t.points)
+                writeStaticPoint(output,"precomputed_network","transition_"+std::to_string(i),t.eventLane.roadId,t.eventLane.sectionIndex,t.eventLane.laneId,index++,p.x,p.y,.18,"yellow",t.vehicleFootprintValid?"candidate":"geometry_only_not_driveable");
+        }
+    }
     if (mission.valid) writeMission(output, map, mission);
     output.close();
     if (!output) {

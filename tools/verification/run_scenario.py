@@ -247,6 +247,11 @@ def parse_args() -> argparse.Namespace:
         help="Embed Scenario XML in SCP instead of loading a VTD-side file",
     )
     parser.add_argument(
+        "--skip-source-sync",
+        action="store_true",
+        help="Run the existing local package without overwriting it from VTD source",
+    )
+    parser.add_argument(
         "--vtd-timeout",
         type=float,
         default=60.0,
@@ -546,7 +551,7 @@ def run_automated(
 
 def main() -> int:
     args = parse_args()
-    if not sync_vtd_source_before_run(args.package):
+    if not args.skip_source_sync and not sync_vtd_source_before_run(args.package):
         return 2
     report = validate_scenario(args.package)
     report.print()

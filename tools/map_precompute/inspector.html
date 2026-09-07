@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko"><meta charset="utf-8"><title>XODR 차선 경로 검수</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#182126;color:#dce5ea;font:14px system-ui,sans-serif}
+header{position:fixed;top:0;left:0;right:0;padding:13px 20px;background:#10191fec;z-index:3;border-bottom:1px solid #40515d}
+header strong{color:#ffff00;margin-right:22px}header label{margin-right:12px;white-space:nowrap}button,input,select{background:#293842;color:#eee;border:1px solid #5a707b;border-radius:4px;padding:5px;margin:2px}
+main{position:fixed;inset:86px 0 30px}#map{width:100%;height:100%;touch-action:none;cursor:grab}
+aside{position:fixed;right:12px;top:100px;width:310px;background:#10191fe8;border:1px solid #40515d;padding:13px;z-index:2;max-height:75vh;overflow:auto;font-size:12px;line-height:1.7}
+aside p{margin:7px 0}#detail{white-space:pre-wrap;color:#ffff99;overflow-wrap:anywhere}footer{position:fixed;bottom:0;left:0;right:0;padding:7px 16px;background:#10191f;font-size:11px}a{color:#84d3ff}#map #paths polyline{pointer-events:stroke}#map #paths polyline:hover{stroke:#72ff8e;stroke-width:.5}
+</style>
+<header><div><strong>XODR 차선 경로 검수</strong>
+<label><input type="checkbox" data-layer="paths" checked>노란 경로</label>
+<label><input type="checkbox" data-layer="raw_paths">원본 중앙선</label>
+<label><input type="checkbox" data-layer="unconnected_paths">미연결 경로</label>
+<label><input type="checkbox" data-layer="direction" checked>주행 방향</label>
+<label><input type="checkbox" data-layer="markings" checked>실선·점선·중앙선</label>
+<label><input type="checkbox" data-layer="objects" checked>횡단보도·정지선·노면표시</label>
+<label><input type="checkbox" data-layer="connections">XODR 연결</label>
+<label><input type="checkbox" data-layer="issues">검토 지점</label></div>
+<div><button id="fit">전체 보기</button><input id="road" placeholder="road ID (예: 72)" size="20"><button id="locate">도로 찾기</button>
+<button id="points">선택 경로의 실제 점</button><button id="clear">선택 해제</button><span id="scale"></span></div></header>
+<main>__SVG__</main>
+<aside><b>검수 방법</b><p>휠: 확대/축소 · 드래그: 이동<br>노란 선 클릭: 차선 ID 확인<br>노란 꺾쇠: 차선의 진행 방향<br>흰 노면 화살표: XODR object 표시<br>청록 점: 연속성 검사 통과 연결<br>빨간 연결선: 원본 연결의 불연속(주행 경로 아님)</p>
+<p id="counts"></p><select id="issueType"><option value="">모든 검토 유형</option></select><br>
+<button id="previous">이전 검토점</button><button id="next">다음 검토점</button><div id="issue"></div><hr><div id="detail">경로를 클릭하면 road:section:lane을 표시합니다.</div>
+<p>노면 모델은 XODR의 위치·방향·크기와 모델명에 따른 2D 기호입니다. 외부 FLT 텍스처를 복원한 화면은 아닙니다. 불명확한 모델은 윤곽으로 표시합니다.</p>
+<a href="validation.json">검증 보고서</a> · <a href="lane_points.csv">전체 점 CSV</a> · <a href="lane_connections.csv">연결 CSV</a><br>
+<a href="road_map.png">도로 PNG</a> · <a href="lane_network.png">노란 경로 PNG</a> · <a href="lane_network.svg">벡터 이미지</a></aside>
+<footer>노란색: 기하 경로 후보(미연결 차선도 표시). 실선·통행 허용·장애물 판단은 플래닝에서 수행. 파란색: 원본. 주황색: 연결 검토 대상. 명시적으로 제외한 후보만 숨깁니다.</footer>
+<script>
+const DATA=__DATA__;
+const svg=document.querySelector('#map'), original=svg.getAttribute('viewBox').split(' ').map(Number);
+let view=[...original], dragging=null, selected=null, issueIndex=-1;
+function update(){svg.setAttribute('viewBox',view.join(' '));document.querySelector('#scale').textContent=`화면 폭 ${view[2].toFixed(1)} m`;}
+function xy(event){const p=svg.createSVGPoint();p.x=event.clientX;p.y=event.clientY;return p.matrixTransform(svg.getScreenCTM().inverse());}
+svg.addEventListener('wheel',event=>{event.preventDefault();let p=xy(event),factor=event.deltaY>0?1.2:1/1.2;let width=view[2]*factor;if(width<5||width>original[2]*3)return;view=[p.x+(view[0]-p.x)*factor,p.y+(view[1]-p.y)*factor,width,view[3]*factor];update();},{passive:false});
+svg.addEventListener('pointerdown',e=>{dragging={x:e.clientX,y:e.clientY,view:[...view],moved:false};svg.setPointerCapture(e.pointerId);});
+svg.addEventListener('pointermove',e=>{if(!dragging)return;const matrix=svg.getScreenCTM();let dx=(e.clientX-dragging.x)/matrix.a,dy=(e.clientY-dragging.y)/matrix.d;dragging.moved ||= Math.abs(e.clientX-dragging.x)+Math.abs(e.clientY-dragging.y)>3;view=[dragging.view[0]-dx,dragging.view[1]-dy,view[2],view[3]];update();});
+svg.addEventListener('pointerup',e=>{let moved=dragging?.moved;dragging=null;if(!moved){const p=xy(e);const hit=document.elementFromPoint(e.clientX,e.clientY);const targets=[...svg.querySelectorAll('#paths polyline')];let nearest=null,dist=Infinity;for(const t of targets){const box=t.getBBox();if(p.x<box.x-1||p.x>box.x+box.width+1||p.y<box.y-1||p.y>box.y+box.height+1)continue;for(let i=0;i<t.points.numberOfItems;i++){const q=t.points.getItem(i),d=Math.hypot(q.x-p.x,q.y-p.y);if(d<dist){dist=d;nearest=t;}}}if(nearest&&dist<3){selected=nearest;document.querySelector('#detail').textContent=selected.querySelector('title').textContent;drawPoints(false);}}});
+svg.addEventListener('pointercancel',()=>dragging=null);
+document.querySelectorAll('[data-layer]').forEach(box=>box.addEventListener('change',()=>document.getElementById(box.dataset.layer).style.display=box.checked?'':'none'));
+document.querySelector('#fit').onclick=()=>{view=[...original];update();};
+function focus(x,y,size=80){let ratio=original[3]/original[2];view=[x-size/2,-y-size*ratio/2,size,size*ratio];update();}
+document.querySelector('#locate').onclick=()=>{const id=document.querySelector('#road').value.trim();if(!/^\d+$/.test(id))return;const paths=[...svg.querySelectorAll(`#paths [data-road="${id}"]`)];if(!paths.length){document.querySelector('#detail').textContent='해당 driving road가 없습니다.';return;}const boxes=paths.map(p=>p.getBBox());let x0=Math.min(...boxes.map(b=>b.x)),y0=Math.min(...boxes.map(b=>b.y)),x1=Math.max(...boxes.map(b=>b.x+b.width)),y1=Math.max(...boxes.map(b=>b.y+b.height));const ratio=original[3]/original[2];const size=Math.max(x1-x0+20,(y1-y0+20)/ratio,30);focus((x0+x1)/2,-(y0+y1)/2,size);};
+document.querySelector('#road').onkeydown=e=>{if(e.key==='Enter')document.querySelector('#locate').click();};
+function drawPoints(show){const g=document.querySelector('#sample_points');g.replaceChildren();if(!selected||!show)return;for(let i=0;i<selected.points.numberOfItems;i++){let p=selected.points.getItem(i),c=document.createElementNS(svg.namespaceURI,'circle');c.setAttribute('cx',p.x);c.setAttribute('cy',p.y);c.setAttribute('r','.12');c.setAttribute('fill','#ff80ee');g.append(c);}}
+document.querySelector('#points').onclick=()=>drawPoints(true);
+document.querySelector('#clear').onclick=()=>{drawPoints(false);selected=null;};
+const type=document.querySelector('#issueType');[...new Set(DATA.issues.map(i=>i.kind))].sort().forEach(k=>{let o=document.createElement('option');o.value=k;o.textContent=k;type.append(o);});
+type.onchange=()=>{issueIndex=-1;};
+function goIssue(step){const rows=DATA.issues.filter(i=>!type.value||i.kind===type.value);if(!rows.length)return;issueIndex=(issueIndex+step+rows.length)%rows.length;let i=rows[issueIndex];focus(i.x,i.y,65);document.querySelector('#issue').textContent=`${issueIndex+1}/${rows.length} ${i.lane} ${i.kind}`;document.querySelector('#detail').textContent=i.detail;document.querySelector('[data-layer="issues"]').checked=true;document.querySelector('#issues').style.display='';}
+document.querySelector('#next').onclick=()=>goIssue(1);document.querySelector('#previous').onclick=()=>goIssue(-1);
+document.querySelector('#counts').textContent=`${DATA.counts.roads} roads · ${DATA.counts.lanes} lanes · ${DATA.counts.transitions} merge/split paths · 미연결 차선 ${DATA.counts.excluded_lanes}개 제외`;update();
+</script></html>

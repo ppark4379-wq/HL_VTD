@@ -76,6 +76,14 @@ planning:
   crosswalk_stop_line_search: 15.0  # [m] 횡단보도 앞 정지선 탐색 거리
 
 lane_change:
+  lattice_short_distance: 12.0   # [m] 제어 룩어헤드와 별개인 5차 후보 완료거리
+  lattice_medium_distance: 20.0
+  lattice_long_distance: 30.0
+  lattice_lane_cost: 2.0
+  lattice_curvature_cost: 30.0
+  lattice_progress_cost: 1.0
+  lattice_obstacle_clearance: 0.30 # [m] 정적 장애물과 nominal OBB 사이 추종 오차 여유
+  gateway_reserve_distance: 8.0  # [m] 마지막 합법적 횡이동 앞 여유
   obstacle_trigger_minimum_distance: 5.0  # [m] 정적으로 판단되면 대기 없이 즉시 회피 검토
   obstacle_trigger_maximum_distance: 70.0 # [m] 정적 장애물 탐색거리
   # 끼어들어 정지한 차량은 잠깐 정지/추종한 뒤 정적 회피 대상으로 전환한다.

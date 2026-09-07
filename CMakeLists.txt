@@ -4,7 +4,40 @@ project(HL_VTD VERSION 0.1.0 LANGUAGES CXX)
 
 enable_testing()
 
+set(CORRIDOR_SOURCES src/planning/local/corridor_lattice.cpp src/data/map/precomputed_lane_network.cpp)
+add_executable(corridor_lattice_tests tests/corridor_lattice_tests.cpp ${CORRIDOR_SOURCES}
+    src/planning/global/mission_corridor.cpp src/planning/global/reference_path_generator.cpp
+    src/planning/collision/collision_checker.cpp src/data/map/map_loader.cpp
+    src/utils/csv_utils.cpp src/utils/math_utils.cpp src/utils/geometry.cpp src/logger/decision_trace.cpp)
+target_compile_features(corridor_lattice_tests PRIVATE cxx_std_17)
+target_include_directories(corridor_lattice_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+add_test(NAME corridor_lattice_tests COMMAND corridor_lattice_tests)
+foreach(corridor_regression IN ITEMS
+        m05-tail-regression
+        m08-obstacle-replay
+        m08-gateway-replay
+        m08-final-gateway-replay
+        m08-corridor-handoff-replay
+        all-scenario-handoff-audit)
+    string(REPLACE "-" "_" corridor_test_name "${corridor_regression}")
+    add_test(NAME corridor_${corridor_test_name}
+             COMMAND corridor_lattice_tests --${corridor_regression})
+    set_tests_properties(corridor_${corridor_test_name}
+                         PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+endforeach()
+
+add_executable(check_precomputed_network
+    tools/map_precompute/check_precomputed_network.cpp
+    src/data/map/precomputed_lane_network.cpp
+    src/utils/csv_utils.cpp)
+target_compile_features(check_precomputed_network PRIVATE cxx_std_17)
+target_include_directories(check_precomputed_network PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+if(NOT MSVC)
+    target_compile_options(check_precomputed_network PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_executable(hl_vtd
+    ${CORRIDOR_SOURCES}
     src/main.cpp
     src/network/network_config.cpp
     src/network/vtd_client.cpp
@@ -76,6 +109,7 @@ add_executable(extract_static_zones
 )
 
 add_executable(controller_logic_tests
+    ${CORRIDOR_SOURCES}
     tests/controller_logic_tests.cpp
     src/network/receive/rdb_clock.cpp
     src/network/vtd_client.cpp
@@ -101,6 +135,9 @@ add_executable(controller_logic_tests
     src/logger/decision_trace.cpp
 )
 target_compile_features(controller_logic_tests PRIVATE cxx_std_17)
+if(NOT MSVC)
+    target_compile_options(controller_logic_tests PRIVATE -UNDEBUG)
+endif()
 target_include_directories(controller_logic_tests
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_test(NAME controller_logic_tests COMMAND controller_logic_tests)

@@ -15,6 +15,7 @@
 #include "data/vehicle/vehicle_config.hpp"
 #include "planning/global/reference_path_generator.hpp"
 #include "planning/global/mission_corridor.hpp"
+#include "planning/local/corridor_lattice.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -383,6 +384,10 @@ int main(int argc, char* argv[]) {
             throw std::invalid_argument("--mission-start-leg requires --checkpoints");
         }
         if (!options.checkpoint_path.empty()) {
+            std::string networkError;
+            if(!initializeCorridorRuntime(mapData,"output/precomputed_lane_network",
+                                          drivingConfig.laneChange,&networkError))
+                throw std::runtime_error("cannot load precomputed corridor network: "+networkError);
             if (!initializeMissionCorridor(
                     planning.missionCorridor, mapData,
                     options.checkpoint_path.string())) {

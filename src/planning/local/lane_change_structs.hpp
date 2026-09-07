@@ -8,6 +8,14 @@
 #include <vector>
 
 struct LaneChangeConfig {
+    double latticeShortDistance{12.0};
+    double latticeMediumDistance{20.0};
+    double latticeLongDistance{30.0};
+    double latticeLaneCost{2.0};
+    double latticeCurvatureCost{30.0};
+    double latticeProgressCost{1.0};
+    double latticeObstacleClearance{0.30};
+    double gatewayReserveDistance{8.0};
     double obstacleTriggerMinimumDistance{5.0};
     double obstacleTriggerMaximumDistance{70.0};
     double stoppedDynamicConfirmationTime{0.75};

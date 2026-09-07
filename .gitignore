@@ -78,6 +78,7 @@ __pycache__/
 *.pyc
 
 # Local scenario design/reference files
+/output/precomputed_lane_network/
 /scenario/SCENARIO_DESIGN_V2.md
 /scenario/SCENARIO_DESIGN_V2.md:Zone.Identifier
 

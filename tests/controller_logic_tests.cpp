@@ -2611,7 +2611,26 @@ void testM11DisplacedEgoStillGetsContinuousLocalPath() {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    // Focused regression entry point; the default still runs every test and
+    // reports the pre-existing close-moving-lead assertion failure.
+    if (argc == 2 && std::string(argv[1]) == "--preserved-safety") {
+        testRecoveryDoesNotCommandAStop();
+        testEmergencyBrakingLatchesEntrySteering();
+        testTrafficControllerParsing();
+        testRdbSimulationTimeMatchesGtInFrameOrder();
+        testStaticZoneRouteAlignment();
+        testScenarioRoutesKeepTheirOwnCrosswalksAndSchoolZone();
+        testPredictedCollisionIsNotCurrentCollision();
+        testConvergingOncomingVehicleIsPredictedOutsideNarrowCorridor();
+        testStaticObstacleFollowNeverCommandsZero();
+        std::cout << "preserved-safety subset: PASS (9 tests; not the full suite)\n";
+        return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--traffic-stop-regression") {
+        testLaneChangeExecutionBlockedByTrafficStops();
+        return 0;
+    }
     testRecoveryDoesNotCommandAStop();
     testEmergencyBrakingLatchesEntrySteering();
     testTrafficControllerParsing();

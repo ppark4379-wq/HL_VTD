@@ -1,4 +1,5 @@
 #include "planning/local/lane_change_planner.hpp"
+#include "planning/local/corridor_lattice.hpp"
 
 #include "logger/decision_trace.hpp"
 #include "planning/collision/collision_checker.hpp"
@@ -2141,6 +2142,8 @@ bool buildRoadIdTrackingPath(
     double horizon,
     DecisionTraceData* trace,
     const MissionCorridorData* mission) {
+    if(map.corridorRuntime && mission && activeMissionLeg(*mission))
+        return buildCorridorTrackingPath(output,plannerConfig,world,map,*mission,horizon,trace);
     output = {};
     output.config = plannerConfig;
     const bool missionActive = mission != nullptr &&
@@ -2343,6 +2346,8 @@ bool tryPrepareRoadConnectionLaneChange(
     std::size_t nearestGlobalIndex,
     DecisionTraceData* trace,
     const MissionCorridorData* mission) {
+    if(map.corridorRuntime && mission && activeMissionLeg(*mission))
+        return prepareCorridorLattice(state,config,safetyConfig,world,map,*mission,nullptr,nullptr,true,trace);
     if (state.phase != LaneChangePhase::None || !world.egoLaneValid ||
         !world.egoPathValid) return false;
     const bool missionActive = mission != nullptr &&
@@ -2719,6 +2724,9 @@ bool tryPrepareObstacleLaneChange(
     const std::vector<int>* confirmedStationaryObjectIds,
     DecisionTraceData* trace,
     const MissionCorridorData* mission) {
+    if(map.corridorRuntime && mission && activeMissionLeg(*mission))
+        return prepareCorridorLattice(state,config,safetyConfig,world,map,*mission,
+                                      confirmedStationaryObjectIds,pendingBlockerDistance,false,trace);
     if (pendingBlockerDistance != nullptr) *pendingBlockerDistance = -1.0;
     if (state.phase != LaneChangePhase::None || !world.egoLaneValid ||
         !world.egoPathValid) return false;

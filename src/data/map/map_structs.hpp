@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -120,7 +121,9 @@ struct LaneSegment {
     std::vector<Waypoint> points;
 };
 
+struct CorridorRuntime;
 struct PathGeneratorData {
+    std::shared_ptr<CorridorRuntime> corridorRuntime;
     double sampleInterval{0.5};
     std::vector<Checkpoint> checkpoints;
     std::unordered_map<int, Road> roads;
