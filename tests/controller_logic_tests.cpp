@@ -2434,7 +2434,7 @@ void testMixedCheckpointMissionsUseEntryExitCorridors() {
     }
     for (const char* scenario : {
              "M05", "M06", "M07", "M08",
-             "M09", "M10", "M11", "M12"}) {
+             "M09", "M10", "M11", "M12", "M13", "M14"}) {
         MissionCorridorData mission;
         const std::string checkpointPath =
             std::string("scenario/mixed/") + scenario + "/checkpoints.csv";

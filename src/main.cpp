@@ -36,6 +36,7 @@ struct CliOptions {
     std::filesystem::path reference_path = "output/reference_path.csv";
     std::filesystem::path checkpoint_path;
     std::filesystem::path mission_output_path;
+    std::optional<std::size_t> mission_start_leg;
     std::filesystem::path map_config_path = "config/maps/living_lab.yaml";
     std::filesystem::path vehicle_config_path = "config/vehicle.yaml";
     CsvLoggerConfig logger;
@@ -97,6 +98,15 @@ CliOptions parseOptions(int argc, char* argv[]) {
                 throw std::invalid_argument("--checkpoints requires a file path");
             }
             options.checkpoint_path = argv[i];
+        } else if (argument == "--mission-start-leg") {
+            if (++i >= argc) {
+                throw std::invalid_argument("--mission-start-leg requires an index");
+            }
+            const std::string value = argv[i];
+            if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos) {
+                throw std::invalid_argument("--mission-start-leg must be a non-negative integer");
+            }
+            options.mission_start_leg = std::stoull(value);
         } else if (argument == "--mission-output") {
             if (++i >= argc) {
                 throw std::invalid_argument(
@@ -156,7 +166,7 @@ CliOptions parseOptions(int argc, char* argv[]) {
             std::cout
                 << "Usage: hl_vtd [--config PATH] [--control-config PATH] "
                    "[--path PATH] [--checkpoints PATH] "
-                   "[--mission-output SVG] [--map-config PATH] "
+                   "[--mission-output SVG] [--mission-start-leg INDEX] [--map-config PATH] "
                    "[--vehicle-config PATH] "
                    "[--log CSV] [--scenario-id ID] "
                    "[--run-id ID] [--receive-only] [--debug-objects] "
@@ -369,6 +379,9 @@ int main(int argc, char* argv[]) {
             throw std::runtime_error("cannot load XODR map: " +
                                      mapConfig.xodrPath);
         }
+        if (options.mission_start_leg && options.checkpoint_path.empty()) {
+            throw std::invalid_argument("--mission-start-leg requires --checkpoints");
+        }
         if (!options.checkpoint_path.empty()) {
             if (!initializeMissionCorridor(
                     planning.missionCorridor, mapData,
@@ -377,6 +390,16 @@ int main(int argc, char* argv[]) {
                     "cannot build checkpoint mission corridor: " +
                     options.checkpoint_path.string());
             }
+            const std::size_t startLeg = options.mission_start_leg.value_or(0);
+            if (startLeg >= planning.missionCorridor.legs.size()) {
+                throw std::invalid_argument("--mission-start-leg exceeds the available mission legs");
+            }
+            planning.missionCorridor.activeLegIndex = startLeg;
+            const auto& start = planning.missionCorridor.legs[startLeg];
+            std::cout << "[mission] start_leg=" << startLeg
+                      << " checkpoint " << start.fromCheckpoint + 1
+                      << " -> gateway " << start.gatewayCheckpoint + 1
+                      << " -> exit " << start.toCheckpoint + 1 << '\n';
             std::cout << "[mission] loaded "
                       << planning.missionCorridor.checkpoints.size()
                       << " checkpoints and "

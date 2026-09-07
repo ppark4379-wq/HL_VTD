@@ -72,6 +72,7 @@ class RouteSyncOptions:
     preserve_checkpoint_coordinates: bool = False
     path_shape_lane_snap: bool = False
     trim_route_to_ego_start: bool = False
+    trim_max_distance_m: float = 5.0
 
 
 @dataclass(frozen=True)
@@ -344,6 +345,12 @@ def read_route_sync_options(package: Path) -> RouteSyncOptions:
     trim_route_to_ego_start = route.get("trim_route_to_ego_start", False)
     if not isinstance(trim_route_to_ego_start, bool):
         raise SyncError("route.trim_route_to_ego_start는 bool이어야 합니다")
+    trim_max_distance = route.get("trim_max_distance_m", 5.0)
+    if (isinstance(trim_max_distance, bool)
+            or not isinstance(trim_max_distance, (int, float))
+            or not math.isfinite(float(trim_max_distance))
+            or trim_max_distance <= 0.0):
+        raise SyncError("route.trim_max_distance_m는 유한한 양수여야 합니다")
 
     segments = []
     for value in raw_segments:
@@ -386,6 +393,7 @@ def read_route_sync_options(package: Path) -> RouteSyncOptions:
         preserve_checkpoint_coordinates=preserve_coordinates,
         path_shape_lane_snap=path_shape_lane_snap,
         trim_route_to_ego_start=trim_route_to_ego_start,
+        trim_max_distance_m=float(trim_max_distance),
     )
 
 
@@ -472,7 +480,8 @@ def trim_route_to_ego_start(
     route_path: Path,
     ego: EgoAbsolutePosition,
     maximum_distance_m: float = 5.0,
-) -> None:
+    checkpoints_path: Path | None = None,
+) -> int:
     fieldnames, rows = read_xy_rows(route_path)
     nearest_index = min(
         range(len(rows)),
@@ -491,6 +500,28 @@ def trim_route_to_ego_start(
     trimmed = rows[nearest_index:]
     if len(trimmed) < 2:
         raise SyncError("Ego 중간 시작 위치 뒤에 남은 경로점이 부족합니다")
+    # Find the active mission before rebasing route s. Anchors are checkpoint
+    # 1, 3, 5, ... and the finish, matching missionAnchorIndices in C++.
+    # Project in checkpoint order so repeated/overlapping roads keep their
+    # occurrence in this mission instead of jumping to a later lap.
+    start_leg = 0
+    if checkpoints_path is not None:
+        _, checkpoints = read_xy_rows(checkpoints_path)
+        anchors = list(range(0, len(checkpoints), 2))
+        if anchors[-1] != len(checkpoints) - 1:
+            anchors.append(len(checkpoints) - 1)
+        cursor = 0
+        for leg_index, checkpoint_index in enumerate(anchors):
+            checkpoint_x, checkpoint_y = xy(checkpoints[checkpoint_index])
+            cursor = min(
+                range(cursor, len(rows)),
+                key=lambda index: (
+                    (xy(rows[index])[0] - checkpoint_x) ** 2
+                    + (xy(rows[index])[1] - checkpoint_y) ** 2
+                ),
+            )
+            if cursor <= nearest_index:
+                start_leg = min(leg_index, len(anchors) - 2)
     update_route_yaw_and_s(trimmed)
     with route_path.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=fieldnames, lineterminator="\n")
@@ -498,9 +529,11 @@ def trim_route_to_ego_start(
         writer.writerows(trimmed)
     print(
         f"[sync] route trimmed to Ego start: removed={nearest_index} "
-        f"distance={distance:.3f}m remaining={len(trimmed)}",
+        f"distance={distance:.3f}m remaining={len(trimmed)} "
+        f"mission_start_leg={start_leg}",
         flush=True,
     )
+    return start_leg
 
 
 def write_checkpoint_slice(
@@ -868,6 +901,7 @@ def sync_manifest_from_xml(
     package: Path,
     scenario_file_name: str,
     root: ET.Element,
+    mission_start_leg: int | None = None,
 ) -> None:
     """Reconcile XML-owned manifest fields while preserving authored metadata."""
     manifest_path = package / "scenario.yaml"
@@ -885,6 +919,8 @@ def sync_manifest_from_xml(
         raise SyncError(f"scenario.yaml 루트는 mapping이어야 합니다: {manifest_path}")
 
     updated = copy.deepcopy(manifest)
+    if mission_start_leg is not None:
+        updated.setdefault("runtime", {})["mission_start_leg"] = mission_start_leg
     scenario = updated.setdefault("scenario", {})
     if not isinstance(scenario, dict):
         raise SyncError(f"scenario.yaml scenario는 mapping이어야 합니다: {manifest_path}")
@@ -1076,8 +1112,12 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
                         linear_segments,
                     )
                     os.replace(staged_merged_route, staged_route)
+            start_leg = 0
             if route_options.trim_route_to_ego_start:
-                trim_route_to_ego_start(staged_route, ego_absolute)
+                start_leg = trim_route_to_ego_start(
+                    staged_route, ego_absolute,
+                    route_options.trim_max_distance_m, staged_checkpoints,
+                )
             run_checked(
                 [
                     sys.executable,
@@ -1100,7 +1140,10 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
                 (staged_xml, f"{destination_stem}.xml"),
             ):
                 os.replace(staged, destination / name)
-            sync_manifest_from_xml(destination, xml_destination.name, root)
+            sync_manifest_from_xml(
+                destination, xml_destination.name, root,
+                mission_start_leg=start_leg,
+            )
             print(
                 f"[sync] synced PosAbsolute: {source} -> {destination}\n"
                 f"[sync] Ego start=({ego_absolute.x:.3f}, {ego_absolute.y:.3f}) "

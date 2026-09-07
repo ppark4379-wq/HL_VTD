@@ -1,0 +1,469 @@
+schema_version: 1
+scenario:
+  id: M14
+  category: mixed
+  name: checkpoint_path_shape_route
+  description: VTD PathShape01의 8개 체크포인트를 이용한 LivingLAB 경로 추종을 검증
+  file: M14.xml
+  format: vtd_native
+  map: LivingLAB
+runtime:
+  simulator: VTD
+  simulator_version: '2025.2'
+  sync_source_before_run: /home/autonav/VIRES/VTD.2025.2/Data/Projects/Current/Scenarios/M14.xml
+  mission_start_leg: 2
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+  preserve_checkpoint_coordinates: true
+  path_shape_lane_snap: false
+  trim_route_to_ego_start: true
+  trim_max_distance_m: 8.0
+validation:
+  ego_control: external
+  start_position_tolerance_m: 8.0
+  start_heading_tolerance_deg: 10.0
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+entities:
+- name: Ego
+  type: vehicle
+  role: ego
+  initial_position:
+    x: 1001.4653930664062
+    y: -590.1285095214844
+    z: 58.7497
+    heading_rad: 2.179711313316282
+- name: New Player
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1555.2611083984375
+    y: -268.10919189453125
+    z: 61.924990107055265
+    heading_rad: 4.828778586864088
+- name: New Player01
+  type: vehicle
+  role: relevant_object
+  initial_route:
+    path_id: 2
+    start_s_m: 17.05962522387597
+    target_s_m: 534.60090609594
+    start_lane: -2
+- name: New Player02
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1409.6590576171875
+    y: -576.4172973632812
+    z: 73.95744525383918
+    heading_rad: 3.820722081127593
+- name: New Player03
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1093.9727783203125
+    y: -707.0429077148438
+    z: 60.035
+    heading_rad: 2.238402653475481
+- name: New Player04
+  type: vehicle
+  role: relevant_object
+  initial_route:
+    path_id: 3
+    start_s_m: 12.626032640482418
+    target_s_m: 113.86605996334569
+    start_lane: 2
+- name: New Player05
+  type: vehicle
+  role: relevant_object
+  initial_route:
+    path_id: 2
+    start_s_m: 210.30731402633234
+    target_s_m: 534.60090609594
+    start_lane: -2
+- name: New Player06
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1176.626708984375
+    y: -762.9009399414062
+    z: 60.617000000000004
+    heading_rad: 5.403909497941845
+- name: New Player07
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 983.8532104492188
+    y: -563.994384765625
+    z: 57.571522165340696
+    heading_rad: 2.2396226535798913
+- name: New Player08
+  type: vehicle
+  role: relevant_object
+  initial_route:
+    path_id: 1
+    start_s_m: 18.663876482825145
+    target_s_m: 219.03152008066917
+    start_lane: -1
+- name: New Player09
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1507.398681640625
+    y: -185.789306640625
+    z: 60.75332032676784
+    heading_rad: 1.2490409594533578
+- name: New Player10
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1538.6622314453125
+    y: -212.1014404296875
+    z: 60.21100572943603
+    heading_rad: 4.830059805485147
+- name: New Player11
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1542.1903076171875
+    y: -216.404052734375
+    z: 60.25761679969628
+    heading_rad: 4.830119848493609
+- name: New Player12
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1546.019775390625
+    y: -220.5608673095703
+    z: 60.345556233090086
+    heading_rad: 4.830073369709378
+- name: 'New Player12 Copy '
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1545.6033935546875
+    y: -217.00234985351562
+    z: 60.2731663558216
+    heading_rad: 4.830073369709378
+- name: New Player12 Copy 01
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 1550.2218017578125
+    y: -226.54220581054688
+    z: 60.53691339179485
+    heading_rad: 4.830073369709378
+- name: 'New Player02 Copy '
+  type: vehicle
+  role: relevant_object
+  initial_route:
+    path_id: 2
+    start_s_m: 292.7732972970144
+    target_s_m: 534.60090609594
+    start_lane: -3
+- name: New Player13
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 989.9296875
+    y: -576.293212890625
+    z: 58.56292122312615
+    heading_rad: 2.2396226540421815
+- name: New Object
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1549.4573974609375
+    y: -277.4588317871094
+    z: 62.21040312584377
+    heading_rad: 1.6296207939510308
+- name: New Object01
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1540.46875
+    y: -405.4130554199219
+    z: 67.43997937371452
+    heading_rad: 0.0
+- name: 'New Object01 Copy '
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1541.309326171875
+    y: -404.85394287109375
+    z: 67.40534549231677
+    heading_rad: 0.0
+- name: New Object01 Copy 01
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1542.207275390625
+    y: -404.3082275390625
+    z: 67.37341414434691
+    heading_rad: 0.0
+- name: New Object01 Copy 02
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1543.0517578125
+    y: -403.5362854003906
+    z: 67.3315351383747
+    heading_rad: 0.0
+- name: New Object01 Copy 03
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1544.0963134765625
+    y: -402.9080505371094
+    z: 67.29843252666791
+    heading_rad: 0.0
+- name: New Object01 Copy 04
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1545.1131591796875
+    y: -402.4870910644531
+    z: 67.27071959976884
+    heading_rad: 1.410609759020697
+- name: New Object01 Copy 05
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1546.068603515625
+    y: -401.9563293457031
+    z: 67.23935739089075
+    heading_rad: 0.0
+- name: New Object01 Copy 06
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1546.8646240234375
+    y: -401.4521484375
+    z: 67.21189388387711
+    heading_rad: 0.0
+- name: New Object01 Copy 07
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 878.589599609375
+    y: -551.0752563476562
+    z: 53.87538458943172
+    heading_rad: 0.0
+- name: New Object01 Copy 08
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 882.6566162109375
+    y: -556.6732177734375
+    z: 53.85589008314761
+    heading_rad: 0.0
+- name: New Object01 Copy 09
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1533.9921875
+    y: -433.3206481933594
+    z: 68.59705128504687
+    heading_rad: 0.0
+- name: New Object01 Copy 10
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1534.946533203125
+    y: -435.4457092285156
+    z: 68.66313645850104
+    heading_rad: 0.0
+- name: New Object01 Copy 11
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1535.5576171875
+    y: -438.078369140625
+    z: 68.74964139628909
+    heading_rad: 0.0
+- name: New Object01 Copy 12
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1536.498046875
+    y: -440.7110595703125
+    z: 68.8284327270712
+    heading_rad: 0.0
+- name: New Object01 Copy 13
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1526.65576171875
+    y: -443.7881164550781
+    z: 69.09960608478416
+    heading_rad: 0.0
+- name: New Object01 Copy 14
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1529.9632568359375
+    y: -453.02178955078125
+    z: 69.38173172284809
+    heading_rad: 0.0
+- name: New Object01 Copy 15
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1521.6038818359375
+    y: -461.3307189941406
+    z: 69.8183950955089
+    heading_rad: 0.0
+- name: New Object01 Copy 16
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1524.9749755859375
+    y: -463.0409851074219
+    z: 69.81488771930648
+    heading_rad: 0.0
+- name: New Object01 Copy 17
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1510.1435546875
+    y: -475.610107421875
+    z: 70.5492406082684
+    heading_rad: 0.0
+- name: New Object01 Copy 18
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1500.5074462890625
+    y: -501.3251037597656
+    z: 71.60990472684216
+    heading_rad: 0.0
+- name: New Object01 Copy 19
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1494.0987548828125
+    y: -498.782958984375
+    z: 71.68451558027584
+    heading_rad: 0.0
+- name: New Object01 Copy 20
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1497.2647705078125
+    y: -506.5003662109375
+    z: 71.84933248779981
+    heading_rad: 0.0
+- name: New Object01 Copy 21
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1491.058837890625
+    y: -502.8958435058594
+    z: 71.88185808543224
+    heading_rad: 0.0
+- name: New Object01 Copy 22
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1493.583740234375
+    y: -510.0237731933594
+    z: 72.0478798075747
+    heading_rad: 0.0
+- name: New Object01 Copy 23
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1487.960693359375
+    y: -507.0341796875
+    z: 72.08844931578314
+    heading_rad: 0.0
+- name: New Object01 Copy 24
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1534.8623046875
+    y: -510.9544372558594
+    z: 0.0
+    heading_rad: 0.0
+- name: New Object02
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1352.01416015625
+    y: -631.1572875976562
+    z: 72.12638352107419
+    heading_rad: 2.2273112845800256
+- name: New Object03
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1200.023681640625
+    y: -748.7824096679688
+    z: 61.178170946500046
+    heading_rad: 0.0
+- name: 'New Object03 Copy '
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1200.34423828125
+    y: -749.2952880859375
+    z: 61.17464976050006
+    heading_rad: 0.0
+- name: New Object03 Copy 01
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1200.7716064453125
+    y: -749.8508911132812
+    z: 61.17379157710265
+    heading_rad: 0.0
+- name: New Object03 Copy 02
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1201.1671142578125
+    y: -750.2722778320312
+    z: 61.17576603364471
+    heading_rad: 0.0
+- name: New Object03 Copy 03
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1199.16015625
+    y: -748.0846557617188
+    z: 61.169277978969404
+    heading_rad: 0.0
+- name: New Object03 Copy 04
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1198.6998291015625
+    y: -747.39697265625
+    z: 61.17080507218918
+    heading_rad: 0.0
+- name: New Object03 Copy 05
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 1198.01171875
+    y: -746.9151000976562
+    z: 61.15993581099976
+    heading_rad: 0.0
+events: []
+expected_outcomes:
+- follow_reference_path
+- reach_route_end
+evaluation:
+  codes:
+  - internal.mixed_checkpoint_path_shape_route
+  required_metrics:
+  - ego_speed
+  - lateral_error
+  - collision
+  - route_progress
+  thresholds_status: pending

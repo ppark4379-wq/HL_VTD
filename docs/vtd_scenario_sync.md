@@ -100,6 +100,31 @@ Ego가 `PosAbsolute`이면 경로 끝점을 XML만으로 알 수 없으므로 XM
 기존 `checkpoints.csv`, `route.csv`, `route.svg`는 보존한다. 이 경우도 실패로
 처리하려면 `--require-route`를 사용한다.
 
+## Ego를 이동해서 중간 구간 디버깅
+
+PosAbsolute 패키지에서 다음 옵션을 켜면 실행 전 동기화할 때마다 XML의
+Ego 위치에 가까운 경로점부터 `route.csv`/`route.svg`를 다시 생성한다.
+체크포인트 원본은 보존하고, 전체 경로에서 이미 지난 진출 체크포인트를
+계산해 `runtime.mission_start_leg`도 자동 갱신한다(0부터 시작).
+러너는 이 값을 제어기의 `--mission-start-leg`로 전달한다.
+Ego를 원래 출발점으로 돌려놓으면 시작 구간도 자동으로 0으로 돌아간다.
+
+```yaml
+route:
+  preserve_checkpoint_coordinates: true
+  trim_route_to_ego_start: true
+  trim_max_distance_m: 8.0
+validation:
+  start_position_tolerance_m: 8.0
+  start_heading_tolerance_deg: 10.0
+```
+
+M13에는 이 설정이 적용되어 있다. VTD Editor에서 Ego 위치/방향을 변경해
+원본 XML을 저장하고 기존 `run_scenario.py scenario/mixed/M13 --auto-vtd`
+명령을 사용하면 된다. `mission_start_leg`를 직접 편집할 필요는 없다.
+경로에서 8m를 넘게 벗어나거나 진행방향이 맞지 않으면 검증은 계속 실패한다.
+기존 주행 로그 보존을 위해 재실행 시 `--run-id`를 생략하거나 새 값을 사용한다.
+
 ## 주의사항
 
 - VTD XML의 `TrackId`와 저장소 XODR의 road id가 다른 맵에서는 변환 테이블이

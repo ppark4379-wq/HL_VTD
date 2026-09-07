@@ -339,6 +339,7 @@ def build_command(
     checkpoints_file: Path | None = None,
     mission_output: Path | None = None,
     visualization_dir: Path | None = None,
+    mission_start_leg: int = 0,
 ) -> list[str]:
     command = [
         str(binary),
@@ -363,6 +364,7 @@ def build_command(
         command.extend(("--control-config", str(control_config)))
     if checkpoints_file is not None:
         command.extend(("--checkpoints", str(checkpoints_file)))
+        command.extend(("--mission-start-leg", str(mission_start_leg)))
     if mission_output is not None:
         command.extend(("--mission-output", str(mission_output)))
     if visualization_dir is not None:
@@ -630,6 +632,8 @@ def main() -> int:
         checkpoints_file,
         mission_output,
         visualization_dir,
+        mission_start_leg=report.manifest.get("runtime", {}).get(
+            "mission_start_leg", 0),
     )
 
     # Build the checkpoint corridor and its image before touching VTD. This
@@ -662,6 +666,7 @@ def main() -> int:
     print(f"Route    : {report.route_file}")
     if checkpoints_file is not None:
         print(f"Mission  : {checkpoints_file}")
+        print(f"Start leg: {report.manifest.get('runtime', {}).get('mission_start_leg', 0)} (0-based)")
         print(f"Map SVG  : {mission_output}")
     if visualization_dir is not None:
         print(f"RViz data: {visualization_dir}")

@@ -1,0 +1,124 @@
+schema_version: 1
+scenario:
+  id: M13
+  category: mixed
+  name: checkpoint_path_shape_route
+  description: VTD PathShape01의 10개 체크포인트를 이용한 LivingLAB 경로 추종을 검증
+  file: M13.xml
+  format: vtd_native
+  map: LivingLAB
+runtime:
+  simulator: VTD
+  simulator_version: '2025.2'
+  sync_source_before_run: /home/autonav/VIRES/VTD.2025.2/Data/Projects/Current/Scenarios/M13.xml
+  mission_start_leg: 0
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+  preserve_checkpoint_coordinates: true
+  path_shape_lane_snap: true
+  trim_route_to_ego_start: true
+  trim_max_distance_m: 8.0
+validation:
+  ego_control: external
+  start_position_tolerance_m: 8.0
+  start_heading_tolerance_deg: 10.0
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+entities:
+- name: Ego
+  type: vehicle
+  role: ego
+  initial_position:
+    x: 783.383
+    y: -914.149
+    z: 53.8757
+    heading_rad: 0.6700318998406232
+- name: New Player
+  type: vehicle
+  role: relevant_object
+  initial_path_shape:
+    path_shape_id: 5
+    start_s_m: 0.01
+    target_s_m: 196.51709827810873
+- name: New Player01
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 853.9219360351562
+    y: -949.7241821289062
+    z: 56.55398256424273
+    heading_rad: 3.8067582754363443
+- name: New Player02
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 843.3910522460938
+    y: -962.2504272460938
+    z: 57.830738479043056
+    heading_rad: 3.8097123786887437
+- name: New Player03
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 642.8360854492188
+    y: -752.77930859375
+    z: 50.45205574713413
+    heading_rad: 2.111848394913139
+- name: New Player04
+  type: vehicle
+  role: relevant_object
+  initial_route:
+    path_id: 2
+    start_s_m: 6.81
+    target_s_m: 397.9225567717407
+    start_lane: 2
+- name: New Player05
+  type: vehicle
+  role: relevant_object
+  initial_position:
+    x: 669.1275634765625
+    y: -857.2086791992188
+    z: 54.654
+    heading_rad: 2.7322977526099574
+- name: New Character
+  type: pedestrian
+  role: relevant_object
+  initial_position:
+    x: 676.7780151367188
+    y: -854.1567993164062
+    z: 54.654
+    heading_rad: 4.370774286320706
+- name: New Object
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 652.1027221679688
+    y: -744.3048706054688
+    z: 49.89677875
+    heading_rad: 0.0
+- name: 'New Object Copy '
+  type: obstacle
+  role: relevant_object
+  initial_position:
+    x: 650.1032104492188
+    y: -741.8379516601562
+    z: 49.89677875
+    heading_rad: 0.0
+events: []
+expected_outcomes:
+- follow_reference_path
+- reach_route_end
+evaluation:
+  codes:
+  - internal.mixed_checkpoint_path_shape_route
+  required_metrics:
+  - ego_speed
+  - lateral_error
+  - collision
+  - route_progress
+  thresholds_status: pending

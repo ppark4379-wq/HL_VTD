@@ -193,6 +193,14 @@ def validate_manifest_structure(
     if not isinstance(route.get("compatible_routes"), list):
         report.add("FAIL", "route.compatible_routes must be an array")
 
+    runtime = manifest.get("runtime", {})
+    if not isinstance(runtime, dict):
+        report.add("FAIL", "runtime must be a mapping")
+    else:
+        start_leg = runtime.get("mission_start_leg", 0)
+        if isinstance(start_leg, bool) or not isinstance(start_leg, int) or start_leg < 0:
+            report.add("FAIL", "runtime.mission_start_leg must be a non-negative integer")
+
     parameters = manifest.get("parameters")
     if not isinstance(parameters, dict):
         report.add("FAIL", "parameters must be a mapping")
