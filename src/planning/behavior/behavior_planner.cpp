@@ -140,18 +140,14 @@ void updateBehavior(BehaviorState& state,
                     const PlanningBehaviorConfig& config,
                     double dt) {
     output = {};
+    (void)dt;
 
-    // Recovery는 진입 즉시 해제되면 맵매칭이 안정될 시간이 없으므로
-    // 최소 유지시간 동안은 정지 상태를 유지한다.
+    // Recovery는 정지 상태가 아니라 이전 프레임의 경로를 새로운
+    // road/section 기준 경로로 교체하는 내부 상태다. 맵매칭 경계에서
+    // 0.5초씩 속도 0을 내면 같은 경계를 못 넘고 매 프레임 재진입한다.
+    // 법규 정지와 비상제동은 각각 StopManager/Safety에서 별도로
+    // 보장하므로, Recovery 자체는 즉시 해제하고 주행을 지속한다.
     if (state.health == SystemHealth::Recovery) {
-        state.recoveryHoldTime += std::max(0.0, dt);
-        if (state.recoveryHoldTime < config.recoveryMinimumHoldTime) {
-            state.longitudinal = LonMode::Stop;
-            output.longitudinal = LonMode::Stop;
-            output.health = SystemHealth::Recovery;
-            output.targetSpeed = 0.0;
-            return;
-        }
         state.health = SystemHealth::Ok;
     }
     state.recoveryHoldTime = 0.0;

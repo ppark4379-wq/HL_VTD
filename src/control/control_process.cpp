@@ -12,6 +12,8 @@ void runControlProcess(ControlProcessData& data,
                        double dt) {
     data.egoSpeed = world.egoSpeed;
     data.nominalCommand = {};
+    const double steeringBeforeFrame = data.controller.hasPreviousSteering
+        ? data.controller.previousSteering : 0.0;
 
     runLateralControl(data.nominalCommand, planning.trackingPlan,
                       data.controller.config.maxSteering);
@@ -31,6 +33,16 @@ void runControlProcess(ControlProcessData& data,
         data.controller.previousSteering = limited;
         data.controller.hasPreviousSteering = true;
         data.nominalCommand.steering = static_cast<float>(limited);
+    }
+    if (planning.emergencyBrake) {
+        if (!data.emergencySteeringLatched) {
+            data.emergencySteering = static_cast<float>(steeringBeforeFrame);
+            data.emergencySteeringLatched = true;
+        }
+        data.nominalCommand.steering = data.emergencySteering;
+        data.controller.previousSteering = data.emergencySteering;
+    } else {
+        data.emergencySteeringLatched = false;
     }
     data.nominalCommand.turnSignal = planning.turnSignal;
 

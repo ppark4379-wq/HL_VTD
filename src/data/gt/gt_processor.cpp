@@ -112,7 +112,13 @@ void worldToRoute(
         }
     }
 
-    if (bestDistance <= 10.0) {
+    // Object는 기준경로 주변의 좁은 충돌 회랑만 보면 되므로 기존 10m를
+    // 유지한다. Ego는 직전 route_s(expectedS)가 있고 checkpoint corridor
+    // 안에서 여러 차선을 자유롭게 쓸 수 있으므로, 4~5차로 폭에서도 경로
+    // 좌표를 잃지 않게 허용 폭을 넓힌다. expectedS의 +/-60m 창과 heading
+    // 점수가 함께 적용되어 겹치는 먼 경로로 순간 점프하지는 않는다.
+    const double maximumProjectionDistance = expectedS ? 18.0 : 10.0;
+    if (bestDistance <= maximumProjectionDistance) {
         pathValid = true;
         pathS = bestS;
         pathD = bestD;
@@ -170,7 +176,8 @@ WorldState makeWorldState(
     const GtFrame& gt,
     const PathGeneratorData& mapData,
     const std::vector<Waypoint>& globalPath,
-    std::optional<double> expectedEgoRouteS) {
+    std::optional<double> expectedEgoRouteS,
+    bool preferGlobalRouteLane) {
 
     WorldState world;
     world.ego = gt.ego;
@@ -204,7 +211,7 @@ WorldState makeWorldState(
     // 어긋나 차선변경·회피 계획이 전부 실패한다.
     // 기준 경로는 어느 road/lane을 지나는지 이미 알고 있으므로, Ego가 실제로
     // 그 lane 안에 들어 있을 때는 경로 쪽 판정을 우선한다.
-    if (world.egoPathValid && !globalPath.empty()) {
+    if (preferGlobalRouteLane && world.egoPathValid && !globalPath.empty()) {
         const auto hint = std::lower_bound(
             globalPath.begin(), globalPath.end(), world.egoPathS,
             [](const Waypoint& point, double value) { return point.s < value; });
@@ -251,4 +258,58 @@ WorldState makeWorldState(
     }
 
     return world;
+}
+
+bool projectWorldToActivePath(WorldState& world,
+                              const std::vector<Waypoint>& activePath,
+                              double frontBumperOffset,
+                              double lateralMargin) {
+    world.egoPathValid = false;
+    world.egoPathS = 0.0;
+    world.egoPathD = 0.0;
+    worldToRoute(world.ego.x, world.ego.y,
+                 world.egoPathValid, world.egoPathS, world.egoPathD,
+                 activePath, std::nullopt, world.ego.heading);
+    if (!world.egoPathValid) {
+        world.frontBumperPathS = 0.0;
+        return false;
+    }
+    world.frontBumperPathS = world.egoPathS + frontBumperOffset;
+
+    for (WorldObjectState& object : world.objects) {
+        object.pathValid = false;
+        object.pathS = 0.0;
+        object.pathD = 0.0;
+        object.relativeS = 0.0;
+        object.relativeD = 0.0;
+        object.isAhead = false;
+        object.isOnEgoPath = false;
+        object.ttc = std::numeric_limits<double>::infinity();
+        objectToRoute(object, activePath);
+        if (!object.pathValid) continue;
+
+        object.relativeS = object.pathS - world.egoPathS;
+        object.relativeD = object.pathD - world.egoPathD;
+        object.isAhead = object.relativeS > 0.0;
+        // 객체 중심이 아니라 OBB의 경로 법선 방향 반폭까지 포함한다.
+        // 차선 경계에 조금 걸친 장애물도 해당 주행 회랑의 장애물이다.
+        const double headingDelta = object.raw.heading - world.ego.heading;
+        const double objectLateralHalfExtent = 0.5 * (
+            std::abs(std::sin(headingDelta)) * object.raw.length +
+            std::abs(std::cos(headingDelta)) * object.raw.width);
+        const double allowedLateral =
+            0.5 * std::max(world.egoLaneWidth, 0.0) +
+            objectLateralHalfExtent + lateralMargin;
+        object.isOnEgoPath = std::abs(object.relativeD) <= allowedLateral;
+        const double longitudinalSpeed =
+            static_cast<double>(object.raw.speed) *
+            std::cos(object.raw.heading - world.ego.heading);
+        const double closingSpeed = world.egoSpeed - longitudinalSpeed;
+        if (object.relativeS <= 0.0) {
+            object.ttc = 0.0;
+        } else if (closingSpeed > 1e-6) {
+            object.ttc = object.relativeS / closingSpeed;
+        }
+    }
+    return true;
 }

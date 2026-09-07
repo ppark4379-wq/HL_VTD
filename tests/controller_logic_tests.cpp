@@ -1,12 +1,18 @@
 #include "data/map/static_zones.hpp"
+#include "data/map/map_matcher.hpp"
+#include "data/gt/gt_processor.hpp"
+#include "control/control_process.hpp"
 #include "network/receive/rdb_clock.hpp"
 #include "network/send/control_sender.hpp"
 #include "planning/behavior/behavior_planner.hpp"
 #include "planning/collision/collision_checker.hpp"
 #include "planning/global/reference_path_generator.hpp"
+#include "planning/global/mission_corridor.hpp"
+#include "planning/planning_process.hpp"
 #include "planning/local/lane_change_planner.hpp"
 #include "planning/local/path_planner.hpp"
 #include "utils/geometry.hpp"
+#include "utils/math_utils.hpp"
 
 #include <cassert>
 #include <algorithm>
@@ -20,6 +26,57 @@ namespace {
 
 static_assert(CONTROL_PACKET_SIZE == 9,
               "VTD control command must be exactly 9 bytes");
+
+void testRecoveryDoesNotCommandAStop() {
+    BehaviorState state;
+    state.health = SystemHealth::Recovery;
+    BehaviorDecision output;
+    ConstraintSet constraints;
+    constraints.speedLimit = 45.0 / 3.6;
+    StopDecision stop;
+    WorldState world;
+    world.egoSpeed = 3.0;
+    PlanningBehaviorConfig config;
+    updateBehavior(state, output, constraints, stop, world,
+                   30.0 / 3.6, config, 0.05);
+    if (output.health == SystemHealth::Recovery ||
+        output.targetSpeed <= 0.0 || output.longitudinal == LonMode::Stop) {
+        std::cerr << "Recovery still commanded a non-emergency stop\n";
+        std::abort();
+    }
+}
+
+void testEmergencyBrakingLatchesEntrySteering() {
+    ControlProcessData control;
+    control.controller.config.maxSteering = 0.48;
+    control.controller.config.maxSteeringRate = 10.0;
+    WorldState world;
+    world.inputValid = true;
+    PlanningResult planning;
+    planning.valid = true;
+    planning.targetSpeed = 5.0;
+    planning.trackingPlan.valid = true;
+    planning.trackingPlan.steering = 0.08;
+    runControlProcess(control, world, planning, 0.05);
+    const float beforeEmergency = control.latestCommand.steering;
+
+    planning.emergencyBrake = true;
+    planning.targetSpeed = 0.0;
+    planning.trackingPlan.steering = -0.48;
+    runControlProcess(control, world, planning, 0.05);
+    if (std::abs(control.latestCommand.steering - beforeEmergency) > 1e-6 ||
+        !control.safety.emergencyBrakeApplied) {
+        std::cerr << "EBS changed steering after brake entry\n";
+        std::abort();
+    }
+
+    planning.trackingPlan.steering = 0.48;
+    runControlProcess(control, world, planning, 0.05);
+    if (std::abs(control.latestCommand.steering - beforeEmergency) > 1e-6) {
+        std::cerr << "EBS steering latch changed while braking\n";
+        std::abort();
+    }
+}
 
 void testTrafficControllerParsing() {
     XmlElement root;
@@ -1304,6 +1361,138 @@ void testLaneChangeExecutionBlockedByTrafficStops() {
                            true, true, true);
     assert(prepared.phase == LaneChangePhase::None);
     assert(prepared.path.empty());
+
+    // gateway는 정지 중 버렸다가 프레임마다 다시 고르면 분기 선택이
+    // 흔들린다. 같은 경로를 보관하고 정지가 풀린 뒤 실행해야 한다.
+    prepared.phase = LaneChangePhase::Prepare;
+    prepared.roadConnectionManeuver = true;
+    prepared.path = makeStraightGlobalPath().waypoints;
+    advanceLaneChangePhase(prepared, laneChangeConfig, world, 0.1,
+                           true, true, true);
+    assert(prepared.phase == LaneChangePhase::Prepare);
+    assert(!prepared.path.empty());
+}
+
+void testActivePathProjectionDoesNotRequireGuideRoute() {
+    WorldState world;
+    world.ego.x = 50.0F;
+    world.ego.y = 20.0F;
+    world.ego.heading = 0.0F;
+    world.egoSpeed = 5.0;
+    world.egoLaneWidth = 3.5;
+    world.egoLaneValid = true;
+    world.inputValid = true;
+    world.egoPathValid = false;  // guide route 투영은 의도적으로 실패
+
+    WorldObjectState object;
+    object.raw.id = 7;
+    object.raw.x = 60.0F;
+    object.raw.y = 20.0F;
+    object.raw.heading = 0.0F;
+    object.raw.length = 4.0F;
+    object.raw.width = 2.0F;
+    object.obb = makeObjectObb(object.raw);
+    world.objects.push_back(object);
+
+    std::vector<Waypoint> activePath;
+    for (int x = 40; x <= 90; ++x) {
+        Waypoint point;
+        point.x = static_cast<double>(x);
+        point.y = 20.0;
+        point.yaw = 0.0;
+        point.s = 100.0 + static_cast<double>(x - 40);
+        activePath.push_back(point);
+    }
+    if (!projectWorldToActivePath(world, activePath, 3.8) ||
+        !world.egoPathValid || std::abs(world.egoPathS - 110.0) > 0.1 ||
+        !world.objects.front().isAhead ||
+        !world.objects.front().isOnEgoPath ||
+        std::abs(world.objects.front().relativeS - 10.0) > 0.1) {
+        std::cerr << "active path still depended on guide route projection\n";
+        std::abort();
+    }
+}
+
+void testPreviousLocalPathBridgesOneFrameSectionRebuildFailure() {
+    PlanningProcessData planning;
+    planning.pathPlanner.config = {};
+    planning.roadLanePlanner.config = planning.pathPlanner.config;
+    planning.config = {};
+    planning.laneChangeConfig = {};
+
+    // 직전 프레임에 정상적으로 생성되어 아직 30 m 이상 남은
+    // local path. 현재 프레임의 map에서는 의도적으로 새 경로를
+    // 만들 수 없게 해 section 경계의 한 프레임 생성 실패를 재현한다.
+    for (int x = 0; x <= 50; ++x) {
+        Waypoint point;
+        point.x = static_cast<double>(x);
+        point.y = -1.75;
+        point.yaw = 0.0;
+        point.s = static_cast<double>(x);
+        point.roadS = static_cast<double>(x);
+        point.roadId = 10;
+        point.sectionIndex = x < 20 ? 0 : 1;
+        point.laneId = -1;
+        planning.roadLanePlanner.waypoints.push_back(point);
+    }
+
+    planning.missionCorridor.valid = true;
+    planning.missionCorridor.minimumTargetDistance =
+        std::numeric_limits<double>::infinity();
+    for (int index = 0; index < 3; ++index) {
+        MissionCheckpointData checkpoint;
+        checkpoint.checkpoint.sequence = index + 1;
+        checkpoint.checkpoint.x = 1000.0 + index * 100.0;
+        checkpoint.checkpoint.y = 1000.0;
+        checkpoint.roadIds.push_back(100 + index);
+        planning.missionCorridor.checkpoints.push_back(std::move(checkpoint));
+    }
+    MissionLegData leg;
+    leg.fromCheckpoint = 0;
+    leg.gatewayCheckpoint = 1;
+    leg.toCheckpoint = 2;
+    leg.valid = true;
+    planning.missionCorridor.legs.push_back(leg);
+
+    GtFrame gt;
+    gt.ego.x = 20.2F;
+    gt.ego.y = -1.75F;
+    gt.ego.heading = 0.0F;
+    WorldState world;
+    world.ego = gt.ego;
+    world.egoSpeed = 5.0;
+    world.inputValid = true;
+    world.egoLaneValid = true;
+    world.egoRoadId = 10;
+    world.egoSectionIndex = 1;
+    world.egoLaneId = -1;
+    world.egoLaneWidth = 3.5;
+    world.frontBumperOffset = 3.8;
+    world.egoObb = makeObb2D(20.2, -1.75, 0.0, 4.8, 1.9);
+
+    PathGeneratorData temporarilyUnavailableMap;
+    runPlanningProcess(planning, gt, world, temporarilyUnavailableMap, 0.05);
+    if (!planning.result.valid ||
+        planning.result.health == SystemHealth::Recovery ||
+        planning.result.targetSpeed <= 0.0 ||
+        planning.roadLanePlanner.waypoints.size() != 51) {
+        std::cerr << "one-frame section rebuild failure discarded the valid "
+                     "previous local path\n";
+        std::abort();
+    }
+
+    // 반대로 정상 경로에서 크게 이탈한 경우는 이전 경로를 붙잡지
+    // 않되, Recovery 상태 자체가 정지를 추가로 유지해서도 안 된다.
+    gt.ego.y = 20.0F;
+    world.ego = gt.ego;
+    world.egoObb = makeObb2D(20.2, 20.0, 0.0, 4.8, 1.9);
+    runPlanningProcess(planning, gt, world, temporarilyUnavailableMap, 0.05);
+    if (planning.result.valid ||
+        planning.result.health == SystemHealth::Recovery) {
+        std::cerr << "large local-path departure retained a stale path or "
+                     "latched Recovery\n";
+        std::abort();
+    }
 }
 
 void testKeepTargetLaneWhenItRejoinsNextRoad() {
@@ -2238,9 +2427,193 @@ void testMixedCheckpointRoutesHaveValidGeometry() {
     }
 }
 
+void testMixedCheckpointMissionsUseEntryExitCorridors() {
+    PathGeneratorData map;
+    if (!loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr", 0.5)) {
+        std::abort();
+    }
+    for (const char* scenario : {
+             "M05", "M06", "M07", "M08",
+             "M09", "M10", "M11", "M12"}) {
+        MissionCorridorData mission;
+        const std::string checkpointPath =
+            std::string("scenario/mixed/") + scenario + "/checkpoints.csv";
+        if (!initializeMissionCorridor(mission, map, checkpointPath)) {
+            std::cerr << scenario
+                      << " checkpoint road corridor was disconnected\n";
+            std::abort();
+        }
+        const std::size_t expectedLegCount = mission.checkpoints.size() / 2;
+        if (mission.legs.size() != expectedLegCount) {
+            std::cerr << scenario
+                      << " mission corridor has wrong checkpoint/leg count\n";
+            std::abort();
+        }
+        for (std::size_t index = 0; index < mission.legs.size(); ++index) {
+            mission.activeLegIndex = index;
+            const MissionLegData& leg = mission.legs[index];
+            const std::size_t expectedFrom = 2 * index;
+            const std::size_t expectedTo = std::min(
+                expectedFrom + 2, mission.checkpoints.size() - 1);
+            if (leg.fromCheckpoint != expectedFrom ||
+                leg.gatewayCheckpoint != expectedFrom + 1 ||
+                leg.toCheckpoint != expectedTo ||
+                !leg.valid || leg.allowedLanes.empty() ||
+                leg.targetLanes.empty() || leg.preferredRoute.empty() ||
+                leg.allowedLanes.count(leg.preferredRoute.front()) == 0 ||
+                leg.targetLanes.count(leg.preferredRoute.back()) == 0) {
+                std::cerr << "invalid " << scenario
+                          << " mission corridor leg " << index << '\n';
+                std::abort();
+            }
+            // Corridor 범위는 roadMark와 무관하다. 한 section/direction이
+            // 들어왔으면 그 안의 모든 driving lane이 포함되고, 실제 실선
+            // 검사는 lane-change trajectory 생성 시점에만 수행한다.
+            for (const LaneKey& key : leg.allowedLanes) {
+                const Road& road = map.roads.at(key.roadId);
+                const LaneSection& section =
+                    road.sections.at(key.sectionIndex);
+                for (const auto& [laneId, lane] : section.lanes) {
+                    if (laneId == 0 || lane.type != "driving" ||
+                        (laneId > 0) != (key.laneId > 0)) {
+                        continue;
+                    }
+                    if (!leg.allowedLanes.count(
+                            {key.roadId, key.sectionIndex, laneId})) {
+                        std::cerr << scenario
+                                  << " corridor was narrowed by lane marking\n";
+                        std::abort();
+                    }
+                }
+            }
+        }
+        if (std::string(scenario) == "M09") {
+            // 교차로 진입 좌표 근처의 잘못된 직진 road가 checkpoint
+            // 통과로 오판되면 안 된다. exit road를 실제로 맵매칭한
+            // 후에만 다음 자유 회랑으로 넘어간다.
+            mission.activeLegIndex = 0;
+            mission.minimumTargetDistance =
+                std::numeric_limits<double>::infinity();
+            mission.targetRoadStableFrames = 0;
+            mission.targetRoadObserved = false;
+            const MissionLegData& first = mission.legs.front();
+            const Checkpoint& exit =
+                mission.checkpoints[first.toCheckpoint].checkpoint;
+            WorldState world;
+            world.ego.x = exit.x;
+            world.ego.y = exit.y;
+            world.egoLaneValid = true;
+            world.egoRoadId =
+                mission.checkpoints[first.gatewayCheckpoint].roadIds.front();
+            updateMissionCorridorProgress(mission, world);
+            if (mission.activeLegIndex != 0) {
+                std::cerr << "M09 advanced at an unobserved exit road\n";
+                std::abort();
+            }
+            world.egoRoadId =
+                mission.checkpoints[first.toCheckpoint].roadIds.front();
+            updateMissionCorridorProgress(mission, world);
+            if (mission.activeLegIndex != 1) {
+                std::cerr << "M09 did not advance after observing exit road\n";
+                std::abort();
+            }
+        }
+    }
+}
+
+void testM11DisplacedEgoStillGetsContinuousLocalPath() {
+    PathGeneratorData map;
+    if (!loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr", 0.5)) {
+        std::abort();
+    }
+    PathPlannerData guide;
+    if (!loadWaypointsCsv(guide.waypoints,
+                          "scenario/mixed/M11/route.csv")) {
+        std::abort();
+    }
+    MissionCorridorData mission;
+    if (!initializeMissionCorridor(
+            mission, map, "scenario/mixed/M11/checkpoints.csv")) {
+        std::abort();
+    }
+    mission.activeLegIndex = 2;
+
+    const std::vector<std::pair<double, double>> samples{
+        {1455.30725, 587.564514}, {1455.55481, 587.562439},
+        {1455.77686, 587.560364}, {1456.63, 587.551}};
+    MapMatchState matchState;
+    for (const auto& [x, y] : samples) {
+        matchWorldPosition(matchState, map, x, y, -0.0091, std::nullopt);
+    }
+    const LaneMatch& match = matchState.lastMatch;
+    WorldState world;
+    world.ego.x = 1456.63F;
+    world.ego.y = 587.551F;
+    world.ego.heading = -0.0091F;
+    world.egoLaneValid = match.valid;
+    world.egoRoadId = match.roadId;
+    world.egoSectionIndex = match.sectionIndex;
+    world.egoLaneId = match.laneId;
+    world.egoRoadS = match.roadS;
+    world.egoLaneWidth = match.laneWidth;
+    world.egoLaneCenterDistance = match.distance;
+    GtFrame routeFrame;
+    routeFrame.ego = world.ego;
+    const WorldState routeProjection = makeWorldState(
+        routeFrame, map, guide.waypoints);
+    world.egoPathValid = routeProjection.egoPathValid;
+    world.egoPathS = routeProjection.egoPathS;
+    world.egoPathD = routeProjection.egoPathD;
+    world.inputValid = world.egoLaneValid;
+    world.egoSpeed = 0.0;
+    world.frontBumperOffset = 3.8;
+
+    PathPlannerData local;
+    PathPlannerConfig plannerConfig;
+    if (!buildRoadIdTrackingPath(
+            local, plannerConfig, world, map, guide, 0, 80.0,
+            nullptr, &mission) || local.waypoints.size() < 2) {
+        std::cerr << "M11 displaced Ego did not get a local lane path: road="
+                  << world.egoRoadId << " section=" << world.egoSectionIndex
+                  << " lane=" << world.egoLaneId << " road_s="
+                  << world.egoRoadS << '\n';
+        std::abort();
+    }
+    WorldState projected = world;
+    if (!projectWorldToActivePath(
+            projected, local.waypoints, world.frontBumperOffset)) {
+        std::cerr << "M11 displaced Ego local path could not be projected\n";
+        std::abort();
+    }
+    if (std::abs(projected.egoPathD) > 8.0) {
+        std::cerr << "M11 displaced Ego selected an unrelated local path\n";
+        std::abort();
+    }
+    const auto point = std::lower_bound(
+        local.waypoints.begin(), local.waypoints.end(), projected.egoPathS,
+        [](const Waypoint& waypoint, double pathS) {
+            return waypoint.s < pathS;
+        });
+    const Waypoint& nearest = point == local.waypoints.end()
+        ? local.waypoints.back() : *point;
+    const double remaining = local.waypoints.back().s - projected.egoPathS;
+    const double headingError = std::abs(normalizeAngle(
+        static_cast<double>(world.ego.heading) - nearest.yaw));
+    if (remaining < 2.0 || headingError > 1.35) {
+        std::cerr << "M11 displaced local path unusable: d="
+                  << projected.egoPathD << " remaining=" << remaining
+                  << " heading_error=" << headingError << " path_lane="
+                  << nearest.roadId << '/' << nearest.sectionIndex << '/'
+                  << nearest.laneId << '\n';
+        std::abort();
+    }
+}
+
 }  // namespace
 
 int main() {
+    testRecoveryDoesNotCommandAStop();
+    testEmergencyBrakingLatchesEntrySteering();
     testTrafficControllerParsing();
     testRdbSimulationTimeMatchesGtInFrameOrder();
     testStaticZoneRouteAlignment();
@@ -2262,6 +2635,8 @@ int main() {
     testO02RouteSectionComesFromMapRoadS();
     testO04RouteSectionComesFromMapRoadS();
     testLaneChangeExecutionBlockedByTrafficStops();
+    testActivePathProjectionDoesNotRequireGuideRoute();
+    testPreviousLocalPathBridgesOneFrameSectionRebuildFailure();
     testLaneChangeAcrossRenumberedLaneSection();
     testLimitedLateralOffsetAvoidance();
     testKeepTargetLaneWhenItRejoinsNextRoad();
@@ -2281,6 +2656,8 @@ int main() {
     testNearestWaypointCannotJumpToOverlappingFutureBranch();
     testLaneGraphDoesNotInventMissingSectionLink();
     testMixedCheckpointRoutesHaveValidGeometry();
+    testMixedCheckpointMissionsUseEntryExitCorridors();
+    testM11DisplacedEgoStillGetsContinuousLocalPath();
     std::cout << "controller_logic_tests: PASS\n";
     return 0;
 }

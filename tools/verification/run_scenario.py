@@ -283,6 +283,14 @@ def parse_args() -> argparse.Namespace:
         help="Write the detailed planning decision trace to this file",
     )
     parser.add_argument(
+        "--rviz-data",
+        action="store_true",
+        help=(
+            "Write static map and live planner state for the RViz bridge "
+            "under this run's rviz directory"
+        ),
+    )
+    parser.add_argument(
         "--param",
         action="append",
         default=[],
@@ -328,6 +336,9 @@ def build_command(
     decision_log: Path | None = None,
     ignore_traffic_lights: bool = False,
     control_config: Path | None = None,
+    checkpoints_file: Path | None = None,
+    mission_output: Path | None = None,
+    visualization_dir: Path | None = None,
 ) -> list[str]:
     command = [
         str(binary),
@@ -350,6 +361,12 @@ def build_command(
         command.append("--ignore-traffic-lights")
     if control_config is not None:
         command.extend(("--control-config", str(control_config)))
+    if checkpoints_file is not None:
+        command.extend(("--checkpoints", str(checkpoints_file)))
+    if mission_output is not None:
+        command.extend(("--mission-output", str(mission_output)))
+    if visualization_dir is not None:
+        command.extend(("--visualization-dir", str(visualization_dir)))
     return command
 
 
@@ -563,6 +580,17 @@ def main() -> int:
         / run_id
         / "run.csv"
     ).resolve()
+    # Rendered scenario/config and the mission corridor visualization all belong
+    # to this run. Create the run directory before any of them are generated.
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    checkpoints_file = (report.package / "checkpoints.csv").resolve()
+    if not checkpoints_file.is_file():
+        checkpoints_file = None
+    mission_output = (
+        log_file.parent / "mission_corridor.svg"
+        if checkpoints_file is not None else None
+    )
+    visualization_dir = log_file.parent / "rviz" if args.rviz_data else None
     scenario_file = report.scenario_file.resolve()
     try:
         parameter_values = resolve_parameters(
@@ -599,12 +627,44 @@ def main() -> int:
         args.decision_log.resolve() if args.decision_log else None,
         bool(report.manifest.get("control", {}).get("ignore_traffic_lights", False)),
         runtime_control_config,
+        checkpoints_file,
+        mission_output,
+        visualization_dir,
     )
+
+    # Build the checkpoint corridor and its image before touching VTD. This
+    # catches a disconnected mission early and guarantees that dry-runs also
+    # leave the requested artifact in the run output directory.
+    if mission_output is not None:
+        if not binary.is_file():
+            print(
+                f"[run_scenario] HL_VTD executable not found: {binary}",
+                file=sys.stderr,
+            )
+            return 2
+        mission_check = command + ["--check-config"]
+        completed = subprocess.run(
+            mission_check, cwd=REPO_ROOT, check=False,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        if completed.returncode != 0:
+            print(
+                "[run_scenario] checkpoint corridor generation failed:\n"
+                + completed.stdout + completed.stderr,
+                file=sys.stderr,
+            )
+            return 2
+        print(f"[mission] corridor map saved: {mission_output}")
 
     print()
     print(f"Scenario : {scenario_id}")
     print(f"File     : {scenario_file}")
     print(f"Route    : {report.route_file}")
+    if checkpoints_file is not None:
+        print(f"Mission  : {checkpoints_file}")
+        print(f"Map SVG  : {mission_output}")
+    if visualization_dir is not None:
+        print(f"RViz data: {visualization_dir}")
     print(f"Log      : {log_file}")
     print(f"Command  : {shlex.join(command)}")
     if args.auto_vtd:
@@ -634,7 +694,6 @@ def main() -> int:
         )
         return 2
 
-    log_file.parent.mkdir(parents=True, exist_ok=True)
     try:
         if args.auto_vtd:
             assert ready_file is not None

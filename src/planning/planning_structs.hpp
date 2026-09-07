@@ -2,6 +2,7 @@
 
 #include "data/map/map_structs.hpp"
 #include "planning/behavior/behavior_structs.hpp"
+#include "planning/global/mission_corridor.hpp"
 #include "planning/local/lane_change_structs.hpp"
 
 #include <cstddef>
@@ -20,6 +21,10 @@ struct PathPlannerConfig {
     double curveThreshold{0.02};
     double sharpCurveThreshold{0.20};
     double curvatureCheckDistance{25.0};
+    // 곡률에 따른 물리적 속도 상한: v <= sqrt(a_lat / curvature).
+    // 단계별 curveSpeed만 쓰면 반경 5 m 급커브에서도 20 km/h가
+    // 허용되어 조향 한계를 넘는다.
+    double maximumLateralAcceleration{1.5};
     double straightSpeed{8.0};
     double curveSpeed{4.0};
     double sharpCurveSpeed{5.5555555556};
@@ -176,6 +181,9 @@ struct PlanningProcessData {
     // pathPlanner는 checkpoint의 road corridor/구역 route_s를 보존한다.
     // roadLanePlanner는 현재 자유 차선을 추종하는 조향용 경로다.
     PathPlannerData roadLanePlanner;
+    // 교차로 진출 checkpoint 사이에서는 allowedLanes를 자유롭게
+    // 사용하고, 진입 checkpoint 근처에서만 targetLanes에 정렬한다.
+    MissionCorridorData missionCorridor;
     PlanningBehaviorConfig config;
     BehaviorState behaviorState;
     StopManagerData stopManager;
@@ -190,6 +198,9 @@ struct PlanningProcessData {
     // Ego가 횡단보도를 완전히 통과할 때까지 clearance 속도를 적용한다.
     std::vector<CrosswalkOccupancyState> crosswalkStates;
     double emergencyBrakeHoldRemaining{};
+    // 급커브가 최근점 뒤로 넘어가자마자 가속하지 않고,
+    // 조향이 풀리고 출구 차선에 안착할 시간을 보장한다.
+    double sharpCurveSpeedHoldRemaining{};
     double previousRouteS{};
     bool hasPreviousRouteS{};
 };

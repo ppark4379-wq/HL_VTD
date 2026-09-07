@@ -8,11 +8,13 @@
 #include "control/control_process.hpp"
 #include "logger/logger.hpp"
 #include "logger/decision_trace.hpp"
+#include "visualization/visualization_logger.hpp"
 #include "planning/planning_process.hpp"
 #include "data/gt/world_process.hpp"
 #include "data/map/static_zones.hpp"
 #include "data/vehicle/vehicle_config.hpp"
 #include "planning/global/reference_path_generator.hpp"
+#include "planning/global/mission_corridor.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -32,6 +34,8 @@ struct CliOptions {
     std::filesystem::path config_path = "config/network.yaml";
     std::filesystem::path control_config_path = "config/control.yaml";
     std::filesystem::path reference_path = "output/reference_path.csv";
+    std::filesystem::path checkpoint_path;
+    std::filesystem::path mission_output_path;
     std::filesystem::path map_config_path = "config/maps/living_lab.yaml";
     std::filesystem::path vehicle_config_path = "config/vehicle.yaml";
     CsvLoggerConfig logger;
@@ -42,6 +46,8 @@ struct CliOptions {
     bool ignore_traffic_lights = false;
     bool decision_logging = false;
     std::filesystem::path decision_log_path;
+    bool visualization_logging = false;
+    std::filesystem::path visualization_directory;
     std::filesystem::path ready_file;
 };
 
@@ -86,6 +92,17 @@ CliOptions parseOptions(int argc, char* argv[]) {
                 throw std::invalid_argument("--path requires a file path");
             }
             options.reference_path = argv[i];
+        } else if (argument == "--checkpoints") {
+            if (++i >= argc) {
+                throw std::invalid_argument("--checkpoints requires a file path");
+            }
+            options.checkpoint_path = argv[i];
+        } else if (argument == "--mission-output") {
+            if (++i >= argc) {
+                throw std::invalid_argument(
+                    "--mission-output requires an SVG file path");
+            }
+            options.mission_output_path = argv[i];
         } else if (argument == "--map-config") {
             if (++i >= argc) throw std::invalid_argument("--map-config requires a file path");
             options.map_config_path = argv[i];
@@ -123,6 +140,13 @@ CliOptions parseOptions(int argc, char* argv[]) {
             }
             options.decision_log_path = argv[i];
             options.decision_logging = true;
+        } else if (argument == "--visualization-dir") {
+            if (++i >= argc) {
+                throw std::invalid_argument(
+                    "--visualization-dir requires a directory path");
+            }
+            options.visualization_directory = argv[i];
+            options.visualization_logging = true;
         } else if (argument == "--ready-file") {
             if (++i >= argc) {
                 throw std::invalid_argument("--ready-file requires a file path");
@@ -131,11 +155,14 @@ CliOptions parseOptions(int argc, char* argv[]) {
         } else if (argument == "--help" || argument == "-h") {
             std::cout
                 << "Usage: hl_vtd [--config PATH] [--control-config PATH] "
-                   "[--path PATH] [--map-config PATH] [--vehicle-config PATH] "
+                   "[--path PATH] [--checkpoints PATH] "
+                   "[--mission-output SVG] [--map-config PATH] "
+                   "[--vehicle-config PATH] "
                    "[--log CSV] [--scenario-id ID] "
                    "[--run-id ID] [--receive-only] [--debug-objects] "
                    "[--ignore-traffic-lights] "
                    "[--decision-log PATH] "
+                   "[--visualization-dir DIR] "
                    "[--ready-file PATH] [--check-config]\n";
             std::exit(0);
         } else {
@@ -342,6 +369,40 @@ int main(int argc, char* argv[]) {
             throw std::runtime_error("cannot load XODR map: " +
                                      mapConfig.xodrPath);
         }
+        if (!options.checkpoint_path.empty()) {
+            if (!initializeMissionCorridor(
+                    planning.missionCorridor, mapData,
+                    options.checkpoint_path.string())) {
+                throw std::runtime_error(
+                    "cannot build checkpoint mission corridor: " +
+                    options.checkpoint_path.string());
+            }
+            std::cout << "[mission] loaded "
+                      << planning.missionCorridor.checkpoints.size()
+                      << " checkpoints and "
+                      << planning.missionCorridor.legs.size()
+                      << " free-driving corridor legs\n";
+            if (!options.mission_output_path.empty()) {
+                const std::filesystem::path parent =
+                    options.mission_output_path.parent_path();
+                if (!parent.empty()) {
+                    std::filesystem::create_directories(parent);
+                }
+                std::filesystem::path csvPath = options.mission_output_path;
+                csvPath.replace_extension(".csv");
+                if (!saveMissionCorridorArtifacts(
+                        planning.missionCorridor, mapData,
+                        planning.pathPlanner.waypoints,
+                        options.mission_output_path.string(),
+                        csvPath.string())) {
+                    throw std::runtime_error(
+                        "cannot save mission corridor artifacts: " +
+                        options.mission_output_path.string());
+                }
+                std::cout << "[mission] visualization: "
+                          << options.mission_output_path << '\n';
+            }
+        }
         if (!alignStaticZonesToRoute(
                 mapConfig.zones, planning.pathPlanner.waypoints)) {
             throw std::runtime_error(
@@ -352,6 +413,17 @@ int main(int argc, char* argv[]) {
         printMapReadiness(mapData.staticZones,
                           drivingConfig.planner.schoolZoneSpeed);
 
+        VisualizationLoggerData visualization;
+        if (options.visualization_logging) {
+            initializeVisualizationLogger(
+                visualization, options.visualization_directory,
+                mapData, planning.missionCorridor);
+            std::cout << "[rviz-data] static map: "
+                      << visualization.staticMapPath << '\n'
+                      << "[rviz-data] live frame: "
+                      << visualization.latestFramePath << '\n';
+        }
+
         if (options.check_config_only) {
             std::cout << "[config] all configured files and values are valid\n";
             return 0;
@@ -360,6 +432,10 @@ int main(int argc, char* argv[]) {
         ControlProcessData control;
         control.controller.config = drivingConfig.controller;
         WorldProcessData world;
+        world.config.speedFilterAlpha =
+            drivingConfig.runtime.speedFilterAlpha;
+        world.config.maxValidSpeed =
+            drivingConfig.runtime.maxValidPositionSpeed;
         FrameClockData clock;
 
         CsvLoggerData logger;
@@ -369,11 +445,17 @@ int main(int argc, char* argv[]) {
         }
 
         DecisionTraceData decisionTrace;
+        const bool decisionLogging = options.decision_logging ||
+                                     options.visualization_logging;
         if (options.decision_logging) {
             initializeDecisionTrace(decisionTrace,
                                     options.decision_log_path);
             std::cout << "[decision-log] output: "
                       << decisionTrace.outputPath << '\n';
+        } else if (options.visualization_logging) {
+            // RViz용 프레임 후보는 메모리에만 수집한다. 20 Hz 제어
+            // 루프에서 판단 로그를 매 이벤트마다 flush하지 않는다.
+            decisionTrace.enabled = true;
         }
 
         auto receiver = makeGtReceiver(config.vtd);
@@ -425,7 +507,7 @@ int main(int argc, char* argv[]) {
             }
             const double elapsedWallTime = std::chrono::duration<double>(
                 LogClock::now() - logStartTime).count();
-            DecisionTraceData* trace = options.decision_logging
+            DecisionTraceData* trace = decisionLogging
                                            ? &decisionTrace
                                            : nullptr;
             if (trace != nullptr) {
@@ -440,10 +522,17 @@ int main(int argc, char* argv[]) {
                 simulationClockAnnounced = true;
             }
             runWorldProcess(world, gt, getLatestGtReceiveTime(receiver), clock.dt,
-                            mapData, planning.pathPlanner.waypoints, vehicle);
+                            mapData, planning.pathPlanner.waypoints, vehicle,
+                            &planning.missionCorridor);
             runPlanningProcess(planning, gt, world.state, mapData, clock.dt,
                                trace);
             runControlProcess(control, world.state, planning.result, clock.dt);
+
+            if (options.visualization_logging) {
+                writeVisualizationFrame(
+                    visualization, frameCount, elapsedWallTime,
+                    world.state, planning, control, trace);
+            }
 
             if (!options.receive_only) {
                 sendControlCommand(receiver.client, control.safeCommand);

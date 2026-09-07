@@ -1,0 +1,55 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.35
+      Cell Size: 5
+      Class: rviz_default_plugins/Grid
+      Color: 70; 70; 70
+      Enabled: true
+      Name: Grid
+      Plane: XY
+      Plane Cell Count: 100
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Static map, corridor, gateway
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /hl_vtd/static_map
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Ego, objects, candidates, decision
+      Topic:
+        Depth: 2
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /hl_vtd/planning
+  Enabled: true
+  Global Options:
+    Background Color: 28; 32; 38
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: Top Down
+      Scale: 18
+      Target Frame: ego_view
+      X: 0
+      Y: 0
+Window Geometry:
+  Height: 900
+  Width: 1500

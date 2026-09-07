@@ -45,6 +45,9 @@ struct RoadMarkEntry {
     double s{};
     std::string laneChange;
     std::string color;
+    // 기존 테스트의 {s, laneChange, color} aggregate 초기화를
+    // 깨지 않도록 마지막에 추가한다.
+    std::string type;
 };
 
 struct LaneDefinition {

@@ -160,7 +160,11 @@ void pollRdbClock(RdbClockData& clock) {
                                   clock.receiveBuffer.begin(),
                                   clock.receiveBuffer.begin() + received);
         extractRdbClockSamples(clock);
-        if (received < clock.receiveBuffer.size()) return;
+        // TCP preserves bytes, not application-message boundaries. A short
+        // recv therefore does not mean that VTD's socket queue is empty. Keep
+        // draining until SO_RCVTIMEO reports no immediately available data;
+        // otherwise large RDB scenes accumulate in VTD and eventually hit its
+        // 50 MiB per-client output-buffer limit.
     }
 }
 

@@ -16,6 +16,7 @@ add_executable(hl_vtd
     src/planning/local/path_planner.cpp
     src/planning/planning_process.cpp
     src/planning/global/global_path_planner.cpp
+    src/planning/global/mission_corridor.cpp
     src/planning/local/local_path_planner.cpp
     src/planning/local/lane_change_planner.cpp
     src/planning/behavior/behavior_planner.cpp
@@ -32,6 +33,7 @@ add_executable(hl_vtd
     src/control/safety/safety_limiter.cpp
     src/logger/logger.cpp
     src/logger/decision_trace.cpp
+    src/visualization/visualization_logger.cpp
     src/utils/csv_utils.cpp
     src/utils/geometry.cpp
     src/utils/math_utils.cpp
@@ -78,12 +80,21 @@ add_executable(controller_logic_tests
     src/network/receive/rdb_clock.cpp
     src/network/vtd_client.cpp
     src/planning/behavior/behavior_planner.cpp
+    src/planning/planning_process.cpp
     src/planning/local/lane_change_planner.cpp
+    src/planning/local/local_path_planner.cpp
     src/planning/local/path_planner.cpp
     src/planning/collision/collision_checker.cpp
     src/planning/global/reference_path_generator.cpp
+    src/planning/global/mission_corridor.cpp
+    src/data/gt/gt_processor.cpp
+    src/data/map/map_matcher.cpp
     src/data/map/map_loader.cpp
     src/data/map/static_zones.cpp
+    src/control/control_process.cpp
+    src/control/lateral/lateral_controller.cpp
+    src/control/longitudinal/longitudinal_controller.cpp
+    src/control/safety/safety_limiter.cpp
     src/utils/csv_utils.cpp
     src/utils/geometry.cpp
     src/utils/math_utils.cpp

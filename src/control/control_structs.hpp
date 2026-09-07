@@ -54,6 +54,10 @@ struct ControlProcessData {
     ControlCommand safeCommand;     // VTD로 실제 전송하는 명령
     ControlCommand latestCommand;   // 로깅용 = safeCommand
     SafetyReport safety;
+    // 비상제동 진입 순간의 조향을 유지한다. 제동 중 속도가
+    // 낮아진 상태에서 lookahead 대상이 바뀌어 조향이 포화되는 것을 막는다.
+    bool emergencySteeringLatched{};
+    float emergencySteering{};
 };
 
 // GT 프레임 기반 제어 주기와 속도 필터 설정.

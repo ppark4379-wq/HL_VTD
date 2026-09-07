@@ -148,12 +148,23 @@ double computePurePursuitSteering(double headingError,
 // 앞쪽에 곡선이 있으면 감속한 목표속도를 선택한다.
 double chooseTargetSpeed(double maxCurvature,
                          const PathPlannerConfig& config) {
+    double nominalSpeed = config.straightSpeed;
     if (maxCurvature >= config.sharpCurveThreshold) {
-        return config.sharpCurveSpeed;
+        nominalSpeed = config.sharpCurveSpeed;
+    } else if (maxCurvature >= config.curveThreshold) {
+        nominalSpeed = config.curveSpeed;
     }
-    return maxCurvature >= config.curveThreshold
-               ? config.curveSpeed
-               : config.straightSpeed;
+    // Discrete "curve/sharp curve" speeds alone do not reflect whether the
+    // steering/tyre model can physically negotiate the detected radius.  Cap
+    // every curved path by lateral acceleration so the same rule also covers
+    // tight VTD junction connectors and newly generated avoidance paths.
+    if (maxCurvature >= config.curveThreshold) {
+        const double physicalSpeed = std::sqrt(
+            config.maximumLateralAcceleration /
+            std::max(maxCurvature, 1e-6));
+        nominalSpeed = std::min(nominalSpeed, physicalSpeed);
+    }
+    return nominalSpeed;
 }
 
 // 최근접점, 곡률, lookahead target, 조향각, 목표속도를 순서대로 계산한다.
@@ -190,6 +201,20 @@ PathPlan runPurePursuit(PathPlannerData& planner, const GtFrame& gt,
     plan.steering = computePurePursuitSteering(
         headingError, targetDistance, planner.config.wheelbase);
     plan.targetSpeed = chooseTargetSpeed(plan.maxCurvature, planner.config);
+    // A sharp bend may just have moved behind Ego while the vehicle is still
+    // carrying substantial steering to settle onto the outgoing lane.  Using
+    // forward path curvature alone releases the speed cap too early and can
+    // accelerate the car while it is still turning.  The steering demand is
+    // another estimate of instantaneous curvature, so keep the same physical
+    // lateral-acceleration cap until the demanded steering has unwound.
+    const double steeringCurvature = std::abs(
+        std::tan(plan.steering) / planner.config.wheelbase);
+    if (steeringCurvature >= planner.config.curveThreshold) {
+        const double steeringLimitedSpeed = std::sqrt(
+            planner.config.maximumLateralAcceleration /
+            std::max(steeringCurvature, 1e-6));
+        plan.targetSpeed = std::min(plan.targetSpeed, steeringLimitedSpeed);
+    }
     if (recoveringToRoute) {
         const double recoverySpeed = std::clamp(3.0 - 0.3 * routeOffset,
                                                 1.5, 2.5);

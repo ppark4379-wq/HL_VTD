@@ -67,6 +67,7 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
                config.planner.curveThreshold &&
            config.planner.sharpCurveSpeed > 0.0 &&
            config.planner.sharpCurveSpeed <= config.planner.curveSpeed &&
+           config.planner.maximumLateralAcceleration > 0.0 &&
            config.behavior.comfortableDeceleration > 0.0 &&
            config.behavior.stopHoldTime >= 1.0 &&
            config.behavior.followTimeGap > 0.0 &&
@@ -141,6 +142,8 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.planner.sharpCurveThreshold) &&
         setConfigValue(values, "pure_pursuit.curvature_check_distance",
                        config.planner.curvatureCheckDistance) &&
+        setConfigValue(values, "pure_pursuit.maximum_lateral_acceleration",
+                       config.planner.maximumLateralAcceleration) &&
         setConfigValue(values, "pure_pursuit.goal_tolerance",
                        config.planner.goalTolerance) &&
         setSpeedConfigValue(values, "speed.straight_target_kph",

@@ -19,4 +19,13 @@ WorldState makeWorldState(
     const GtFrame& gt,
     const PathGeneratorData& mapData,
     const std::vector<Waypoint>& globalPath,
-    std::optional<double> expectedEgoRouteS = std::nullopt);
+    std::optional<double> expectedEgoRouteS = std::nullopt,
+    bool preferGlobalRouteLane = true);
+
+// 차량과 객체의 종/횡방향 관계를 이번 프레임에 실제로 추종할 경로로
+// 다시 계산한다. checkpoint mission에서는 guide route가 아니라 이 결과가
+// 장애물 탐색, TTC, 충돌예측과 lane-change 완료 판정의 기준이다.
+bool projectWorldToActivePath(WorldState& world,
+                              const std::vector<Waypoint>& activePath,
+                              double frontBumperOffset,
+                              double lateralMargin = 0.5);

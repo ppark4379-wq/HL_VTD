@@ -11,6 +11,7 @@ pure_pursuit:
   curve_threshold: 0.02           # [1/m] 곡선 판정 곡률
   sharp_curve_threshold: 0.20     # [1/m] 급커브 판정; 실측 일반 0.055, 급커브 0.220~0.414
   curvature_check_distance: 25.0  # [m] 앞쪽 곡률 탐색 거리
+  maximum_lateral_acceleration: 1.5 # [m/s^2] 급커브 물리 속도상한 sqrt(a_lat/kappa)
   goal_tolerance: 1.5             # [m] 도착 판정 거리
 
 # 속도는 전부 km/h로 적는다. 채점 기준이 km/h라 그대로 비교할 수 있다.
@@ -23,7 +24,7 @@ pure_pursuit:
 speed:
   straight_target_kph: 45.0        # 50 km/h 제한 대비 4 km/h 여유
   curve_target_kph: 30.0
-  sharp_curve_target_kph: 20.0    # maxCurvature >= sharp_curve_threshold
+  sharp_curve_target_kph: 6.0     # 반경 5m급 connector에서 조향 slew 시간 확보
   school_zone_target_kph: 25.0     # 보호구역 진입 후 유지할 보수적 목표속도
 
 planning:
@@ -118,5 +119,5 @@ limits:
 runtime:
   nominal_dt: 0.05                # [s] 20 Hz
   speed_filter_alpha: 0.25        # (0, 1], 작을수록 부드럽게 반영
-  max_valid_position_speed_kph: 288.0 # 초기화·리스폰 위치 점프 검출 기준
+  max_valid_position_speed_kph: 60.0 # 제어 최고 45km/h를 넘는 GT/RDB 시간·위치 점프 제거
   input_timeout: 1.0              # [s] GT 미수신 시 비상제동 후 연결 종료

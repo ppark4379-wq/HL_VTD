@@ -162,6 +162,36 @@ bool comparePolynomialS(const Polynomial& lhs, const Polynomial& rhs) {
     return lhs.s < rhs.s;
 }
 
+// Some VTD-exported OpenDRIVE maps contain consecutive piecewise records whose
+// start positions are mathematically identical but differ by floating-point
+// noise (for example 32.701000000124 and 32.700999999999).  Sorting those raw
+// values can reverse their XML declaration order.  Since the later declaration
+// is the effective one at an equal start position, that reversal selects a
+// stale polynomial and creates a lateral jump in otherwise continuous lanes.
+// Coalesce near-identical starts before sorting, retaining the later XML value.
+void normalizePiecewisePolynomials(std::vector<Polynomial>& polynomials) {
+    constexpr double kDuplicateStartTolerance = 1e-6;
+    std::vector<Polynomial> normalized;
+    normalized.reserve(polynomials.size());
+    for (const Polynomial& polynomial : polynomials) {
+        auto duplicate = std::find_if(
+            normalized.begin(), normalized.end(),
+            [&](const Polynomial& existing) {
+                return std::abs(existing.s - polynomial.s) <=
+                       kDuplicateStartTolerance;
+            });
+        if (duplicate == normalized.end()) {
+            normalized.push_back(polynomial);
+            continue;
+        }
+        const double canonicalStart = std::min(duplicate->s, polynomial.s);
+        *duplicate = polynomial;
+        duplicate->s = canonicalStart;
+    }
+    std::stable_sort(normalized.begin(), normalized.end(), comparePolynomialS);
+    polynomials = std::move(normalized);
+}
+
 // laneSection을 road s 오름차순으로 정렬할 때 사용한다.
 bool compareLaneSectionS(const LaneSection& lhs, const LaneSection& rhs) {
     return lhs.s < rhs.s;
@@ -842,6 +872,8 @@ void parseLanes(const XmlElement& node, Road& road) {
                                 RoadMarkEntry mark;
                                 mark.s = section.s +
                                     readAttribute<double>(item.second, "sOffset", 0.0);
+                                mark.type =
+                                    readAttribute<std::string>(item.second, "type", "none");
                                 mark.laneChange =
                                     readAttribute<std::string>(item.second, "laneChange", "none");
                                 mark.color =
@@ -858,14 +890,14 @@ void parseLanes(const XmlElement& node, Road& road) {
                                 }
                             }
                         }
+                        normalizePiecewisePolynomials(lane.widths);
                         section.lanes.emplace(lane.id, std::move(lane));
                     }
                 }
                 road.sections.push_back(std::move(section));
             }
         }
-        std::sort(road.laneOffsets.begin(), road.laneOffsets.end(),
-             comparePolynomialS);
+        normalizePiecewisePolynomials(road.laneOffsets);
         std::sort(road.sections.begin(), road.sections.end(), compareLaneSectionS);
     }
 

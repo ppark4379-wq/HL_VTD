@@ -86,6 +86,7 @@ struct WorldState {
     bool egoPathValid{};
     double egoPathS{};
     double egoPathD{};
+    double frontBumperOffset{};
     double frontBumperPathS{};
     std::vector<WorldObjectState> objects;
     TrafficLightState trafficLight;
