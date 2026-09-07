@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE Scenario>
+<Scenario RevMajor="2025" RevMinor="2">
+    <Layout Database="../Runtime/Tools/RodDistro_0925131035_Rod2025.2/DefaultProject/Database/LivingLAB_ver197_260804_final.opt.osgb" File="../Runtime/Tools/ROD/DefaultProject/Odr/LivingLAB_ver197_260804_final.xodr"/>
+    <VehicleList ConfigFile="Distros/Current/Config/Players/Vehicles"/>
+    <DriverList ConfigFile="Distros/Current/Config/Players/driverCfg.xml"/>
+    <CharacterList ConfigFile="Distros/Current/Config/Players/Pedestrians"/>
+    <ObjectList ConfigFile="Distros/Current/Config/Players/Objects"/>
+    <DynObjects Path="Distros/Current/Config/DynObjects/Logic"/>
+    <TrafficElements/>
+    <PulkTraffic/>
+    <TrafficControl>
+        <Path Name="Path01" PathId="1">
+            <Waypoint PathOption="shortest" s="3.4485593329020219e+01" TrackId="429"/>
+            <Waypoint PathOption="shortest" s="6.1133433600081780e+01" TrackId="418"/>
+            <Waypoint PathOption="shortest" s="1.2518601765305371e+02" TrackId="128"/>
+        </Path>
+        <Player>
+            <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_ActiveBlue" Name="Ego"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosAbsolute X="3.4571044921875000e+02" Y="-1.1255429840087891e+02" Z="4.1500000000000000e+01" Direction="5.2900052038517895e+00" AlignToRoad="true"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="CutInActor"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="1.0827616920917183e+02" EndAction="continue" TargetS="2.8861950600882591e+02" StartLane="2" PathId="1"/>
+            </Init>
+        </Player>
+        <PlayerActions Player="Ego"/>
+        <PlayerActions Player="CutInActor">
+            <Action Name="stationary_adjacent_cutin">
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.5000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="1.5000000000000000e+01" X="3.4571044921875000e+02" Y="-1.1255429840087891e+02"/>
+                <SpeedChange Rate="8.0000000000000000e+00" Target="6.0000000000000000e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <LaneChange Direction="-1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Time="1.5000000000000000e+00"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="1.5000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+    </TrafficControl>
+    <MovingObjectsControl/>
+    <LightSigns/>
+    <Selections/>
+</Scenario>
