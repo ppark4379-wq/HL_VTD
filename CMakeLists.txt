@@ -114,6 +114,14 @@ add_executable(checkpoints_to_route
     src/utils/math_utils.cpp
 )
 
+# Offline XODR geometry/link export; no mission snapshot or VTD socket.
+add_executable(export_mission_corridors tools/verification/export_mission_corridors.cpp
+    src/planning/global/reference_path_generator.cpp
+    src/data/map/map_loader.cpp
+    src/utils/csv_utils.cpp src/utils/math_utils.cpp)
+target_compile_features(export_mission_corridors PRIVATE cxx_std_17)
+target_include_directories(export_mission_corridors PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
 add_executable(extract_static_zones
     tools/map_extraction/extract_static_zones.cpp
     src/planning/global/reference_path_generator.cpp

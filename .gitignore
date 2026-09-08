@@ -79,6 +79,11 @@ __pycache__/
 
 # Local scenario design/reference files
 /output/precomputed_lane_network/
+# Share the complete offline corridor/gateway package, including SVG/PNG/JSON.
+!/output/콜리더_게이트웨이/
+!/output/콜리더_게이트웨이/**
+# Obsolete partial inspection snapshots are not part of this package.
+/output/콜리더_게이트웨이/previous_partial/
 /scenario/SCENARIO_DESIGN_V2.md
 /scenario/SCENARIO_DESIGN_V2.md:Zone.Identifier
 

@@ -1,0 +1,12 @@
+scenario,checkpoints,corridors,gateways,xodr_connector_groups,ordered_connected,gate_connected,geometry_gaps,centerline_steps,pairing_valid,unreachable_lane_sections
+M05,8,4,3,3,True,True,0,0,True,0
+M06,10,5,4,4,True,True,0,1,True,0
+M07,8,4,3,3,True,True,0,0,True,0
+M08,10,5,4,4,True,True,0,1,True,0
+M09,8,4,3,6,True,True,0,0,True,0
+M10,10,5,4,7,True,True,0,0,True,10
+M11,8,4,3,5,True,True,0,0,True,4
+M12,8,4,3,7,True,True,0,0,True,5
+M13,10,5,4,6,True,True,0,0,True,0
+M14,8,4,3,9,True,True,0,0,True,7
+M15,11,10,0,9,True,True,0,0,False,1
