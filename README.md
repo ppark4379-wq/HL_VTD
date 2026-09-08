@@ -187,7 +187,18 @@ python3 tools/verification/evaluate.py \
   --summary output/verification/B02/test_01/summary.csv
 ```
 
-현재 `evaluate.py`는 제한속도·보호구역 속도·중앙선/보도 지속 침범·실선 변경·횡단보도 정차·충돌·리스폰을 해당 로그 필드가 있을 때 구간별로 평가합니다. 입력 데이터가 없는 공식 항목은 `UNAVAILABLE`로 표시하며 임의로 PASS 처리하지 않습니다. 일반 기준과 공식 기준을 모두 지정하지 않으면 기존 `result`는 `NOT_EVALUATED`가 정상입니다. 자세한 내용은 [docs/eval_criteria.md](docs/eval_criteria.md)에 정리합니다.
+`evaluate.py`는 차로 유지를 제외한 14개 항목의 판정 입력으로 구간별 감점을 계산합니다. 500점에서 시작하며 데이터가 없는 항목은 `UNAVAILABLE`로 남깁니다. 최신 사용자 결정·출처·항목별 기준·실행 절차는 [최종 자동채점 기준](docs/HL_VTD_자동채점_최종평가기준.md)을 우선 확인하세요.
+
+### VTD PC의 실시간 자동채점 대시보드
+
+VTD와 같은 Linux PC에서 실행합니다. 별도 제어기 PC의 CSV가 없어도 읽기 전용 RDB 출력을 수신합니다.
+
+```bash
+python3 tools/dashboard/check_environment.py --probe-rdb
+python3 tools/dashboard/server.py --host 127.0.0.1 --port 8765 --video-source window
+```
+
+브라우저: `http://127.0.0.1:8765/`. Python/PyYAML과 영상용 FFmpeg/X11 환경이 필요합니다. 서버가 출력하는 `control_monitor.py` 명령을 VTD PC의 다른 터미널에서 실행해야 첫 제어값 수신부터 채점됩니다(0 제어값 포함, Play/움직임만으로 시작하지 않음). 웹 서버에는 sudo를 사용하지 않습니다. [assessment_rules.yaml](tools/dashboard/assessment_rules.yaml)의 경로/신호 매핑과 실제 객체 송출을 확인하세요. 종료는 마지막 체크포인트 도달(현재 구현 허용거리 1.5m)이며 종료 정지선 지정은 필요 없습니다. 보호구역 43개 적용·15/28번 보류([연결 보완 근거](docs/living_lab_school_zone_review.md)), 횡단보도 197개 추출 상태이며 실제 VTD 종단 간 검증은 별도입니다.
 
 ## 네트워크
 

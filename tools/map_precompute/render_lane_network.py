@@ -170,7 +170,8 @@ class Drawing:
                     self.feature_counts["other_pavement_object"] += 1
                     corners=[(-length/2,-width/2),(length/2,-width/2),(length/2,width/2),(-length/2,width/2),(-length/2,-width/2)]
                     self.add("objects","line",world(corners),"#9ba3ac",.08,label,rid)
-                    self.add("object_labels","text",[center],"#cad0d5",.6,name.removesuffix('.flt'),rid)
+                    object_name = name[:-4] if name.endswith('.flt') else name
+                    self.add("object_labels","text",[center],"#cad0d5",.6,object_name,rid)
                     self.feature_issues.append(dict(road=rid,id=obj.get("id"),name=name,kind="model_footprint_only"))
 
     def draw_paths(self):

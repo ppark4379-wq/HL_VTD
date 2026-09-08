@@ -4,6 +4,8 @@ Raw lane centers stay immutable. Maneuver endpoints reference existing samples;
 intermediate points follow a quintic lateral profile in the source road frame.
 These are generated paths, not additional links claimed to exist in the XML.
 """
+from __future__ import annotations
+
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 import bisect

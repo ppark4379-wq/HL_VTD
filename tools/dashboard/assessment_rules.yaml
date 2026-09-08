@@ -1,0 +1,40 @@
+# HL assessment rules: user supplied DOCX and organizer answers, 2026-09-08.
+base_score: 500
+normal_speed_kmh: 50
+school_speed_kmh: 30
+school_zones_file: tools/dashboard/living_lab_school_zones.yaml
+school_zone_corrections_file: tools/dashboard/living_lab_school_zone_corrections.yaml
+# Supplied HLVTD Ioniq 6 dimensions; derive rear axle from the raw RDB OBB offset.
+vehicle_reference:
+  length_m: 4.848
+  width_m: 1.886
+  rear_axle_to_front_m: 3.808
+map:
+  xodr: src/data/map/HL_FMA_VTD_LivingLab.xodr
+  extract_crosswalks: true
+route:
+  csv: tools/dashboard/livinglab_route.csv
+  start_s_m: 3.5851800814350838
+  # The generated lane-center route ends 0.229 m before VTD PathRef TargetS=842.2247695884054.
+  target_s_m: 841.99568158
+  section_count: 5
+  max_projection_distance_m: 20
+# Latest user decision: finish at the final route checkpoint, not a stop line.
+# User-confirmed: match config/control.yaml goal_tolerance at 1.5 m.
+completion:
+  mode: final_checkpoint
+  tolerance_m: 1.5
+# User-confirmed green-start exception: an object whose OBB overlaps the
+# vehicle-width planned path within 30 m ahead is a valid reason not to start.
+green_start_exception:
+  forward_path_m: 30.0
+session:
+  start_trigger: controller_packet_arrival
+  max_sample_gap_s: 0.5
+  time_limit_s: 900
+  stop_speed_kmh: 0.0
+  # Provisional teleport observation threshold, NOT an official respawn rule.
+  # VTD performs the relocation; the dashboard never sends respawn commands.
+  respawn_jump_m: 5
+# School ranges load from school_zones_file. Signal mapping is still pending.
+metadata: {}
