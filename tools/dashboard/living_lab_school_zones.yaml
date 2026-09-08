@@ -1,0 +1,960 @@
+# HL FMA VTD LivingLab 어린이보호구역 구간 경계 원본
+# point_1/point_2는 사용자가 사진 두 장씩 묶어 기록한 경계값.
+# 같은 track_id + lane_id인 경우에만 direct_s_range를 바로 사용할 수 있음.
+# track/lane이 다르면 S는 서로 다른 로컬 도로좌표이므로 단순 min~max 비교 금지.
+# requires_topology_expansion=true 구간은 OpenDRIVE 연결관계로 중간 segment를 풀어야 함.
+# school_zone_45는 동일 지점 캡처만 있어 두 번째 경계가 없는 미완성 기록.
+
+map: HL_FMA_VTD_LivingLab
+coordinate_frame: vtd_world
+speed_limit_kph: 30.0
+school_zones:
+  - id: school_zone_01
+    status: complete
+    point_1:
+      x: 359.584
+      y: -71.227
+      z: 41.5
+      track_id: 420
+      lane_id: -1
+      s: 0.084
+    point_2:
+      x: 409.920
+      y: -38.474
+      z: 40.2908
+      track_id: 420
+      lane_id: -1
+      s: 60.307
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 420
+      lane_id: -1
+      s_min: 0.084
+      s_max: 60.307
+  - id: school_zone_02
+    status: complete
+    point_1:
+      x: 441.811
+      y: -19.465
+      z: 40.0
+      track_id: 797
+      lane_id: -1
+      s: 0.029
+    point_2:
+      x: 517.200
+      y: -140.672
+      z: 42.0
+      track_id: 190
+      lane_id: 1
+      s: 0.449
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_03
+    status: complete
+    point_1:
+      x: 595.507
+      y: -122.845
+      z: 44.8178
+      track_id: 174
+      lane_id: 1
+      s: 18.015
+    point_2:
+      x: 610.698
+      y: -115.612
+      z: 45.4
+      track_id: 174
+      lane_id: 1
+      s: 1.209
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 174
+      lane_id: 1
+      s_min: 1.209
+      s_max: 18.015
+  - id: school_zone_04
+    status: complete
+    point_1:
+      x: 630.436
+      y: -122.195
+      z: 45.4
+      track_id: 4471
+      lane_id: -1
+      s: 23.829
+    point_2:
+      x: 699.466
+      y: -210.287
+      z: 46.6787
+      track_id: 146
+      lane_id: 1
+      s: 34.753
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_05
+    status: complete
+    point_1:
+      x: 701.709
+      y: -207.314
+      z: 46.6659
+      track_id: 146
+      lane_id: -1
+      s: 35.605
+    point_2:
+      x: 633.099
+      y: -121.149
+      z: 45.4
+      track_id: 146
+      lane_id: -1
+      s: 145.818
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 146
+      lane_id: -1
+      s_min: 35.605
+      s_max: 145.818
+  - id: school_zone_06
+    status: complete
+    point_1:
+      x: 609.129
+      y: -110.528
+      z: 45.4
+      track_id: 174
+      lane_id: -2
+      s: 0.583
+    point_2:
+      x: 561.620
+      y: -132.217
+      z: 42.0
+      track_id: 174
+      lane_id: -2
+      s: 52.590
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 174
+      lane_id: -2
+      s_min: 0.583
+      s_max: 52.590
+  - id: school_zone_07
+    status: complete
+    point_1:
+      x: 563.513
+      y: -134.778
+      z: 42.0
+      track_id: 174
+      lane_id: -1
+      s: 52.057
+    point_2:
+      x: 610.070
+      y: -113.540
+      z: 45.4
+      track_id: 174
+      lane_id: -1
+      s: 0.946
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 174
+      lane_id: -1
+      s_min: 0.946
+      s_max: 52.057
+  - id: school_zone_08
+    status: complete
+    point_1:
+      x: 519.984
+      y: -139.962
+      z: 42.0
+      track_id: 781
+      lane_id: -1
+      s: 49.056
+    point_2:
+      x: 415.336
+      y: -31.275
+      z: 40.0775
+      track_id: 420
+      lane_id: 1
+      s: 68.697
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_09
+    status: complete
+    point_1:
+      x: 510.365
+      y: -164.010
+      z: 42.0
+      track_id: 465
+      lane_id: 1
+      s: 64.340
+    point_2:
+      x: 484.630
+      y: -178.214
+      z: 42.8628
+      track_id: 465
+      lane_id: 1
+      s: 35.030
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 465
+      lane_id: 1
+      s_min: 35.030
+      s_max: 64.340
+  - id: school_zone_10
+    status: complete
+    point_1:
+      x: 372.391
+      y: -270.804
+      z: 47.8388
+      track_id: 211
+      lane_id: -1
+      s: 6.290
+    point_2:
+      x: 390.065
+      y: -256.076
+      z: 44.16
+      track_id: 211
+      lane_id: -2
+      s: 29.234
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_11
+    status: complete
+    point_1:
+      x: 381.575
+      y: -259.179
+      z: 44.5673
+      track_id: 211
+      lane_id: -1
+      s: 20.830
+    point_2:
+      x: 388.193
+      y: -252.982
+      z: 44.16
+      track_id: 679
+      lane_id: -1
+      s: 0.299
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_12
+    status: complete
+    point_1:
+      x: 463.900
+      y: -517.337
+      z: 47.7525
+      track_id: 1603
+      lane_id: -1
+      s: 21.168
+    point_2:
+      x: 451.078
+      y: -499.647
+      z: 47.418
+      track_id: 1612
+      lane_id: -1
+      s: 35.370
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_13
+    status: complete
+    point_1:
+      x: 491.003
+      y: -603.193
+      z: 49.3419
+      track_id: 1712
+      lane_id: -1
+      s: 19.881
+    point_2:
+      x: 490.192
+      y: -624.130
+      z: 49.99
+      track_id: 1712
+      lane_id: -1
+      s: 40.975
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 1712
+      lane_id: -1
+      s_min: 19.881
+      s_max: 40.975
+  - id: school_zone_14
+    status: complete
+    point_1:
+      x: 491.837
+      y: -651.281
+      z: 49.99
+      track_id: 1734
+      lane_id: -1
+      s: 0.208
+    point_2:
+      x: 500.151
+      y: -673.340
+      z: 50.91
+      track_id: 1734
+      lane_id: -1
+      s: 23.536
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 1734
+      lane_id: -1
+      s_min: 0.208
+      s_max: 23.536
+  - id: school_zone_15
+    status: complete
+    point_1:
+      x: 559.392
+      y: -753.136
+      z: 52.2443
+      track_id: 1769
+      lane_id: -1
+      s: 25.805
+    point_2:
+      x: 575.891
+      y: -775.402
+      z: 52.773
+      track_id: 1769
+      lane_id: -2
+      s: 53.510
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_16
+    status: complete
+    point_1:
+      x: 618.672
+      y: -828.762
+      z: 53.6391
+      track_id: 1777
+      lane_id: -1
+      s: 31.641
+    point_2:
+      x: 647.695
+      y: -850.227
+      z: 54.654
+      track_id: 1777
+      lane_id: -1
+      s: 67.560
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 1777
+      lane_id: -1
+      s_min: 31.641
+      s_max: 67.560
+  - id: school_zone_17
+    status: complete
+    point_1:
+      x: 725.008
+      y: -880.542
+      z: 55.8048
+      track_id: 1818
+      lane_id: 1
+      s: 52.479
+    point_2:
+      x: 677.356
+      y: -857.349
+      z: 54.654
+      track_id: 1818
+      lane_id: 2
+      s: 0.102
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_18
+    status: complete
+    point_1:
+      x: 702.797
+      y: -871.034
+      z: 55.1607
+      track_id: 1818
+      lane_id: 1
+      s: 28.703
+    point_2:
+      x: 676.604
+      y: -860.357
+      z: 54.654
+      track_id: 1818
+      lane_id: 1
+      s: 0.619
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 1818
+      lane_id: 1
+      s_min: 0.619
+      s_max: 28.703
+  - id: school_zone_19
+    status: complete
+    point_1:
+      x: 621.182
+      y: -822.558
+      z: 53.5342
+      track_id: 1777
+      lane_id: 3
+      s: 29.019
+    point_2:
+      x: 602.297
+      y: -801.902
+      z: 52.773
+      track_id: 1777
+      lane_id: 2
+      s: 0.617
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_20
+    status: complete
+    point_1:
+      x: 616.710
+      y: -821.941
+      z: 53.3885
+      track_id: 1777
+      lane_id: 2
+      s: 25.380
+    point_2:
+      x: 599.753
+      y: -803.669
+      z: 52.773
+      track_id: 1777
+      lane_id: 1
+      s: 0.357
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_21
+    status: complete
+    point_1:
+      x: 649.112
+      y: -735.431
+      z: 49.8968
+      track_id: 1778
+      lane_id: -1
+      s: 0.344
+    point_2:
+      x: 599.484
+      y: -773.741
+      z: 52.773
+      track_id: 1778
+      lane_id: -2
+      s: 63.051
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_22
+    status: complete
+    point_1:
+      x: 625.152
+      y: -757.892
+      z: 51.4403
+      track_id: 1778
+      lane_id: -1
+      s: 33.075
+    point_2:
+      x: 601.364
+      y: -777.412
+      z: 52.773
+      track_id: 1811
+      lane_id: -1
+      s: 0.505
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_23
+    status: complete
+    point_1:
+      x: 538.684
+      y: -720.103
+      z: 51.785
+      track_id: 1750
+      lane_id: 2
+      s: 28.787
+    point_2:
+      x: 521.111
+      y: -698.611
+      z: 50.91
+      track_id: 1750
+      lane_id: 2
+      s: 1.032
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 1750
+      lane_id: 2
+      s_min: 1.032
+      s_max: 28.787
+  - id: school_zone_24
+    status: complete
+    point_1:
+      x: 535.829
+      y: -722.481
+      z: 51.785
+      track_id: 1750
+      lane_id: 1
+      s: 28.896
+    point_2:
+      x: 519.005
+      y: -699.495
+      z: 50.91
+      track_id: 1750
+      lane_id: 1
+      s: 0.427
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 1750
+      lane_id: 1
+      s_min: 0.427
+      s_max: 28.896
+  - id: school_zone_25
+    status: complete
+    point_1:
+      x: 505.658
+      y: -671.833
+      z: 50.91
+      track_id: 1734
+      lane_id: 2
+      s: 24.318
+    point_2:
+      x: 498.660
+      y: -650.116
+      z: 49.99
+      track_id: 1734
+      lane_id: 2
+      s: 0.770
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 1734
+      lane_id: 2
+      s_min: 0.770
+      s_max: 24.318
+  - id: school_zone_26
+    status: complete
+    point_1:
+      x: 502.574
+      y: -673.283
+      z: 50.91
+      track_id: 1734
+      lane_id: 1
+      s: 24.438
+    point_2:
+      x: 495.306
+      y: -650.341
+      z: 49.99
+      track_id: 1734
+      lane_id: 1
+      s: 0.160
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 1734
+      lane_id: 1
+      s_min: 0.160
+      s_max: 24.438
+  - id: school_zone_27
+    status: complete
+    point_1:
+      x: 1117.602
+      y: -431.995
+      z: 68.9071
+      track_id: 2313
+      lane_id: -2
+      s: 26.890
+    point_2:
+      x: 1007.353
+      y: -291.108
+      z: 69.2894
+      track_id: 2386
+      lane_id: -1
+      s: 0.493
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_28
+    status: complete
+    point_1:
+      x: 1009.518
+      y: -288.943
+      z: 69.2894
+      track_id: 2386
+      lane_id: 1
+      s: 0.130
+    point_2:
+      x: 1120.609
+      y: -429.822
+      z: 68.9071
+      track_id: 2313
+      lane_id: -1
+      s: 27.052
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_29
+    status: complete
+    point_1:
+      x: 1011.850
+      y: -287.693
+      z: 69.2894
+      track_id: 2386
+      lane_id: 2
+      s: 0.590
+    point_2:
+      x: 1123.107
+      y: -427.990
+      z: 68.9071
+      track_id: 2313
+      lane_id: 1
+      s: 27.166
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_30
+    status: complete
+    point_1:
+      x: 1205.114
+      y: -542.109
+      z: 72.3482
+      track_id: 2264
+      lane_id: -1
+      s: 89.231
+    point_2:
+      x: 1149.436
+      y: -472.700
+      z: 68.9071
+      track_id: 2264
+      lane_id: -1
+      s: 0.254
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 2264
+      lane_id: -1
+      s_min: 0.254
+      s_max: 89.231
+  - id: school_zone_31
+    status: complete
+    point_1:
+      x: 1152.940
+      y: -470.510
+      z: 68.9071
+      track_id: 2264
+      lane_id: 1
+      s: 0.701
+    point_2:
+      x: 1208.521
+      y: -540.064
+      z: 72.3482
+      track_id: 2264
+      lane_id: 1
+      s: 89.732
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 2264
+      lane_id: 1
+      s_min: 0.701
+      s_max: 89.732
+  - id: school_zone_32
+    status: complete
+    point_1:
+      x: 1154.817
+      y: -468.570
+      z: 68.9071
+      track_id: 2264
+      lane_id: 2
+      s: 0.338
+    point_2:
+      x: 1209.808
+      y: -538.399
+      z: 72.3482
+      track_id: 2264
+      lane_id: 2
+      s: 89.220
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 2264
+      lane_id: 2
+      s_min: 0.338
+      s_max: 89.220
+  - id: school_zone_33
+    status: complete
+    point_1:
+      x: 1236.407
+      y: -372.191
+      z: 72.1807
+      track_id: 2312
+      lane_id: 3
+      s: 109.355
+    point_2:
+      x: 1151.273
+      y: -437.521
+      z: 68.943
+      track_id: 2312
+      lane_id: 3
+      s: 1.201
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 2312
+      lane_id: 3
+      s_min: 1.201
+      s_max: 109.355
+  - id: school_zone_34
+    status: complete
+    point_1:
+      x: 1240.004
+      y: -374.093
+      z: 72.2299
+      track_id: 2312
+      lane_id: 2
+      s: 110.996
+    point_2:
+      x: 1153.544
+      y: -439.999
+      z: 68.9632
+      track_id: 2312
+      lane_id: 2
+      s: 1.878
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 2312
+      lane_id: 2
+      s_min: 1.878
+      s_max: 110.996
+  - id: school_zone_35
+    status: complete
+    point_1:
+      x: 1233.758
+      y: -373.067
+      z: 72.1004
+      track_id: 2312
+      lane_id: 4
+      s: 106.679
+    point_2:
+      x: 1150.278
+      y: -434.951
+      z: 68.9568
+      track_id: 2312
+      lane_id: 4
+      s: 1.666
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 2312
+      lane_id: 4
+      s_min: 1.666
+      s_max: 106.679
+  - id: school_zone_36
+    status: complete
+    point_1:
+      x: 1114.316
+      y: -448.243
+      z: 68.9071
+      track_id: 2192
+      lane_id: 4
+      s: 170.371
+    point_2:
+      x: 1069.949
+      y: -459.316
+      z: 65.5811
+      track_id: 2192
+      lane_id: 4
+      s: 124.389
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 2192
+      lane_id: 4
+      s_min: 124.389
+      s_max: 170.371
+  - id: school_zone_37
+    status: complete
+    point_1:
+      x: 1115.452
+      y: -451.952
+      z: 68.9071
+      track_id: 2192
+      lane_id: 3
+      s: 170.674
+    point_2:
+      x: 1041.266
+      y: -466.032
+      z: 63.2596
+      track_id: 2192
+      lane_id: 3
+      s: 94.952
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 2192
+      lane_id: 3
+      s_min: 94.952
+      s_max: 170.674
+  - id: school_zone_38
+    status: complete
+    point_1:
+      x: 1115.603
+      y: -454.830
+      z: 68.9071
+      track_id: 2192
+      lane_id: 2
+      s: 170.203
+    point_2:
+      x: 1042.733
+      y: -468.262
+      z: 63.343
+      track_id: 2192
+      lane_id: 2
+      s: 95.983
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 2192
+      lane_id: 2
+      s_min: 95.983
+      s_max: 170.203
+  - id: school_zone_39
+    status: complete
+    point_1:
+      x: 1042.733
+      y: -468.262
+      z: 63.343
+      track_id: 2192
+      lane_id: 2
+      s: 95.983
+    point_2:
+      x: 1083.063
+      y: -465.667
+      z: 66.289
+      track_id: 2192
+      lane_id: -1
+      s: 136.130
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_40
+    status: complete
+    point_1:
+      x: 1083.063
+      y: -465.667
+      z: 66.289
+      track_id: 2192
+      lane_id: -1
+      s: 136.130
+    point_2:
+      x: 1083.490
+      y: -468.188
+      z: 66.2866
+      track_id: 2192
+      lane_id: -2
+      s: 136.090
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_41
+    status: complete
+    point_1:
+      x: 1117.521
+      y: -464.508
+      z: 68.9071
+      track_id: 2192
+      lane_id: -3
+      s: 169.976
+    point_2:
+      x: 1088.405
+      y: -469.428
+      z: 66.5731
+      track_id: 2192
+      lane_id: -3
+      s: 140.666
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 2192
+      lane_id: -3
+      s_min: 140.666
+      s_max: 169.976
+  - id: school_zone_42
+    status: complete
+    point_1:
+      x: 1238.362
+      y: -713.795
+      z: 66.1812
+      track_id: 2076
+      lane_id: -3
+      s: 657.966
+    point_2:
+      x: 1179.296
+      y: -770.328
+      z: 60.617
+      track_id: 2076
+      lane_id: -1
+      s: 739.451
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_43
+    status: complete
+    point_1:
+      x: 1239.551
+      y: -717.467
+      z: 66.0252
+      track_id: 2076
+      lane_id: -2
+      s: 659.359
+    point_2:
+      x: 1177.900
+      y: -767.794
+      z: 60.617
+      track_id: 2076
+      lane_id: -2
+      s: 738.931
+    same_track_lane: true
+    requires_topology_expansion: false
+    direct_s_range:
+      track_id: 2076
+      lane_id: -2
+      s_min: 659.359
+      s_max: 738.931
+  - id: school_zone_44
+    status: complete
+    point_1:
+      x: 1244.516
+      y: -718.035
+      z: 66.3984
+      track_id: 2076
+      lane_id: -1
+      s: 655.863
+    point_2:
+      x: 1175.728
+      y: -765.208
+      z: 60.617
+      track_id: 2076
+      lane_id: -3
+      s: 738.979
+    same_track_lane: false
+    requires_topology_expansion: true
+    direct_s_range: null
+  - id: school_zone_45
+    status: incomplete_single_boundary
+    point_1:
+      x: 1207.612
+      y: -737.815
+      z: 61.9506
+      track_id: 2076
+      lane_id: -4
+      s: 696.957
+    point_2: null
+    same_track_lane: null
+    requires_topology_expansion: true
+    direct_s_range: null
