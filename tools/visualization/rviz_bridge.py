@@ -229,7 +229,8 @@ class HLVtdRvizBridge(Node):
                         for i in range(49)]
                 markers.append(self.line_marker(layer, ring, 0.18, (1.0, 0.15, 0.65, 1.0)))
             elif layer == "traffic_signal" and points:
-                controller_text = style.removeprefix("controller=")
+                prefix = "controller="
+                controller_text = style[len(prefix):] if style.startswith(prefix) else style
                 try:
                     controller = int(controller_text)
                 except ValueError:

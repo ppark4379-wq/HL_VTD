@@ -1,0 +1,42 @@
+# Review overlay only; original YAML and CSV captures remain unchanged.
+# Evidence: user's earlier VTD screenshots + lane_network.svg + current XODR.
+# No new school boundary is inferred merely from a road edge or speed marking.
+map: HL_FMA_VTD_LivingLab
+review_date: '2026-09-08'
+map_svg_sha256: fbb6e7b5203e9ebe4efc0ad827bb916d3ec806ec4ba4953702d4c23d2fa29e1d
+corrections:
+  - id: school_zone_39
+    reason: Original first point duplicated zone 38's positive-lane endpoint. Restore the supplied negative-lane end capture.
+    evidence: 'Earlier user screenshot: road 2192 lane -1 S=170.710, World=(1116.995,-458.765), birdRS 00:40.840; existing zone 39 point_2.'
+    expected:
+      point_1: {track_id: 2192, lane_id: 2, s: 95.983}
+      point_2: {track_id: 2192, lane_id: -1, s: 136.130}
+    point_1: {x: 1116.995, y: -458.765, z: 68.9071, track_id: 2192, lane_id: -1, s: 170.710}
+  - id: school_zone_40
+    reason: Original pair contained the start captures of two adjacent lanes. Restore lane -2's supplied end capture.
+    evidence: 'Earlier user screenshot: road 2192 lane -2 S=170.444, World=(1117.366,-461.664), birdRS 01:15.640; existing zone 40 point_2.'
+    expected:
+      point_1: {track_id: 2192, lane_id: -1, s: 136.130}
+      point_2: {track_id: 2192, lane_id: -2, s: 136.090}
+    point_1: {x: 1117.366, y: -461.664, z: 68.9071, track_id: 2192, lane_id: -2, s: 170.444}
+  - id: school_zone_42
+    reason: End captures of zones 42 and 44 were paired to opposite lane numbers. Re-pair -3 with -3; the XODR lane ID stays -3 throughout.
+    evidence: 'Original zone 44 point_2 and earlier user screenshot: road 2076 lane -3 S=738.979, World=(1175.728,-765.208), birdRS 00:17.560.'
+    expected:
+      point_1: {track_id: 2076, lane_id: -3, s: 657.966}
+      point_2: {track_id: 2076, lane_id: -1, s: 739.451}
+    point_2: {x: 1175.728, y: -765.208, z: 60.617, track_id: 2076, lane_id: -3, s: 738.979}
+  - id: school_zone_44
+    reason: Counterpart of zone 42 repair; re-pair -1 with -1 without adding lane-changing segments.
+    evidence: 'Original zone 42 point_2 and earlier user screenshot: road 2076 lane -1 S=739.451, World=(1179.296,-770.328), birdRS 00:37.560.'
+    expected:
+      point_1: {track_id: 2076, lane_id: -1, s: 655.863}
+      point_2: {track_id: 2076, lane_id: -3, s: 738.979}
+    point_2: {x: 1179.296, y: -770.328, z: 60.617, track_id: 2076, lane_id: -1, s: 739.451}
+  - id: school_zone_45
+    reason: The end capture is absent from the YAML but is present in the earlier supplied screenshots.
+    evidence: 'Earlier user screenshot: road 2076 lane -4 S=738.520, World=(1174.125,-762.519), z=60.617, birdRS 00:07.880.'
+    expected:
+      point_1: {track_id: 2076, lane_id: -4, s: 696.957}
+      point_2: null
+    point_2: {x: 1174.125, y: -762.519, z: 60.617, track_id: 2076, lane_id: -4, s: 738.520}

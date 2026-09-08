@@ -91,3 +91,19 @@ __pycache__/
 # 루프백 테스트 임시 출력
 /server_out.txt
 /server_err.txt
+
+# Local live-assessment evidence and task QA dependencies
+/tmp/
+/output/assessment/
+/tmp/browser_deps/
+/tmp/media_deps/
+/tmp/video_reference_*
+/tmp/dashboard_browser_*
+
+# Local route extraction intermediates (runtime uses livinglab_route.csv)
+/tools/dashboard/livinglab_ego_path.csv
+/tools/dashboard/livinglab_route_checkpoints.csv
+
+# Local competition guide and Windows download metadata
+/2026_HL_FMA_대회_안내문.md
+/2026_HL_FMA_대회_안내문.md:Zone.Identifier

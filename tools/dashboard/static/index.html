@@ -3,138 +3,195 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HL_VTD 대회 검증 평가</title>
+<title>2026 HL FMA Assessment Tool</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<div class="app">
-
-  <header class="topbar">
-    <div class="topbar-title">
-      <span class="brand">HL_VTD</span>
-      <span class="brand-sub">대회용 검증 평가</span>
+<div class="app-shell">
+  <header class="brandbar">
+    <div class="brand-lockup" aria-label="iVH Assessment Tool">
+      <span class="brand-ivh">iVH</span>
+      <span class="brand-product">Assessment Tool</span>
     </div>
-    <div class="topbar-controls">
-      <label>시나리오
-        <select id="scenarioSelect"></select>
-      </label>
-      <label>실행(Run)
-        <select id="runSelect"></select>
-      </label>
-      <button id="liveToggle" class="btn btn-live">실시간 갱신: ON</button>
-      <span id="liveBadge" class="badge badge-idle">대기중</span>
+    <nav class="main-nav" aria-label="주 메뉴">
+      <span class="nav-user">관리자</span>
+      <span>로그아웃</span>
+      <span class="nav-divider" aria-hidden="true"></span>
+      <span class="active">대시보드</span>
+      <span>이력</span>
+      <span>자동 테스트</span>
+      <span>관리자</span>
+    </nav>
+    <div class="partner-lockup" aria-label="주최 및 협력 기관">
+      <span class="hl-mando"><b>HL</b><i></i>Mando</span>
+      <span class="partner-divider" aria-hidden="true"></span>
+      <span class="koroad-mark" aria-hidden="true">K</span>
+      <span class="koroad-name">한국도로교통공단<small>KoROAD</small></span>
     </div>
   </header>
 
-  <section class="stats-row" id="statsRow">
-    <div class="stat-card">
-      <div class="stat-label">현재 구간</div>
-      <div class="stat-value" id="statSection">-</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">경과 시간</div>
-      <div class="stat-value" id="statElapsed">0.0<span class="unit">초</span></div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">접촉 위험 요소</div>
-      <div class="stat-value" id="statRisk">0</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">속도</div>
-      <div class="stat-value" id="statSpeed">0.0<span class="unit">km/h</span></div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">종방향거리</div>
-      <div class="stat-value" id="statLongDist">0.0<span class="unit">m</span></div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">후방시간(TTC)</div>
-      <div class="stat-value" id="statTtc">-<span class="unit">초</span></div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">채점 시간</div>
-      <div class="stat-value" id="statScoredAt">-</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">신호 정보</div>
-      <div class="stat-value" id="statSignal">-</div>
-    </div>
-  </section>
+  <main class="dashboard">
+    <section class="overview-grid" aria-label="실시간 평가 요약">
+      <article class="station-card">
+        <div class="station-heading">
+          <div>
+            <p class="eyebrow">2026 HL FMA</p>
+            <h1>대회용 워크스테이션</h1>
+          </div>
+          <button id="reloadRun" class="ghost-button" type="button" title="선택한 실행 기록 다시 불러오기">
+            <span aria-hidden="true">↻</span> 다시 불러오기
+          </button>
+        </div>
+        <p id="scenarioMeta" class="scenario-meta">시나리오를 선택하세요</p>
+        <div class="run-identity">
+          <span class="vehicle-name">VTD EGO</span>
+          <span id="stationFrame" class="frame-id">#0</span>
+          <span id="liveBadge" class="run-state badge-idle"><i></i> READY</span>
+        </div>
+        <div class="station-selectors">
+          <label>
+            <span>기록 조회 시나리오</span>
+            <select id="scenarioSelect" aria-label="시나리오 선택"></select>
+          </label>
+          <label>
+            <span>실행 기록</span>
+            <select id="runSelect" aria-label="실행 기록 선택"></select>
+          </label>
+        </div>
+        <div class="station-actions">
+          <button id="liveSourceBtn" class="ghost-button" type="button">VTD 실시간</button>
+          <button id="liveToggle" class="action-button live-toggle" type="button"><span aria-hidden="true">Ⅱ</span> 실시간 갱신</button>
+          <button id="reportBtn" class="action-button report-button" type="button"><span aria-hidden="true">▤</span> 결과 상세</button>
+          <a class="ghost-button" href="/api/criteria.md" download="HL_VTD_자동채점_최종평가기준.md">평가 기준 받기</a>
+        </div>
+      </article>
 
-  <main class="main-grid">
-
-    <section class="panel checklist-panel">
-      <div class="panel-header">
-        <span>평가 항목 (2026 HL FMA 공식 15개 기준)</span>
-        <span id="scenarioMeta" class="panel-header-sub"></span>
-      </div>
-      <div class="checklist-scroll">
-        <table id="checklistTable" class="checklist-table">
-          <thead>
-            <tr id="checklistHead"><th class="col-item">항목</th></tr>
-          </thead>
-          <tbody id="checklistBody"></tbody>
-        </table>
-      </div>
+      <article class="metric-card metric-section">
+        <p>현재 구간</p>
+        <strong id="statSection">-</strong>
+        <span class="metric-caption">SECTION</span>
+      </article>
+      <article class="metric-card metric-score">
+        <p>평가 점수</p>
+        <strong><span id="totalScore">-</span><small>점</small></strong>
+        <span id="scoreStatus" class="metric-caption">평가 대기</span>
+      </article>
+      <article class="metric-card metric-major">
+        <p>중대 위반 횟수</p>
+        <strong id="statMajor">0</strong>
+        <span id="majorCaption" class="metric-caption">MAJOR</span>
+      </article>
+      <article class="metric-card metric-speed">
+        <p>속도</p>
+        <strong id="statSpeed">0.0<small>km/h</small></strong>
+        <span class="metric-caption">현재 차량 속도</span>
+      </article>
+      <article class="metric-card metric-distance">
+        <p>주행거리</p>
+        <strong id="statDistance">0.0<small>m</small></strong>
+        <span class="metric-caption">누적 이동 거리</span>
+      </article>
+      <article class="metric-card metric-time">
+        <p>주행 시간</p>
+        <strong id="statElapsed">0<small>s</small></strong>
+        <span class="metric-caption">ELAPSED</span>
+      </article>
+      <article class="metric-card metric-limit">
+        <p>제한 시간</p>
+        <strong id="statLimit">900<small>s</small></strong>
+        <span class="metric-caption">15분 기준 잔여 시간</span>
+      </article>
+      <article class="metric-card metric-signal">
+        <p>신호 정보</p>
+        <div class="signal-lights" aria-label="현재 교통 신호">
+          <i id="signalRed" class="signal-light red"></i>
+          <i id="signalYellow" class="signal-light yellow"></i>
+          <i id="signalGreen" class="signal-light green"></i>
+          <i id="signalOther" class="signal-light neutral"></i>
+        </div>
+        <span id="statSignal" class="signal-label">신호 없음</span>
+      </article>
     </section>
 
-    <section class="panel viewer-panel">
-      <div class="panel-header">
-        <div class="view-tabs">
-          <button id="tabMainrs" class="view-tab active">mainRS 화면</button>
-          <button id="tabMap" class="view-tab">주행 궤적 지도</button>
+    <details class="assessment-health" id="assessmentHealth">
+      <summary id="healthSummary">연결 및 평가 데이터 확인 중</summary>
+      <ul id="healthDetails"></ul>
+    </details>
+    <section class="workspace-grid">
+      <article class="panel rubric-panel">
+        <header class="panel-heading rubric-heading">
+          <div class="heading-title">평가 항목 <span class="count-pill">14</span></div>
+          <div class="penalty-legend" aria-label="감점 기준">
+            <span><i class="legend-dot minor"></i>경미 -3</span>
+            <span><i class="legend-dot major"></i>중대 -6</span>
+          </div>
+        </header>
+        <div class="checklist-scroll">
+          <table id="checklistTable" class="checklist-table">
+            <thead>
+              <tr id="checklistHead"><th class="col-item">평가 항목</th></tr>
+            </thead>
+            <tbody id="checklistBody"></tbody>
+            <tfoot id="checklistFoot"></tfoot>
+          </table>
         </div>
-        <span id="frameReadout" class="panel-header-sub">frame 0 / 0</span>
-      </div>
-      <div class="viewer-canvas-wrap">
-        <img id="mainrsImg" alt="mainRS">
-        <div id="mainrsFallback" class="mainrs-fallback hidden">
-          <div class="mainrs-fallback-title">mainRS 화면을 찾을 수 없습니다</div>
-          <div class="mainrs-fallback-sub">VTD에서 시나리오를 재생 중인지, mainRS 창이 다른 창에 가려져 있지 않은지 확인하세요.</div>
-        </div>
-        <canvas id="mapCanvas" class="hidden"></canvas>
-        <div class="viewer-overlay-top">
-          <span id="overlayTime">00:00.0</span>
-          <span id="overlaySignal" class="overlay-chip">신호 -</span>
-        </div>
-      </div>
-      <div class="playback-controls" id="playbackControls">
-        <button id="playBtn" class="btn">▶ 재생</button>
-        <input id="scrubber" type="range" min="0" max="0" value="0" step="1">
-        <select id="speedSelect">
-          <option value="1">x1</option>
-          <option value="2">x2</option>
-          <option value="4">x4</option>
-          <option value="8">x8</option>
-        </select>
-        <button id="jumpLiveBtn" class="btn">실시간으로</button>
-      </div>
-    </section>
+      </article>
 
+      <article class="panel live-panel">
+        <header class="panel-heading live-heading">
+          <div class="heading-title">실시간 영상</div>
+          <div class="viewer-tools">
+            <div class="view-tabs" aria-label="화면 선택">
+              <button id="tabMainrs" class="view-tab active" type="button">VTD LIVE</button>
+              <button id="tabMap" class="view-tab" type="button">주행 궤적</button>
+            </div>
+            <span id="frameReadout" class="frame-readout">0 frames</span>
+          </div>
+        </header>
+        <div class="viewer-canvas-wrap">
+          <img id="mainrsImg" alt="VTD mainRS 실시간 화면">
+          <div id="mainrsFallback" class="mainrs-fallback hidden">
+            <div class="fallback-icon" aria-hidden="true"><span></span></div>
+            <div class="mainrs-fallback-title">VTD 실시간 영상을 기다리는 중입니다</div>
+            <div class="mainrs-fallback-sub">VTD에서 시나리오 Play를 누르면 mainRS 화면이 자동으로 연결됩니다.</div>
+          </div>
+          <canvas id="mapCanvas" class="hidden" aria-label="주행 궤적 지도"></canvas>
+          <div class="viewer-overlay-top">
+            <span id="streamBadge" class="stream-badge waiting"><i></i> STANDBY</span>
+            <span class="stream-meta"><b id="overlayFrame">0 frames</b><span>VTD mainRS</span></span>
+          </div>
+          <div class="viewer-overlay-bottom">
+            <span id="overlayTime">00:00.0</span>
+            <span id="overlaySignal">신호 없음</span>
+          </div>
+        </div>
+        <div class="playback-controls hidden" id="playbackControls">
+          <button id="playBtn" class="control-button" type="button">▶ 재생</button>
+          <input id="scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="주행 기록 위치">
+          <select id="speedSelect" aria-label="재생 속도">
+            <option value="1">x1</option>
+            <option value="2">x2</option>
+            <option value="4">x4</option>
+            <option value="8">x8</option>
+          </select>
+          <button id="jumpLiveBtn" class="control-button" type="button">최신 위치</button>
+        </div>
+      </article>
+    </section>
   </main>
 
-  <footer class="scorebar">
-    <div class="score-block">
-      <div class="score-label">종합 점수</div>
-      <div class="score-value" id="totalScore">-</div>
-    </div>
-    <div class="score-sub">
-      <span id="scoreViolations">위반 0건</span>
-      <span id="scoreUnavailable">미평가 0건</span>
-    </div>
-    <button id="reportBtn" class="btn btn-primary">리포트 확인</button>
-  </footer>
-
-  <div id="reportModal" class="modal hidden">
+  <div id="reportModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="reportTitle">
     <div class="modal-box">
       <div class="modal-header">
-        <span>평가 리포트</span>
-        <button id="closeReport" class="btn">닫기</button>
+        <div>
+          <p class="eyebrow">2026 HL FMA</p>
+          <strong id="reportTitle">평가 결과 상세</strong>
+        </div>
+        <button id="closeReport" class="modal-close" type="button" aria-label="닫기">×</button>
       </div>
       <pre id="reportContent" class="modal-content"></pre>
     </div>
   </div>
-
 </div>
 <script src="/static/app.js"></script>
 </body>
