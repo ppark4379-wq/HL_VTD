@@ -81,6 +81,7 @@ struct LaneChangeData {
     // 이 차선에 안착한 뒤에만 허용해, 출발 차선에서 계획을 반복 초기화하지 않는다.
     LaneKey shiftCompletedLane;
     bool shiftCompletedLaneValid{};
+    bool gatewayReplanRequestedAfterShift{};
     // 현재 횡이동이 끝난 직후 같은 종방향 차선 연결 위에서 만날
     // 다음 정적 장애물. Execute 중 차선 중심에 먼저 안착하면 현재
     // 기동 종료를 기다리지 않고 다음 회피 후보로 원자적으로 교체한다.

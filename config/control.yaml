@@ -98,7 +98,7 @@ lane_change:
   lattice_tight_obstacle_clearance: 0.05 # [m] 0.30m 후보가 전부 막힌 필수 회피에만 쓰는 최소 여유
   gateway_reserve_distance: 8.0  # [m] 마지막 합법적 횡이동 앞 여유
   obstacle_trigger_minimum_distance: 5.0  # [m] 정적으로 판단되면 대기 없이 즉시 회피 검토
-  obstacle_trigger_maximum_distance: 70.0 # [m] 정적 장애물 탐색거리
+  obstacle_trigger_maximum_distance: 70.0 # [m] 로컬 회피 시작 탐색거리. 콜리더 전역 경로는 거리 제한 없이 수신 정적 객체 전체 반영(미수신=안전 확인 아님).
   obstacle_mandatory_avoidance_distance: 15.0 # [m] 현재 경로의 정적 장애물: 통과하지 못하는 직진/지연 후보 제외
   # 끼어들어 정지한 차량은 잠깐 정지/추종한 뒤 정적 회피 대상으로 전환한다.
   # 처음부터 정지해 있던 장애물은 이 대기 없이 즉시 회피를 검토한다.

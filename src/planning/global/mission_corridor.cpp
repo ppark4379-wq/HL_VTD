@@ -2,6 +2,8 @@
 
 #include "planning/global/reference_path_generator.hpp"
 #include "utils/math_utils.hpp"
+#define BOOST_BIND_GLOBAL_PLACEHOLDERS
+#include <boost/property_tree/json_parser.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -858,6 +860,131 @@ bool initializeMissionCorridor(MissionCorridorData& output,
     return output.valid;
 }
 
+bool missionPointIsTarget(const MissionLegData& leg, const Waypoint& point) {
+    const LaneKey key{point.roadId, point.sectionIndex, point.laneId};
+    if (!leg.targetLanes.count(key)) return false;
+    const auto station = leg.targetRoadS.find(key);
+    if (station == leg.targetRoadS.end()) return !leg.topologyAuthority;
+    if (!std::isfinite(point.roadS)) return false;
+    return key.laneId < 0 ? point.roadS >= station->second - .25
+                          : point.roadS <= station->second + .25;
+}
+
+bool loadPrecomputedMission(MissionCorridorData& output,
+                            const PathGeneratorData& map,
+                            const std::string& artifact, std::string* error) {
+    output = {};
+    try {
+        using boost::property_tree::ptree;
+        ptree document;
+        boost::property_tree::read_json(artifact, document);
+        if (document.get<int>("runtime_schema_version") != 1 ||
+            document.get<std::string>("mode") != "whole_mission_xodr_precomputed" ||
+            !document.get<bool>("initialized_ok"))
+            throw std::runtime_error("unsupported/uninitialized mission artifact");
+        for (const auto* field : {"checkpoint_rules_valid", "ordered_lane_graph_connected",
+                                  "gateway_interfaces_connected", "surface_interfaces_connected"})
+            if (!document.get<bool>(std::string("validation.") + field))
+                throw std::runtime_error(std::string("mission validation failed: ") + field);
+        const auto key = [&](const ptree& item) {
+            if (item.size() != 3) throw std::runtime_error("invalid lane key length");
+            auto it = item.begin();
+            const int road = (it++)->second.get_value<int>();
+            const int section = (it++)->second.get_value<int>();
+            const int lane = it->second.get_value<int>();
+            LaneKey k{road, section, lane};
+            if (!isDrivingLane(map, k) || !map.laneSegments.count(k))
+                throw std::runtime_error("artifact lane is absent from loaded XODR");
+            return k;
+        };
+        MissionCorridorData loaded;
+        for (const auto& item : document.get_child("checkpoints")) {
+            MissionCheckpointData cp;
+            cp.checkpoint.sequence = item.second.get<int>("seq");
+            cp.checkpoint.x = item.second.get<double>("x");
+            cp.checkpoint.y = item.second.get<double>("y");
+            if (cp.checkpoint.sequence != static_cast<int>(loaded.checkpoints.size()+1) ||
+                !std::isfinite(cp.checkpoint.x) || !std::isfinite(cp.checkpoint.y))
+                throw std::runtime_error("invalid checkpoint sequence/coordinate");
+            loaded.checkpoints.push_back(cp);
+        }
+        if (loaded.checkpoints.size() < 2 || loaded.checkpoints.size()%2)
+            throw std::runtime_error("mission needs start, entry/exit pairs, finish");
+        for (const auto& item : document.get_child("checkpoint_matches")) {
+            const auto& match = item.second;
+            auto& cp = loaded.checkpoints.at(match.get<std::size_t>("seq")-1);
+            const auto matched = key(match.get_child("nearest_lane"));
+            cp.roadIds.push_back(matched.roadId);
+            for (const auto& [k, segment] : map.laneSegments) {
+                (void)segment;
+                if (k.roadId == matched.roadId && k.sectionIndex == matched.sectionIndex &&
+                    (k.laneId > 0) == (matched.laneId > 0)) cp.lanes.insert(k);
+            }
+        }
+        for (const auto& item : document.get_child("runtime_legs")) {
+            const auto& record = item.second;
+            MissionLegData leg;
+            leg.topologyAuthority = true;
+            leg.finalLeg = record.get<bool>("final");
+            leg.fromCheckpoint = record.get<std::size_t>("from_checkpoint");
+            leg.gatewayCheckpoint = record.get<std::size_t>("gateway_checkpoint");
+            leg.toCheckpoint = record.get<std::size_t>("to_checkpoint");
+            if (leg.fromCheckpoint != (loaded.legs.empty()?0:loaded.legs.back().toCheckpoint) ||
+                leg.gatewayCheckpoint != leg.fromCheckpoint+1 ||
+                leg.toCheckpoint != leg.gatewayCheckpoint+(leg.finalLeg?0:1) ||
+                leg.toCheckpoint >= loaded.checkpoints.size())
+                throw std::runtime_error("runtime leg breaks checkpoint ordering");
+            for (const auto& row : record.get_child("allowed")) leg.allowedLanes.insert(key(row.second));
+            for (const auto& row : record.get_child("gateway_lanes")) leg.gatewayLanes.insert(key(row.second));
+            for (const auto& row : record.get_child("targets")) {
+                const auto k = key(row.second.get_child("lane"));
+                const auto station = row.second.get<double>("road_s");
+                const auto& segment = map.laneSegments.at(k);
+                if (!leg.allowedLanes.count(k) || !std::isfinite(station) ||
+                    station < segment.startS-1e-3 || station > segment.endS+1e-3)
+                    throw std::runtime_error("gateway target is outside its XODR lane");
+                leg.targetLanes.insert(k); leg.targetRoadS[k] = station;
+            }
+            if (leg.targetLanes.empty() || (!leg.finalLeg && leg.gatewayLanes.empty()))
+                throw std::runtime_error("missing actual gateway lanes");
+            for (const auto& row : record.get_child("witness_route")) {
+                const auto k = key(row.second);
+                if (!leg.allowedLanes.count(k)) throw std::runtime_error("witness leaves corridor");
+                if (!leg.preferredRoute.empty()) {
+                    const auto edges = map.laneGraph.find(leg.preferredRoute.back());
+                    if (edges == map.laneGraph.end() ||
+                        std::find(edges->second.begin(), edges->second.end(), k) == edges->second.end())
+                        throw std::runtime_error("witness has a non-XODR lane link");
+                }
+                leg.preferredRoute.push_back(k);
+            }
+            for (const auto& lane : leg.allowedLanes) {
+                std::vector<LaneKey> route;
+                if (findRestrictedRoute(map, leg.allowedLanes, leg.targetLanes, lane, route))
+                    leg.routesToTargetByLane.emplace(lane, std::move(route));
+            }
+            if (leg.preferredRoute.empty() ||
+                !leg.routesToTargetByLane.count(leg.preferredRoute.front()))
+                throw std::runtime_error("no directed corridor route reaches gateway");
+            if (!loaded.legs.empty()) for (const auto& lane : loaded.legs.back().targetLanes)
+                if (!leg.routesToTargetByLane.count(lane))
+                    throw std::runtime_error("gateway alternative cannot reach next gateway");
+            leg.valid = true;
+            loaded.legs.push_back(std::move(leg));
+        }
+        if (loaded.legs.empty() || !loaded.legs.back().finalLeg ||
+            loaded.legs.back().toCheckpoint+1 != loaded.checkpoints.size())
+            throw std::runtime_error("mission does not reach finish");
+        loaded.initialized = loaded.valid = loaded.topologyAuthority = true;
+        loaded.minimumTargetDistance = kInfinity;
+        output = std::move(loaded);
+        return true;
+    } catch (const std::exception& ex) {
+        if (error) *error = ex.what();
+        return false;
+    }
+}
+
 const MissionLegData* activeMissionLeg(const MissionCorridorData& mission) {
     if (!mission.valid || mission.activeLegIndex >= mission.legs.size()) {
         return nullptr;
@@ -866,6 +993,7 @@ const MissionLegData* activeMissionLeg(const MissionCorridorData& mission) {
 }
 
 bool missionLegRequiresGuideContinuity(const MissionCorridorData& mission) {
+    if (mission.topologyAuthority) return false;
     const MissionLegData* leg=activeMissionLeg(mission);
     if(!leg || leg->fromCheckpoint>=mission.checkpoints.size() ||
        leg->toCheckpoint>=mission.checkpoints.size() ||
@@ -888,6 +1016,7 @@ bool missionLegRequiresGuideContinuity(const MissionCorridorData& mission) {
 
 bool missionLaneRequiresGuideContinuity(const MissionCorridorData& mission,
                                         const LaneKey& currentLane) {
+    if (mission.topologyAuthority) return false;
     const MissionLegData* leg=activeMissionLeg(mission);
     if(!leg) return false;
     if(missionLegRequiresGuideContinuity(mission)) return true;
@@ -899,6 +1028,25 @@ void updateMissionCorridorProgress(MissionCorridorData& mission,
                                    const WorldState& world) {
     const MissionLegData* leg = activeMissionLeg(mission);
     if (leg == nullptr) return;
+    if (mission.topologyAuthority) {
+        Waypoint pose;
+        pose.roadId = world.egoRoadId;
+        pose.sectionIndex = world.egoSectionIndex;
+        pose.laneId = world.egoLaneId;
+        pose.roadS = world.egoRoadS;
+        // Actual directed exit lane/station, across its full width. Never a
+        // radius around an approximate checkpoint or a nearest route.csv point.
+        if (world.egoLaneValid && missionPointIsTarget(*leg, pose))
+            ++mission.targetRoadStableFrames;
+        else mission.targetRoadStableFrames = 0;
+        if (mission.targetRoadStableFrames >= 2) {
+            ++mission.activeLegIndex;
+            mission.targetRoadStableFrames = 0;
+            mission.minimumTargetDistance = kInfinity;
+            mission.targetRoadObserved = false;
+        }
+        return;
+    }
     const MissionCheckpointData& target =
         mission.checkpoints[leg->toCheckpoint];
     const double distance = std::hypot(

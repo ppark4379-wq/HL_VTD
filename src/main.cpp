@@ -388,13 +388,13 @@ int main(int argc, char* argv[]) {
             if(!initializeCorridorRuntime(mapData,"output/precomputed_lane_network",
                                           drivingConfig.laneChange,&networkError))
                 throw std::runtime_error("cannot load precomputed corridor network: "+networkError);
-            if (!initializeMissionCorridor(
+            if (!preparePrecomputedMission(
                     planning.missionCorridor, mapData,
                     options.checkpoint_path.string(),
-                    &planning.pathPlanner.waypoints)) {
+                    mapConfig.xodrPath, "output/precomputed_lane_network",
+                    "output/runtime_mission", &networkError)) {
                 throw std::runtime_error(
-                    "cannot build checkpoint mission corridor: " +
-                    options.checkpoint_path.string());
+                    "cannot prepare checkpoint mission corridor: " + networkError);
             }
             const std::size_t startLeg = options.mission_start_leg.value_or(0);
             if (startLeg >= planning.missionCorridor.legs.size()) {

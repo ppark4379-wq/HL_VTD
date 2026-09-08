@@ -1102,7 +1102,8 @@ void runPlanningProcess(PlanningProcessData& data,
         }
         double guideLateral{};
         double guideRemaining{};
-        if (std::isfinite(bestScore) && bestScore <= 12.0) {
+        if (!data.missionCorridor.topologyAuthority &&
+            std::isfinite(bestScore) && bestScore <= 12.0) {
             data.pathPlanner.nearestIndex = bestIndex;
             guideContinuityPathValid = corridorGeometryContinuityUsable(
                 data.pathPlanner, sensedWorld,
@@ -1113,7 +1114,8 @@ void runPlanningProcess(PlanningProcessData& data,
         // other XODR successor while Ego is still inside the same lane.
         const double guideAttachmentDistance = std::max(
             1.25, 0.5 * std::max(sensedWorld.egoLaneWidth, 1.88));
-        const bool guidePhysicallyAttached = guideContinuityPathValid &&
+        const bool guidePhysicallyAttached = !data.missionCorridor.topologyAuthority &&
+            guideContinuityPathValid &&
             guideLateral <= guideAttachmentDistance &&
             bestIndex < data.pathPlanner.waypoints.size() &&
             std::abs(normalizeAngle(
@@ -1453,6 +1455,7 @@ void runPlanningProcess(PlanningProcessData& data,
     // committed path를 원자적으로 이어 간다. 이 조건은 road/lane
     // ID를 특정하지 않고 모든 corridor leg에 동일하게 적용된다.
     if (data.laneChange.phase != LaneChangePhase::None &&
+        !data.missionCorridor.topologyAuthority &&
         data.laneChange.shiftCompletedLaneValid &&
         !mandatoryCommittedAvoidance &&
         (data.laneChange.phase == LaneChangePhase::Settle ||
@@ -1550,15 +1553,13 @@ void runPlanningProcess(PlanningProcessData& data,
         // 비상제동만 걸리고 목표점(reconnected)에 영원히 못 도달해
         // phase가 절대 None으로 안 돌아가 다음 회피 탐색 자체가 막혔다.
         // 정적 장애물은 접촉 여부와 무관하게 반드시 회피해야 한다.
-        // A moving actor is handled by the independent predictive safety
-        // layer.  Replacing an already executing route for one transient
-        // dynamic prediction made the new candidate unsafe on the next frame,
-        // cancelled the manoeuvre, and handed branch authority to an
-        // arbitrary physical successor.  Static geometry can invalidate and
-        // atomically replace the committed detour; dynamic risk brakes/holds
-        // the same trajectory until it clears instead of erasing it.
+        // A new cut-in can invalidate a committed detour too. In the new
+        // topology-authority mode, try a predictive-collision-checked escape
+        // from the actual pose. Replace atomically ONLY on success; otherwise
+        // keep the path and independent predictive braking/yielding active.
         const bool unsafeActivePathReplan =
-            !activePathSafe && staticRisk &&
+            !activePathSafe && (staticRisk ||
+                (data.missionCorridor.topologyAuthority && dynamicRisk)) &&
             (activeSafety.collision || activeSafety.predictedCollision);
         if (anticipatedFollowupReady || unsafeActivePathReplan) {
             std::ostringstream detail;
@@ -1652,7 +1653,23 @@ void runPlanningProcess(PlanningProcessData& data,
          successorPlannerAttachedToEgo(data.roadLanePlanner)) ||
         (guideContinuityPathValid &&
          successorPlannerAttachedToEgo(data.pathPlanner));
-    if (data.laneChange.phase == LaneChangePhase::Settle &&
+    if (data.missionCorridor.topologyAuthority && map.corridorRuntime &&
+        data.laneChange.phase != LaneChangePhase::None &&
+        !data.laneChange.roadConnectionManeuver &&
+        !data.laneChange.gatewayReplanRequestedAfterShift &&
+        data.laneChange.shiftCompletedLaneValid && world.egoLaneValid &&
+        LaneKey{world.egoRoadId,world.egoSectionIndex,world.egoLaneId} ==
+            data.laneChange.shiftCompletedLane &&
+        world.egoLaneCenterDistance <= 0.75 &&
+        (data.laneChange.phase == LaneChangePhase::Settle ||
+         world.egoPathS >= data.laneChange.rejoinRouteS-1.0)) {
+        requestCorridorGlobalReplan(*map.corridorRuntime);
+        data.laneChange.gatewayReplanRequestedAfterShift = true;
+        traceDecision(trace,"corridor_global_route","post_avoidance_replan_requested",
+                      "target_lane_reached=1 keep_current_trajectory_until_replacement=1");
+    }
+    if (!data.missionCorridor.topologyAuthority &&
+        data.laneChange.phase == LaneChangePhase::Settle &&
         !successorPathReady && map.corridorRuntime) {
         // A topology-valid route can still be the pre-detour route several
         // metres away.  Keeping that route marked committed makes the next
@@ -1704,11 +1721,20 @@ void runPlanningProcess(PlanningProcessData& data,
                         return static_cast<int>(object.raw.id) ==
                                    data.laneChange.obstacleId;
                     });
+    const bool finishingAvoidance = data.laneChange.phase != LaneChangePhase::None &&
+        !data.laneChange.roadConnectionManeuver &&
+        !data.laneChange.gatewayReplanRequestedAfterShift;
     advanceLaneChangePhase(data.laneChange, data.laneChangeConfig, world, dt,
                            laneChangeExecutionBlocked,
                            maneuverObstacleStillConfirmed,
                            candidateSafeAtManeuverSpeed,
                            trace, successorPathReady);
+    if (finishingAvoidance && data.laneChange.phase == LaneChangePhase::None &&
+        data.missionCorridor.topologyAuthority && map.corridorRuntime) {
+        requestCorridorGlobalReplan(*map.corridorRuntime);
+        traceDecision(trace,"corridor_global_route","post_avoidance_replan_requested",
+                      "avoidance_finished=1 keep_current_trajectory_until_replacement=1");
+    }
 
     if (successorActivePathFallbackUsed &&
         !committedActivePathProjectionValid &&
@@ -2062,9 +2088,10 @@ void runPlanningProcess(PlanningProcessData& data,
     tracking.targetSpeed = data.frame.behavior.targetSpeed;
     const bool missionComplete = data.missionCorridor.valid &&
         activeMissionLeg(data.missionCorridor) == nullptr;
-    tracking.goalReached = missionComplete || crossedFinishLine(
-        data, sensedWorld, map.staticZones,
-        !data.missionCorridor.valid && globalTracking.goalReached);
+    tracking.goalReached = missionComplete ||
+        (!data.missionCorridor.topologyAuthority && crossedFinishLine(
+            data, sensedWorld, map.staticZones,
+            !data.missionCorridor.valid && globalTracking.goalReached));
     data.pathPlanner.latestPlan = tracking;
 
     data.result.valid = tracking.valid && world.inputValid;

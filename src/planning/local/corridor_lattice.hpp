@@ -6,6 +6,7 @@
 #include <array>
 
 struct DecisionTraceData;
+struct CorridorGlobalRouteWorker;
 struct CorridorEdge {
     std::int64_t to{-1};
     double distance{};
@@ -54,8 +55,12 @@ struct CorridorRuntime {
     // stationary-object set changes, not in every 20 Hz frame.  The current
     // path remains available to the local avoidance planner meanwhile.
     bool globalRouteSearchFailed{};
+    bool globalRouteReplanRequested{};
+    std::uint64_t globalRouteRequestRevision{};
+    std::shared_ptr<CorridorGlobalRouteWorker> globalRouteWorker;
     LaneKey globalRouteFailureLane;
     std::size_t globalRouteFailureStaticCount{};
+    std::uint64_t globalRouteFailureStaticSignature{};
     double globalRouteFailureRoadS{};
     double globalRouteRetryAfter{};
     // Cost through the current gateway and the next mission leg.  This is a
@@ -99,6 +104,9 @@ struct CorridorRuntime {
 };
 
 void beginCorridorSearchFrame(CorridorRuntime& runtime);
+// Keep the usable trajectory until a replacement from the measured pose is
+// ready. Used after avoidance has reached its target lane.
+void requestCorridorGlobalReplan(CorridorRuntime& runtime);
 
 bool initializeCorridorRuntime(PathGeneratorData& map,const std::string& directory,
                               const LaneChangeConfig& config,std::string* error);

@@ -12,6 +12,24 @@
 #include <queue>
 #include <set>
 #include <sstream>
+#include <future>
+
+// Own immutable map/graph snapshots. The control loop only polls the result;
+// it never waits for global A* or shares mutable planning state with it.
+struct CorridorGlobalRouteWorker {
+    struct Result {
+        std::size_t leg{};
+        std::uint64_t revision{}, staticSignature{};
+        LaneKey startLane;
+        double startRoadS{}, receiveTime{};
+        bool success{};
+        bool exception{};
+        std::vector<Waypoint> path;
+    };
+    std::shared_ptr<CorridorRuntime> runtime;
+    std::shared_ptr<const PathGeneratorData> map;
+    std::future<Result> pending;
+};
 
 namespace {
 constexpr double inf=std::numeric_limits<double>::infinity();
@@ -57,6 +75,8 @@ void activate(CorridorRuntime& r,const MissionCorridorData& mission) {
     r.referenceRecoveryFailureRoadS=0.;
     r.referenceRecoveryRetryAfter=0.;
     r.globalRouteSearchFailed=false;
+    r.globalRouteReplanRequested=false;
+    ++r.globalRouteRequestRevision;
     r.globalRouteFailureLane={};
     r.globalRouteFailureStaticCount=0;
     r.globalRouteFailureRoadS=0.;
@@ -84,7 +104,7 @@ void activate(CorridorRuntime& r,const MissionCorridorData& mission) {
         r.trackingAllowed[p.id]=r.allowed[p.id];
         r.surfaceAllowed[p.id]=(leg->allowedLanes.count(key)||leg->targetLanes.count(key)) &&
             r.network.lanes.at(key).topologyStatus!="excluded_by_review";
-        if(r.allowed[p.id] && leg->targetLanes.count(key)) {
+        if(r.allowed[p.id] && missionPointIsTarget(*leg,p.pose)) {
             r.gatewayCost[p.id]=0.;
             r.gatewayLateralSteps[p.id]=0;
             queue.push({0.,p.id});
@@ -108,7 +128,7 @@ void activate(CorridorRuntime& r,const MissionCorridorData& mission) {
     // lateral stage, which previously rejected safe intermediate lanes.
     std::deque<std::int64_t> stepQueue;
     for(const auto& p:r.network.points) if(r.allowed[p.id] &&
-        leg->targetLanes.count(keyOf(p.pose))) stepQueue.push_back(p.id);
+        missionPointIsTarget(*leg,p.pose)) stepQueue.push_back(p.id);
     while(!stepQueue.empty()) {
         const auto id=stepQueue.front();stepQueue.pop_front();
         for(const auto& e:r.reverse[id]) {
@@ -145,7 +165,7 @@ void activate(CorridorRuntime& r,const MissionCorridorData& mission) {
                 // surface must be visible during this atomic handoff too.
                 r.surfaceAllowed[p.id]=true;
             }
-            if(r.trackingAllowed[p.id] && nextLeg.targetLanes.count(key)) {
+            if(r.trackingAllowed[p.id] && missionPointIsTarget(nextLeg,p.pose)) {
                 r.handoffCost[p.id]=0.;handoffQueue.push({0.,p.id});
             }
         }
@@ -616,6 +636,27 @@ bool isStationaryRouteObstacle(const WorldObjectState& object) {
     return vehicleOrElongated || compactLowObstacle;
 }
 
+std::uint64_t stationarySceneSignature(const WorldState& world) {
+    // Slot order is not object identity. A 30-slot update can replace one
+    // obstacle with another without changing the count; moved/stopped actors
+    // also invalidate a previous failed search. Quantization ignores noise.
+    std::vector<std::array<std::int64_t,7>> objects;
+    for (const auto& object : world.objects) {
+        if (!isStationaryRouteObstacle(object)) continue;
+        const auto& o = object.raw;
+        objects.push_back({o.id, std::llround(o.x*4.), std::llround(o.y*4.),
+            std::llround(o.z*4.), std::llround(o.heading*16.),
+            std::llround(o.length*10.), std::llround(o.width*10.)});
+    }
+    std::sort(objects.begin(), objects.end());
+    std::uint64_t signature = 14695981039346656037ULL;
+    for (const auto& object : objects) for (const auto value : object) {
+        signature ^= static_cast<std::uint64_t>(value);
+        signature *= 1099511628211ULL;
+    }
+    return signature;
+}
+
 bool stationaryPathClear(const std::vector<Waypoint>& path,
                          const WorldState& world,double margin,
                          std::size_t begin=0,int* objectId=nullptr) {
@@ -696,8 +737,9 @@ bool materializeObstacleAwareGlobalRoute(
         for(const auto id:lane->second.pointIds) {
             if(id<0 || !r.allowed[id]) continue;
             const auto& p=r.network.points[id].pose;
-            const double distance=std::hypot(
-                p.x-checkpoint.x,p.y-checkpoint.y);
+            const double distance=leg->topologyAuthority
+                ? std::abs(p.roadS-leg->targetRoadS.at(key))
+                : std::hypot(p.x-checkpoint.x,p.y-checkpoint.y);
             if(distance<best) {best=distance;closest=id;}
         }
         if(closest>=0 && !goal[closest]) {goal[closest]=true;++goalCount;}
@@ -942,7 +984,8 @@ bool materializePrecomputedGatewayRoute(
         const auto lane=r.network.lanes.find(key);
         if(lane==r.network.lanes.end()) continue;
         for(const auto id:lane->second.pointIds) {
-            if(id<0 || !r.allowed[id]) continue;
+            if(id<0 || !r.allowed[id] ||
+               !missionPointIsTarget(*leg,r.network.points[id].pose)) continue;
             if(!goal[id]) {goal[id]=true;++goalCount;}
         }
     }
@@ -1343,7 +1386,7 @@ bool ensureObstacleAwareGlobalRoute(
     DecisionTraceData* trace) {
     std::vector<Waypoint> current;
     const bool sliceAvailable=globalRouteSlice(current,r,world,horizon);
-    bool retained=sliceAvailable;
+    bool retained=sliceAvailable && !r.globalRouteReplanRequested;
     if(retained) {
         // Check only the unconsumed suffix.  An obstacle already passed must
         // not invalidate a route merely because its old point is still stored.
@@ -1352,6 +1395,102 @@ bool ensureObstacleAwareGlobalRoute(
             r.committedGlobalPathProgress);
     }
     if(retained) {output=std::move(current);return true;}
+
+    if (r.budgetedSearch && mission.topologyAuthority && r.globalRouteWorker) {
+        auto& worker = *r.globalRouteWorker;
+        if (worker.pending.valid() &&
+            worker.pending.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            auto result = worker.pending.get();
+            if (result.leg == r.activeLeg && result.revision == r.globalRouteRequestRevision) {
+                // The vehicle and observations have advanced while A* ran.
+                // Validate attachment and the remaining static-clear suffix
+                // against THIS frame before adopting the asynchronous result.
+                std::size_t nearestIndex = 0;
+                double best = inf;
+                for (std::size_t i=0; i<result.path.size(); ++i) {
+                    const auto& p = result.path[i];
+                    if (std::abs(normalizeAngle(p.yaw-world.ego.heading)) > .8) continue;
+                    const double d = std::hypot(p.x-world.ego.x,p.y-world.ego.y);
+                    if (d < best) {best=d;nearestIndex=i;}
+                }
+                if (result.success && best <= 1.25 && nearestIndex+1 < result.path.size() &&
+                    stationaryPathClear(result.path,world,r.laneConfig.latticeObstacleClearance,nearestIndex)) {
+                    r.committedGlobalPath = std::move(result.path);
+                    r.committedGlobalPathLeg = r.activeLeg;
+                    r.committedGlobalPathProgress = nearestIndex;
+                    r.committedGlobalPathReachesGateway = true;
+                    r.globalRouteSearchFailed = false;
+                    r.globalRouteReplanRequested = false;
+                    r.recoveryTrackingPath.clear();
+                    ++r.routeRevision;
+                    traceDecision(trace,"corridor_global_route","async_route_adopted",
+                                  "current_pose_and_observed_static_suffix_revalidated=1");
+                    if (globalRouteSlice(output,r,world,horizon)) return true;
+                } else if (!result.success) {
+                    r.globalRouteSearchFailed = true;
+                    r.globalRouteFailureLane = result.startLane;
+                    r.globalRouteFailureRoadS = result.startRoadS;
+                    r.globalRouteFailureStaticSignature = result.staticSignature;
+                    r.globalRouteRetryAfter = world.receiveTime+5.;
+                    traceDecision(trace,"corridor_global_route",
+                                  result.exception?"async_search_exception":"async_search_exhausted",
+                                  "keep_local_avoidance_and_retry_on_scene_change=1");
+                } else {
+                    // A successful but stale plan is not evidence that the
+                    // current pose has no route; request a fresh snapshot.
+                    r.globalRouteSearchFailed = false;
+                    traceDecision(trace,"corridor_global_route","async_stale_route_discarded",
+                                  "ego_or_observations_changed=1");
+                }
+            }
+        }
+        const LaneKey currentLane{world.egoRoadId,world.egoSectionIndex,world.egoLaneId};
+        const auto signature = stationarySceneSignature(world);
+        const bool suppressed = r.globalRouteSearchFailed &&
+            r.globalRouteFailureLane == currentLane &&
+            r.globalRouteFailureStaticSignature == signature &&
+            std::abs(world.egoRoadS-r.globalRouteFailureRoadS) < 8. &&
+            world.receiveTime < r.globalRouteRetryAfter;
+        if (!worker.pending.valid() && !suppressed) {
+            const auto snapshot = worker.runtime;
+            const auto mapSnapshot = worker.map;
+            const auto revision = r.globalRouteRequestRevision;
+            try {
+              worker.pending = std::async(std::launch::async,
+                [snapshot,mapSnapshot,world,mission,signature,revision]() {
+                    CorridorGlobalRouteWorker::Result result;
+                    result.leg = mission.activeLegIndex;
+                    result.revision = revision;
+                    result.staticSignature = signature;
+                    result.startLane = {world.egoRoadId,world.egoSectionIndex,world.egoLaneId};
+                    result.startRoadS = world.egoRoadS;
+                    result.receiveTime = world.receiveTime;
+                    try {
+                        activate(*snapshot,mission);
+                        const auto start = nearest(*snapshot,world);
+                        if (start>=0) result.success = materializePrecomputedGatewayRoute(
+                            result.path,*snapshot,*mapSnapshot,world,mission,start,nullptr);
+                    } catch (...) {result.success=false;result.exception=true;}
+                    return result;
+                });
+              r.globalRouteReplanRequested = true;
+              traceDecision(trace,"corridor_global_route","async_search_started",
+                          "scope=whole_active_corridor received_objects="+
+                              std::to_string(world.objects.size())+" unseen_space_not_verified=1");
+            } catch (const std::exception& ex) {
+                r.globalRouteSearchFailed=true;
+                r.globalRouteFailureLane=currentLane;
+                r.globalRouteFailureRoadS=world.egoRoadS;
+                r.globalRouteFailureStaticSignature=signature;
+                r.globalRouteRetryAfter=world.receiveTime+1.;
+                traceDecision(trace,"corridor_global_route","async_launch_failed",ex.what());
+            }
+        }
+        if (sliceAvailable) {output=std::move(current);return true;}
+        // The ordinary gateway-aware sampled path and bounded local avoidance
+        // continue sending commands while the global worker is busy.
+        return false;
+    }
 
     // Never run the exhaustive, whole-corridor obstacle search from the
     // real-time control frame.  It evaluates thousands of swept quintics and
@@ -1383,6 +1522,7 @@ bool ensureObstacleAwareGlobalRoute(
         // Ego advances materially, or five simulation seconds pass.
         const bool retrySuppressed=r.globalRouteSearchFailed &&
             r.globalRouteFailureLane==failureLane &&
+            r.globalRouteFailureStaticSignature==stationarySceneSignature(world) &&
             std::abs(world.egoRoadS-r.globalRouteFailureRoadS)<8.0 &&
             world.receiveTime<r.globalRouteRetryAfter;
         std::vector<Waypoint> rebuilt;
@@ -1393,6 +1533,8 @@ bool ensureObstacleAwareGlobalRoute(
             r.committedGlobalPathProgress=0;
             r.committedGlobalPathReachesGateway=true;
             r.globalRouteSearchFailed=false;
+            r.globalRouteReplanRequested=false;
+            r.recoveryTrackingPath.clear();
             ++r.routeRevision;
             if(globalRouteSlice(output,r,world,horizon)) return true;
         }
@@ -1400,6 +1542,7 @@ bool ensureObstacleAwareGlobalRoute(
             r.globalRouteSearchFailed=true;
             r.globalRouteFailureLane=failureLane;
             r.globalRouteFailureStaticCount=staticCount;
+            r.globalRouteFailureStaticSignature=stationarySceneSignature(world);
             r.globalRouteFailureRoadS=world.egoRoadS;
             r.globalRouteRetryAfter=world.receiveTime+5.0;
         }
@@ -1428,7 +1571,10 @@ bool ensureObstacleAwareGlobalRoute(
         [](const auto& object){return isStationaryRouteObstacle(object);});
     const bool unchangedFailedSearch=r.globalRouteSearchFailed &&
         r.globalRouteFailureLane==failureLane &&
-        r.globalRouteFailureStaticCount==staticCount;
+        r.globalRouteFailureStaticCount==staticCount &&
+        r.globalRouteFailureStaticSignature==stationarySceneSignature(world) &&
+        std::abs(world.egoRoadS-r.globalRouteFailureRoadS)<8. &&
+        world.receiveTime<r.globalRouteRetryAfter;
     std::vector<Waypoint> rebuilt;
     if(!unchangedFailedSearch && start>=0 &&
        materializeObstacleAwareGlobalRoute(
@@ -1438,6 +1584,8 @@ bool ensureObstacleAwareGlobalRoute(
         r.committedGlobalPathProgress=0;
         r.committedGlobalPathReachesGateway=true;
         r.globalRouteSearchFailed=false;
+        r.globalRouteReplanRequested=false;
+        r.recoveryTrackingPath.clear();
         ++r.routeRevision;
         if(globalRouteSlice(output,r,world,horizon)) return true;
     }
@@ -1445,6 +1593,9 @@ bool ensureObstacleAwareGlobalRoute(
         r.globalRouteSearchFailed=true;
         r.globalRouteFailureLane=failureLane;
         r.globalRouteFailureStaticCount=staticCount;
+        r.globalRouteFailureStaticSignature=stationarySceneSignature(world);
+        r.globalRouteFailureRoadS=world.egoRoadS;
+        r.globalRouteRetryAfter=world.receiveTime+5.;
     }
     // Search failure is not path failure.  Keep the existing sampled route
     // so prepareCorridorLattice can see its blocker and atomically replace it
@@ -1600,6 +1751,14 @@ bool initializeCorridorRuntime(PathGeneratorData& map,PrecomputedLaneNetwork net
             if(legal) addEdge(*r,p.id,{id,distance,-1,true});
         }
     }
+    // Snapshot once at startup, not on a control frame or at each replan.
+    // The worker owns its graph/masks and cannot race activation/map matching.
+    auto worker=std::make_shared<CorridorGlobalRouteWorker>();
+    worker->runtime=std::make_shared<CorridorRuntime>(*r);
+    auto frozenMap=std::make_shared<PathGeneratorData>(map);
+    frozenMap->corridorRuntime.reset();
+    worker->map=std::move(frozenMap);
+    r->globalRouteWorker=std::move(worker);
     map.corridorRuntime=std::move(r);return true;
 }
 
@@ -1709,6 +1868,13 @@ bool corridorCommittedRouteConnects(const PathGeneratorData& map,
     return false;
 }
 
+void requestCorridorGlobalReplan(CorridorRuntime& runtime) {
+    runtime.globalRouteReplanRequested = true;
+    ++runtime.globalRouteRequestRevision;
+    runtime.globalRouteSearchFailed = false;
+    runtime.globalRouteRetryAfter = 0.;
+}
+
 bool buildCorridorTrackingPath(PathPlannerData& output,const PathPlannerConfig& config,
                               const WorldState& world,const PathGeneratorData& map,
                               const MissionCorridorData& mission,double horizon,DecisionTraceData* trace) {
@@ -1737,8 +1903,16 @@ bool buildCorridorTrackingPath(PathPlannerData& output,const PathPlannerConfig& 
     // corridor position to the physical checkpoint gateway.  It includes
     // legal lateral quintics, so neither the greedy obstacle selector nor the
     // gateway selector has to rediscover the same decision every frame.
+    // Poll/rebuild before returning a cached short recovery bridge. Otherwise
+    // that bridge can indefinitely hide a completed global worker result.
+    // While the worker is busy, keep using the bridge instead of rebuilding
+    // its expensive swept geometry on every frame.
+    const bool globalAttempted = r.globalRouteReplanRequested ||
+        (r.globalRouteWorker && r.globalRouteWorker->pending.valid());
+    if(globalAttempted && ensureObstacleAwareGlobalRoute(
+            output.waypoints,r,map,world,mission,horizon,trace)) return true;
     if(recoveryRouteSlice(output.waypoints,r,world,horizon)) return true;
-    if(ensureObstacleAwareGlobalRoute(
+    if(!globalAttempted && ensureObstacleAwareGlobalRoute(
             output.waypoints,r,map,world,mission,horizon,trace)) return true;
     traceDecision(trace,"corridor_global_route","fallback_selected",
                   "reason=no_complete_static_obstacle_aware_route");
@@ -2084,7 +2258,7 @@ bool prepareCorridorLattice(LaneChangeData& state,const LaneChangeConfig& config
     // no scenario, road or coordinate special case.
     const bool referenceIsGatewayAuthority=activeReferenceUsed &&
         (activeReferenceIsMissionGuide ||
-         !std::isfinite(r.gatewayCost[startId]));
+         (!mission.topologyAuthority && !std::isfinite(r.gatewayCost[startId])));
     // Lane IDs are not branch identities.  Before a split, the lane that
     // continues straight and the lane that enters the official connector can
     // share the same road/section/lane metadata.  A candidate is therefore

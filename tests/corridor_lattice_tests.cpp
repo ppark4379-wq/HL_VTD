@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <array>
+#include <thread>
 
 void require(bool okay,const char* message) {if(!okay) throw std::runtime_error(message);}
 PathGeneratorData fixture(bool solid=false,bool sourceKnot=false) {
@@ -74,6 +75,78 @@ void m08StaticObjects(WorldState& w) {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2 && std::string(argv[1])=="--observed-global-replan") {
+            auto map=fixture();auto m=mission();auto w=world(10.);
+            m.topologyAuthority=true;m.checkpoints.resize(2);
+            m.checkpoints[0].checkpoint.x=10.;m.checkpoints[1].checkpoint.x=180.;
+            auto& leg=m.legs.front();leg.topologyAuthority=true;leg.finalLeg=true;
+            leg.gatewayCheckpoint=leg.toCheckpoint=1;
+            for(const auto& lane:leg.targetLanes) leg.targetRoadS[lane]=80.;
+            obstacle(w);w.objects.front().raw.x=130.;
+            w.objects.front().obb=makeObb2D(130.,-1.75,0.,4.,2.);
+            PathPlannerData path;DecisionTraceData trace;trace.enabled=true;
+            auto& runtime=*map.corridorRuntime;
+            const auto poll=[&]() {
+                const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+                do {
+                    beginCorridorSearchFrame(runtime);
+                    buildCorridorTrackingPath(path,PathPlannerConfig{},w,map,m,80.,&trace);
+                    if(runtime.committedGlobalPathReachesGateway && !runtime.globalRouteReplanRequested)
+                        return true;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                } while(std::chrono::steady_clock::now()<deadline);
+                return false;
+            };
+            require(poll(),"asynchronous observed-obstacle global route missing");
+            require(runtime.committedGlobalPath.back().x>=179.5,
+                    "route ended at exit lane start instead of finish station");
+            for(const auto& p:runtime.committedGlobalPath)
+                require(!intersects(makeObb2D(p.x+1.3725*std::cos(p.yaw),
+                    p.y+1.3725*std::sin(p.yaw),p.yaw,4.855+.6,1.88+.6),w.objects.front().obb),
+                    "global route ignored a received static obstacle beyond 70m");
+            w=world(150.);w.ego.y=-8.75;w.egoRoadId=2;w.egoLaneId=-3;w.egoRoadS=50.;
+            requestCorridorGlobalReplan(runtime);
+            require(!runtime.committedGlobalPath.empty(),"replan erased the old trajectory prematurely");
+            require(poll(),"post-avoidance gateway global route missing");
+            require(std::hypot(runtime.committedGlobalPath.front().x-w.ego.x,
+                               runtime.committedGlobalPath.front().y-w.ego.y)<1.,
+                    "post-avoidance global route starts on the old lane");
+            std::cout<<"observed whole-corridor / post-avoidance replan PASS\n";
+            return 0;
+        }
+        if(argc==3 && std::string(argv[1])=="--precomputed-mission-audit") {
+            PathGeneratorData map;
+            require(loadMap(map,"src/data/map/HL_FMA_VTD_LivingLab.xodr"),"map load");
+            MissionCorridorData m;std::string error;
+            const bool loaded=loadPrecomputedMission(m,map,argv[2],&error);
+            require(loaded,error.c_str());
+            require(m.topologyAuthority,"new artifact was not made authoritative");
+            for(std::size_t i=0;i<m.legs.size();++i) {
+                m.activeLegIndex=i;
+                const auto& leg=m.legs[i];
+                require(!missionLegRequiresGuideContinuity(m),"new mission uses legacy guide");
+                for(const auto& target:leg.targetLanes) {
+                    auto trial=m;trial.targetRoadStableFrames=0;
+                    auto pose=map.laneSegments.at(target).points.front();
+                    pose.roadS=leg.targetRoadS.at(target);
+                    require(missionPointIsTarget(leg,pose),"target station not recognized");
+                    auto before=pose;before.roadS+=(target.laneId<0?-1.:1.);
+                    require(!missionPointIsTarget(leg,before),"gateway advances before exit station");
+                    auto w=world();w.egoLaneValid=true;
+                    w.egoRoadId=target.roadId;w.egoSectionIndex=target.sectionIndex;
+                    w.egoLaneId=target.laneId;w.egoRoadS=pose.roadS;
+                    // Deliberately far from CP: road/station, not CP radius,
+                    // must govern progression; world normally comes from map matching.
+                    w.ego.x=pose.x;w.ego.y=pose.y;
+                    updateMissionCorridorProgress(trial,w);
+                    require(trial.activeLegIndex==i,"single-frame match advanced gateway");
+                    updateMissionCorridorProgress(trial,w);
+                    require(trial.activeLegIndex==i+1,"directed gateway handoff failed");
+                }
+            }
+            std::cout<<"precomputed mission audit PASS legs="<<m.legs.size()<<'\n';
+            return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--m14-guide-recovery") {
             PathGeneratorData map;
             require(loadMap(map,"src/data/map/HL_FMA_VTD_LivingLab.xodr"),

@@ -42,6 +42,11 @@ struct MissionLegData {
     // Legal lane selection therefore still comes from the restricted XODR
     // graph; the sampled guide is used only when that graph has a real gap.
     bool guideRouteAuthority{};
+    // Validated whole-mission XODR artifact is authoritative, NOT route.csv.
+    bool topologyAuthority{};
+    bool finalLeg{};
+    std::set<LaneKey> gatewayLanes;
+    std::map<LaneKey, double> targetRoadS;
     std::set<LaneKey> allowedLanes;
     std::set<LaneKey> targetLanes;
     std::vector<LaneKey> preferredRoute;
@@ -54,6 +59,7 @@ struct MissionLegData {
 struct MissionCorridorData {
     bool initialized{};
     bool valid{};
+    bool topologyAuthority{};
     std::vector<MissionCheckpointData> checkpoints;
     std::vector<MissionLegData> legs;
     std::size_t activeLegIndex{};
@@ -61,6 +67,23 @@ struct MissionCorridorData {
     int targetRoadStableFrames{};
     bool targetRoadObserved{};
 };
+
+// Startup only: export the loaded map, run the headless whole-mission
+// generator, then load/validate its result before opening VTD control.
+bool preparePrecomputedMission(MissionCorridorData& output,
+                               PathGeneratorData& map,
+                               const std::string& checkpointCsv,
+                               const std::string& xodrPath,
+                               const std::string& pointNetworkDirectory,
+                               const std::string& outputDirectory,
+                               std::string* error = nullptr);
+bool loadPrecomputedMission(MissionCorridorData& output,
+                            const PathGeneratorData& map,
+                            const std::string& artifact,
+                            std::string* error = nullptr);
+bool exportMissionMap(const PathGeneratorData& map,
+                      const std::string& directory);
+bool missionPointIsTarget(const MissionLegData& leg, const Waypoint& point);
 
 // CSV checkpoint를 road 구역으로 변환하고, 각 구간의 자유 주행 회랑과
 // 마지막 gateway를 lane graph에서 계산한다.

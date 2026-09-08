@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(HL_VTD VERSION 0.1.0 LANGUAGES CXX)
+find_package(Boost REQUIRED)
+find_package(Threads REQUIRED)
+include_directories(SYSTEM ${Boost_INCLUDE_DIRS})
+link_libraries(Threads::Threads)
 
 enable_testing()
 
@@ -33,6 +37,7 @@ foreach(corridor_regression IN ITEMS
         m09-compact-obstacle-replay
         m11-transition-commitment
         m14-guide-recovery
+        observed-global-replan
         all-scenario-handoff-audit)
     string(REPLACE "-" "_" corridor_test_name "${corridor_regression}")
     add_test(NAME corridor_${corridor_test_name}
@@ -65,6 +70,8 @@ add_executable(hl_vtd
     src/planning/planning_process.cpp
     src/planning/global/global_path_planner.cpp
     src/planning/global/mission_corridor.cpp
+    src/planning/global/mission_precompute.cpp
+    src/data/map/mission_map_export.cpp
     src/planning/local/local_path_planner.cpp
     src/planning/local/lane_change_planner.cpp
     src/planning/behavior/behavior_planner.cpp
@@ -116,11 +123,13 @@ add_executable(checkpoints_to_route
 
 # Offline XODR geometry/link export; no mission snapshot or VTD socket.
 add_executable(export_mission_corridors tools/verification/export_mission_corridors.cpp
+    src/data/map/mission_map_export.cpp
     src/planning/global/reference_path_generator.cpp
     src/data/map/map_loader.cpp
     src/utils/csv_utils.cpp src/utils/math_utils.cpp)
 target_compile_features(export_mission_corridors PRIVATE cxx_std_17)
 target_include_directories(export_mission_corridors PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_definitions(hl_vtd PRIVATE HL_VTD_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_executable(extract_static_zones
     tools/map_extraction/extract_static_zones.cpp

@@ -71,6 +71,7 @@ Testing/
 
 # Local VTD verification runs (CSV logs, summaries, plots)
 /output/verification/**
+/output/runtime_mission/
 !/output/verification/.gitkeep
 
 # Python bytecode cache
