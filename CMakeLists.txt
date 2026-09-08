@@ -8,6 +8,34 @@ link_libraries(Threads::Threads)
 
 enable_testing()
 
+add_executable(vehicle_footprint_tests tests/vehicle_footprint_tests.cpp
+    src/utils/geometry.cpp)
+target_compile_features(vehicle_footprint_tests PRIVATE cxx_std_17)
+target_include_directories(vehicle_footprint_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+add_test(NAME vehicle_footprint_tests COMMAND vehicle_footprint_tests)
+
+add_executable(road_elevation_tests tests/road_elevation_tests.cpp
+    src/planning/global/reference_path_generator.cpp src/data/map/map_loader.cpp
+    src/utils/csv_utils.cpp src/utils/math_utils.cpp)
+target_compile_features(road_elevation_tests PRIVATE cxx_std_17)
+target_include_directories(road_elevation_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+add_test(NAME road_elevation_tests COMMAND road_elevation_tests)
+
+add_executable(local_fallback_config_tests tests/local_fallback_config_tests.cpp
+    src/control/config/control_config.cpp src/utils/csv_utils.cpp)
+target_compile_features(local_fallback_config_tests PRIVATE cxx_std_17)
+target_include_directories(local_fallback_config_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+add_test(NAME local_fallback_config_tests COMMAND local_fallback_config_tests)
+set_tests_properties(local_fallback_config_tests PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+add_executable(mission_exit_target_tests tests/mission_exit_target_tests.cpp
+    src/planning/global/mission_corridor.cpp src/planning/global/reference_path_generator.cpp
+    src/data/map/map_loader.cpp src/utils/csv_utils.cpp src/utils/math_utils.cpp)
+target_compile_features(mission_exit_target_tests PRIVATE cxx_std_17)
+target_include_directories(mission_exit_target_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+add_test(NAME mission_exit_target_tests COMMAND mission_exit_target_tests)
+
 add_executable(gt_receiver_tests tests/gt_receiver_tests.cpp
     src/network/receive/gt_receiver.cpp src/network/receive/packet_parser.cpp
     src/network/vtd_client.cpp)
@@ -27,7 +55,44 @@ add_executable(corridor_lattice_tests tests/corridor_lattice_tests.cpp ${CORRIDO
 target_compile_features(corridor_lattice_tests PRIVATE cxx_std_17)
 target_include_directories(corridor_lattice_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_test(NAME corridor_lattice_tests COMMAND corridor_lattice_tests)
+add_executable(global_route_obstacle_tests tests/global_route_obstacle_tests.cpp ${CORRIDOR_SOURCES}
+    src/planning/global/mission_corridor.cpp src/planning/global/reference_path_generator.cpp
+    src/planning/local/path_planner.cpp
+    src/planning/collision/collision_checker.cpp src/data/map/map_loader.cpp
+    src/utils/csv_utils.cpp src/utils/math_utils.cpp src/utils/geometry.cpp src/logger/decision_trace.cpp)
+target_compile_features(global_route_obstacle_tests PRIVATE cxx_std_17)
+target_include_directories(global_route_obstacle_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+add_test(NAME global_route_obstacle_tests COMMAND global_route_obstacle_tests)
+add_test(NAME dense_global_route_regression COMMAND global_route_obstacle_tests --dense-global)
+add_executable(local_corridor_fallback_tests tests/local_corridor_fallback_tests.cpp ${CORRIDOR_SOURCES}
+    src/planning/global/mission_corridor.cpp src/planning/global/reference_path_generator.cpp
+    src/planning/local/path_planner.cpp src/planning/collision/collision_checker.cpp
+    src/data/map/map_loader.cpp src/utils/csv_utils.cpp src/utils/math_utils.cpp
+    src/utils/geometry.cpp src/logger/decision_trace.cpp)
+target_compile_features(local_corridor_fallback_tests PRIVATE cxx_std_17)
+target_include_directories(local_corridor_fallback_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+add_test(NAME local_corridor_fallback_tests COMMAND local_corridor_fallback_tests)
+set_tests_properties(local_corridor_fallback_tests PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" TIMEOUT 40)
+add_executable(reference_reconnect_cache_tests tests/reference_reconnect_cache_tests.cpp ${CORRIDOR_SOURCES}
+    src/planning/global/mission_corridor.cpp src/planning/global/reference_path_generator.cpp
+    src/planning/local/path_planner.cpp src/planning/collision/collision_checker.cpp
+    src/data/map/map_loader.cpp src/utils/csv_utils.cpp src/utils/math_utils.cpp
+    src/utils/geometry.cpp src/logger/decision_trace.cpp)
+target_compile_features(reference_reconnect_cache_tests PRIVATE cxx_std_17)
+target_include_directories(reference_reconnect_cache_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+add_test(NAME reference_reconnect_cache_tests COMMAND reference_reconnect_cache_tests)
+add_executable(replay_corridor_scene tools/verification/replay_corridor_scene.cpp ${CORRIDOR_SOURCES}
+    src/planning/global/mission_corridor.cpp src/planning/global/reference_path_generator.cpp
+    src/planning/local/path_planner.cpp src/planning/collision/collision_checker.cpp
+    src/data/map/map_loader.cpp src/control/config/control_config.cpp
+    src/utils/csv_utils.cpp src/utils/math_utils.cpp src/utils/geometry.cpp src/logger/decision_trace.cpp)
+target_compile_features(replay_corridor_scene PRIVATE cxx_std_17)
+target_include_directories(replay_corridor_scene PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 foreach(corridor_regression IN ITEMS
+        surface-permission
+        alignment-deadline
+        vehicle-footprint-width
         m05-tail-regression
         m08-obstacle-replay
         m08-gateway-replay
@@ -174,6 +239,7 @@ target_include_directories(controller_logic_tests
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_test(NAME controller_logic_tests COMMAND controller_logic_tests)
 add_test(NAME dense_static_speed_regression COMMAND controller_logic_tests --dense-static-speed)
+add_test(NAME avoidance_safe_handoff_regression COMMAND controller_logic_tests --safe-tail-stopline)
 set_tests_properties(controller_logic_tests PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 

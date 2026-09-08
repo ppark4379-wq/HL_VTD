@@ -75,6 +75,56 @@ void m08StaticObjects(WorldState& w) {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2 && std::string(argv[1])=="--surface-permission") {
+            auto map=fixture();auto m=mission();auto w=world();
+            auto& leg=m.legs.front();leg.allowedLanes.erase({1,0,-3});
+            leg.surfaceOnlySpans.push_back({{1,0,-3},20.,40.,{1,0,-2}});
+            PathPlannerData path;
+            buildCorridorTrackingPath(path,PathPlannerConfig{},w,map,m,60.,nullptr);
+            const auto& runtime=*map.corridorRuntime;
+            for(const auto id:runtime.network.lanes.at({1,0,-3}).pointIds) {
+                const double station=runtime.network.points[id].pose.roadS;
+                require(runtime.surfaceAllowed[id]==(station>=20.&&station<=40.),
+                        "surface-only permission escaped its bounded interval");
+                require(!runtime.allowed[id] && !runtime.trackingAllowed[id] &&
+                        !std::isfinite(runtime.gatewayCost[id]),
+                        "surface-only permission incorrectly opened route graph");
+            }
+            std::cout<<"bounded surface-only permission PASS\n";return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--alignment-deadline") {
+            for(const double distance:{30.,5.}) {
+                auto map=fixture();auto m=mission(true);auto w=world();
+                LaneChangeData candidate;LaneAlignmentContext context;
+                context.maximumCompletionDistance=distance;context.stopLineId=1;
+                const bool chosen=prepareCorridorLattice(candidate,LaneChangeConfig{},
+                    PlanningBehaviorConfig{},w,map,m,nullptr,nullptr,true,nullptr,
+                    nullptr,false,&context);
+                require(chosen==(distance>5.),"alignment deadline candidate feasibility");
+                if(chosen) {
+                    require(candidate.shiftCompletedLane.laneId==-3,
+                            "short intermediate stage displaced full gateway alignment");
+                    require(candidate.rejoinRouteS-w.egoPathS<=distance,
+                            "lane alignment ends after the stop-line deadline");
+                }
+            }
+            std::cout<<"multi-stage stop-line alignment PASS\n";return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--vehicle-footprint-width") {
+            auto m=mission();
+            for(const double width:{1.88,3.8}) {
+                auto map=fixture();auto w=world();obstacle(w);
+                w.egoObb=makeObb2D(w.ego.x+1.3725,w.ego.y,0.,4.855,width);
+                LaneChangeData candidate;
+                const bool chosen=prepareCorridorLattice(
+                    candidate,LaneChangeConfig{},PlanningBehaviorConfig{},w,
+                    map,m,nullptr,nullptr,false,nullptr);
+                require(chosen==(width<3.5),
+                        "lattice target/surface eligibility ignored configured ego width");
+            }
+            std::cout<<"configured lattice vehicle width PASS\n";
+            return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--observed-global-replan") {
             auto map=fixture();auto m=mission();auto w=world(10.);
             m.topologyAuthority=true;m.checkpoints.resize(2);

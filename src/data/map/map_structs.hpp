@@ -67,6 +67,9 @@ struct Road {
     std::vector<Polynomial> laneOffsets;
     std::vector<LaneSection> sections;
     RoadLink predecessor; RoadLink successor;
+    // Appended to preserve existing Road aggregate initializers. Empty means
+    // elevation is unknown, not a road at world z=0.
+    std::vector<Polynomial> elevations;
 };
 
 // XODR <road><objects><object> 하나.

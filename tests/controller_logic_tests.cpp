@@ -11,6 +11,7 @@
 #include "planning/global/mission_corridor.hpp"
 #include "planning/planning_process.hpp"
 #include "planning/local/lane_change_planner.hpp"
+#include "planning/local/corridor_lattice.hpp"
 #include "planning/local/path_planner.hpp"
 #include "utils/geometry.hpp"
 #include "utils/math_utils.hpp"
@@ -2753,9 +2754,97 @@ void testM11DisplacedEgoStillGetsContinuousLocalPath() {
     }
 }
 
+void testSafeAvoidanceSuccessorAndPhysicalStopLine() {
+    auto map=makeStraightTwoLaneMap();
+    WorldState world;
+    world.ego.x=10.;world.ego.y=-5.25;world.ego.heading=0.;
+    world.egoRoadId=1;world.egoSectionIndex=0;world.egoLaneId=-2;
+    world.egoRoadS=world.egoPathS=10.;world.egoSpeed=2.;
+    world.egoLaneWidth=3.5;world.egoLaneValid=world.egoPathValid=true;
+    world.frontBumperOffset=3.8;
+    world.egoObb=makeObb2D(11.3725,-5.25,0.,4.855,1.88);
+    PathPlannerData safe;
+    for(int x=0;x<=80;++x) {
+        Waypoint p;p.x=x;p.y=-5.25;p.s=p.roadS=x;
+        p.roadId=1;p.sectionIndex=0;p.laneId=-2;
+        safe.waypoints.push_back(p);
+    }
+    auto occupiedReturn=safe.waypoints;
+    for(auto& p:occupiedReturn) {
+        p.y+=3.5*std::clamp((p.x-10.)/20.,0.,1.);
+        if(p.x>10. && p.x<30.) p.yaw=std::atan2(3.5,20.);
+        if(p.x>=30.) p.laneId=-1;
+    }
+    WorldObjectState object;
+    object.raw.id=7;object.raw.x=45.;object.raw.y=-1.75;
+    object.raw.length=4.;object.raw.width=2.;object.obb=makeObjectObb(object.raw);
+    world.objects.push_back(object);
+    PlanningBehaviorConfig behavior;
+    assert(corridorTrackingPathIsSafe(safe.waypoints,world,.3,nullptr,&behavior,&map));
+    assert(!corridorTrackingPathIsSafe(occupiedReturn,world,.3,nullptr,&behavior,&map));
+    LaneChangeConfig config;
+    LaneChangeData state;state.phase=LaneChangePhase::Settle;
+    state.obstacleId=7;state.path=safe.waypoints;
+    // The triggering actor is still ahead on another lane: no unconditional
+    // overtaking/body-alignment gate is added. Only safe successor readiness.
+    advanceLaneChangePhase(state,config,world,config.settleTime+1.,
+                           false,true,true,nullptr,false);
+    assert(state.phase==LaneChangePhase::Settle && !state.path.empty());
+    advanceLaneChangePhase(state,config,world,.05,false,true,true,nullptr,true);
+    assert(state.phase==LaneChangePhase::None);
+    StopLine line;line.id=99;line.roadId=1;
+    line.begin={60.,0.};line.end={60.,-7.};line.routeS=-1000.;
+    map.staticZones.stopLines.push_back(line);
+    const auto deadline=laneAlignmentBeforeStopLine(world,map,safe,2.5,70.);
+    assert(deadline.stopLineId==99);
+    assert(std::abs(deadline.maximumCompletionDistance-43.7)<1e-6);
+    map.staticZones.stopLines[0].roadId=2;
+    assert(!std::isfinite(laneAlignmentBeforeStopLine(world,map,safe,2.5,70.)
+                              .maximumCompletionDistance));
+    map.staticZones.stopLines[0].roadId=1;
+    world.ego.x=61.;world.egoRoadS=world.egoPathS=61.;
+    world.egoObb=makeObb2D(62.3725,-5.25,0.,4.855,1.88);
+    assert(!std::isfinite(laneAlignmentBeforeStopLine(world,map,safe,2.5,70.)
+                              .maximumCompletionDistance));
+
+    // A final selected-path speed cap must beat the progress floor while
+    // preserving tracking geometry. Clearing the body releases it next frame.
+    PlanningProcessData planning;
+    planning.pathPlanner=safe;
+    world.ego.x=10.;world.egoRoadS=world.egoPathS=10.;world.inputValid=true;
+    world.egoObb=makeObb2D(11.3725,-5.25,0.,4.855,1.88);
+    map.staticZones.stopLines.clear();
+    world.objects.clear();
+    object.raw.x=17.;object.raw.y=-3.5;object.raw.width=8.;
+    object.raw.length=4.;object.raw.height=1.5;object.obb=makeObjectObb(object.raw);
+    world.objects.push_back(object);
+    GtFrame gt;gt.ego=world.ego;
+    runPlanningProcess(planning,gt,world,map,.05);
+    assert(planning.result.valid && planning.result.localPath.valid);
+    if(planning.result.targetSpeed!=0.) {
+        int blocker=-1;
+        std::cerr<<"selected-path guard speed="<<planning.result.targetSpeed
+                 <<" free="<<corridorStationaryFreeDistance(planning.result.localPath.points,
+                     world,.3,&map,&blocker)<<" blocker="<<blocker
+                 <<" stop_margin="<<planning.config.stopSafetyMargin
+                 <<" path_y="<<planning.result.localPath.points.front().y<<'\n';
+    }
+    assert(planning.result.targetSpeed==0.);
+    assert(planning.result.stopReason==StopReason::StationaryPathBlocked);
+    assert(!planning.result.emergencyBrake);
+    world.objects.clear();
+    runPlanningProcess(planning,gt,world,map,.05);
+    assert(planning.result.valid && planning.result.targetSpeed>0.);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+    if(argc==2 && std::string(argv[1])=="--safe-tail-stopline") {
+        testSafeAvoidanceSuccessorAndPhysicalStopLine();
+        std::cout<<"safe avoidance successor / physical stop-line deadline PASS\n";
+        return 0;
+    }
     if(argc==2 && std::string(argv[1])=="--dense-static-speed") {
         PlanningBehaviorConfig config;BehaviorState state;BehaviorDecision output;
         WorldState world;world.egoSpeed=15.0/3.6;

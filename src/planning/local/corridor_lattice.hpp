@@ -7,6 +7,7 @@
 
 struct DecisionTraceData;
 struct CorridorGlobalRouteWorker;
+struct CorridorLocalRouteWorker;
 struct CorridorEdge {
     std::int64_t to{-1};
     double distance{};
@@ -16,6 +17,15 @@ struct CorridorEdge {
 struct CorridorRuntime {
     PrecomputedLaneNetwork network;
     std::vector<std::vector<CorridorEdge>> forward, reverse;
+    // Additional medium/long legal lane-change edges for obstacle-aware A*.
+    // Keep the established gateway/tracking policy graph unchanged.
+    std::vector<std::vector<CorridorEdge>> globalLateral;
+    std::vector<std::array<CorridorEdge,4>> globalInLaneShift;
+    std::vector<bool> ordinaryRoadPoint;
+    // Bounded, obstacle-aware overlap beyond the current exit. This is not
+    // the next intersection and never advances actual mission progress.
+    std::vector<bool> globalSearchAllowed,globalSearchGoal;
+    bool globalExitPreviewActive{};
     std::vector<double> gatewayCost;
     // Deterministic shortest-path policy to the active gateway.  This is the
     // corridor-wide global route: it is computed once when the mission leg is
@@ -34,12 +44,23 @@ struct CorridorRuntime {
     std::size_t committedGlobalPathLeg{static_cast<std::size_t>(-1)};
     std::size_t committedGlobalPathProgress{};
     bool committedGlobalPathReachesGateway{};
+    bool committedGlobalPathHasExitPreview{};
+    std::vector<Waypoint> pendingGatewayHandoffPath;
+    // Geometry availability is not a collision approval. A blocked route
+    // remains available as a local-planning reference, but must not replace
+    // a safe avoidance trajectory in the controller.
+    bool trackingPathApproved{};
+    int trackingPathBlockingObject{-1};
+    double trackingPathValidatedClearance{-1.};
     // Short physical C2 bridge from the measured post-manoeuvre pose back to
     // sampled XODR lanes.  It is cached because rebuilding the same 80 m
     // bridge in every 20 Hz frame is both unnecessary and too expensive.
     std::vector<Waypoint> recoveryTrackingPath;
     std::size_t recoveryTrackingPathLeg{static_cast<std::size_t>(-1)};
     std::size_t recoveryTrackingPathProgress{};
+    // A certified tight-gap avoidance tail keeps its checked clearance;
+    // recaching must not silently inflate it to the ordinary comfort margin.
+    double recoveryTrackingPathClearance{-1.};
     // True when this bridge ends on a caller-supplied map-derived mission
     // reference, rather than merely on the nearest physical driving lane.
     bool recoveryTrackingPathReachesReference{};
@@ -51,6 +72,19 @@ struct CorridorRuntime {
     bool referenceRecoveryFailureValid{};
     double referenceRecoveryFailureRoadS{};
     double referenceRecoveryRetryAfter{};
+    // Negative cache only for the expensive measured-pose -> committed
+    // global-route bridge. It never certifies a path or suppresses collision
+    // checks. Changes to the route, pose or received scene invalidate it.
+    struct ReconnectFailure {
+        bool valid{};
+        std::size_t leg{}, progress{}, pointCount{};
+        std::uint64_t routeRevision{}, requestRevision{};
+        LaneKey lane;
+        double x{}, y{}, z{}, yaw{}, speed{}, curvature{}, horizon{}, failedAt{};
+        double clearance{}, maneuverSpeed{};
+        VehicleFootprint2D footprint;
+        std::vector<std::array<double,20>> observations;
+    } committedReconnectFailure;
     // A failed full-corridor search is retried when the physical lane or the
     // stationary-object set changes, not in every 20 Hz frame.  The current
     // path remains available to the local avoidance planner meanwhile.
@@ -58,6 +92,17 @@ struct CorridorRuntime {
     bool globalRouteReplanRequested{};
     std::uint64_t globalRouteRequestRevision{};
     std::shared_ptr<CorridorGlobalRouteWorker> globalRouteWorker;
+    // Independent bounded local job. These flags do not approve any path;
+    // the caller must keep ordinary safety and traffic checks active.
+    std::shared_ptr<CorridorLocalRouteWorker> localRouteWorker;
+    bool localFallbackPending{};
+    bool localFallbackEngaged{};
+    bool localFallbackContinuationRequested{};
+    std::size_t localFallbackLeg{static_cast<std::size_t>(-1)};
+    std::uint64_t localFallbackEpoch{}, localFallbackSignature{};
+    std::chrono::steady_clock::time_point localFallbackRetryAt;
+    double localFallbackLastX{},localFallbackLastY{};
+    bool localFallbackIssued{};
     LaneKey globalRouteFailureLane;
     std::size_t globalRouteFailureStaticCount{};
     std::uint64_t globalRouteFailureStaticSignature{};
@@ -108,6 +153,37 @@ void beginCorridorSearchFrame(CorridorRuntime& runtime);
 // ready. Used after avoidance has reached its target lane.
 void requestCorridorGlobalReplan(CorridorRuntime& runtime);
 
+// Returns only a currently attached, fully checked local replacement. False
+// never clears the active trajectory; Pending/Engaged report worker state.
+bool prepareLocalCorridorFallback(
+    LaneChangeData& replacement,const LaneChangeConfig& config,
+    const PlanningBehaviorConfig& safety,const WorldState& world,
+    const PathGeneratorData& map,const MissionCorridorData& mission,
+    const std::vector<Waypoint>& reference,DecisionTraceData* trace);
+
+// Revalidate the unconsumed, physically attached suffix using the measured
+// body, all received stationary boxes and predicted moving actors. No
+// semantic size filter is applied. Known other road decks are excluded using
+// candidate-road elevation, never the current Ego altitude. This is required
+// before releasing a completed avoidance onto another tracking path.
+bool corridorTrackingPathIsSafe(
+    const std::vector<Waypoint>& path,const WorldState& world,double margin,
+    int* blockerId=nullptr,
+    const PlanningBehaviorConfig* behaviorConfig=nullptr,
+    const PathGeneratorData* map=nullptr);
+bool corridorObstacleAtPathLevel(const PathGeneratorData& map,
+                                const Waypoint& point,
+                                const WorldObjectState& object);
+double corridorStationaryFreeDistance(
+    const std::vector<Waypoint>& path,const WorldState& world,double margin,
+    const PathGeneratorData* map=nullptr,int* blockerId=nullptr);
+// Keep a safe avoidance continuation while its gateway replacement is being
+// rebuilt. A blocked/consumed/detached trajectory is never cached as safe.
+bool retainCorridorAvoidanceTail(
+    const PathGeneratorData& map,const MissionCorridorData& mission,
+    const WorldState& world,const std::vector<Waypoint>& path,
+    DecisionTraceData* trace=nullptr,double validatedClearance=-1.);
+
 bool initializeCorridorRuntime(PathGeneratorData& map,const std::string& directory,
                               const LaneChangeConfig& config,std::string* error);
 bool initializeCorridorRuntime(PathGeneratorData& map,PrecomputedLaneNetwork network,
@@ -140,4 +216,5 @@ bool prepareCorridorLattice(LaneChangeData& state,const LaneChangeConfig& config
                            const std::vector<int>* confirmed,double* blockerDistance,
                            bool gatewayOnly,DecisionTraceData* trace,
                            const PathPlannerData* activeReference=nullptr,
-                           bool activeReferenceIsMissionGuide=false);
+                           bool activeReferenceIsMissionGuide=false,
+                           const LaneAlignmentContext* alignment=nullptr);

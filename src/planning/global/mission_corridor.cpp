@@ -862,12 +862,85 @@ bool initializeMissionCorridor(MissionCorridorData& output,
 
 bool missionPointIsTarget(const MissionLegData& leg, const Waypoint& point) {
     const LaneKey key{point.roadId, point.sectionIndex, point.laneId};
+    if(leg.topologyAuthority && !leg.finalLeg) {
+        // An intersection exit checkpoint identifies a directed road, not a
+        // mandatory lane centre. A safe parallel lane on that same permitted
+        // exit road completes the gateway too; other turns/roads do not.
+        if(key.laneId==0 || !leg.allowedLanes.count(key) ||
+           !std::isfinite(point.roadS)) return false;
+        for(const auto& target:leg.targetLanes) {
+            if(target.roadId!=key.roadId || target.laneId==0 ||
+               (target.laneId>0)!=(key.laneId>0)) continue;
+            const auto station=leg.targetRoadS.find(target);
+            if(station==leg.targetRoadS.end() || !std::isfinite(station->second)) continue;
+            if(key.laneId<0 ? point.roadS>=station->second-.25
+                            : point.roadS<=station->second+.25) return true;
+        }
+        return false;
+    }
     if (!leg.targetLanes.count(key)) return false;
     const auto station = leg.targetRoadS.find(key);
     if (station == leg.targetRoadS.end()) return !leg.topologyAuthority;
     if (!std::isfinite(point.roadS)) return false;
     return key.laneId < 0 ? point.roadS >= station->second - .25
                           : point.roadS <= station->second + .25;
+}
+
+namespace {
+bool sameDirectedExitRoad(const MissionLegData& leg,const LaneKey& lane) {
+    return lane.laneId!=0 && std::any_of(leg.targetLanes.begin(),leg.targetLanes.end(),
+        [&](const LaneKey& target) {
+            return target.roadId==lane.roadId && target.laneId!=0 &&
+                   (target.laneId>0)==(lane.laneId>0);
+        });
+}
+
+void expandSameExitGatewayLanes(MissionLegData& leg,const MissionLegData& nextLeg,
+                                const PathGeneratorData& map) {
+    if(leg.finalLeg || !leg.topologyAuthority) return;
+    const auto declaredGateways=leg.gatewayLanes;
+    const auto isExit=[&](const LaneKey& lane) {
+        return sameDirectedExitRoad(leg,lane) &&
+               (leg.allowedLanes.count(lane)||leg.targetLanes.count(lane)) &&
+               nextLeg.allowedLanes.count(lane) &&
+               nextLeg.routesToTargetByLane.count(lane);
+    };
+    for(const auto& [candidate,segment]:map.laneSegments) {
+        (void)segment;
+        const bool sameConnector=std::any_of(declaredGateways.begin(),declaredGateways.end(),
+            [&](const LaneKey& gateway) {
+                return candidate.roadId==gateway.roadId && candidate.laneId!=0 &&
+                       (candidate.laneId>0)==(gateway.laneId>0);
+            });
+        if(!sameConnector || !isDrivingLane(map,candidate) ||
+           leg.gatewayLanes.count(candidate)) continue;
+        // Surface-only experiment spans are deliberately not routing lanes.
+        if(std::any_of(leg.surfaceOnlySpans.begin(),leg.surfaceOnlySpans.end(),
+                       [&](const auto& span){return span.lane==candidate;})) continue;
+        std::queue<LaneKey> pending;std::set<LaneKey> visited{candidate};
+        pending.push(candidate);bool reachesExit=false;
+        while(!pending.empty() && !reachesExit) {
+            const auto current=pending.front();pending.pop();
+            if(isExit(current)) {reachesExit=true;break;}
+            const auto edges=map.laneGraph.find(current);
+            if(edges==map.laneGraph.end()) continue;
+            for(const auto& next:edges->second) {
+                if(isLateralEdge(current,next) || !isDrivingLane(map,next) ||
+                   !map.laneSegments.count(next)) continue;
+                if(!isExit(next) && (next.roadId!=candidate.roadId ||
+                   (next.laneId>0)!=(candidate.laneId>0))) continue;
+                if(visited.insert(next).second) pending.push(next);
+            }
+        }
+        if(reachesExit) {
+            // This is topological permission only. A zero-width taper may
+            // need a precomputed split before the actual body can use it;
+            // runtime surface/road-mark/collision checks remain authoritative.
+            leg.allowedLanes.insert(candidate);
+            leg.gatewayLanes.insert(candidate);
+        }
+    }
+}
 }
 
 bool loadPrecomputedMission(MissionCorridorData& output,
@@ -947,6 +1020,55 @@ bool loadPrecomputedMission(MissionCorridorData& output,
             }
             if (leg.targetLanes.empty() || (!leg.finalLeg && leg.gatewayLanes.empty()))
                 throw std::runtime_error("missing actual gateway lanes");
+            if (const auto spans = record.get_child_optional("surface_only_spans")) {
+                leg.surfaceOnlyTrial = record.get<std::string>("surface_only_trial");
+                if (leg.surfaceOnlyTrial != "m12-g1-exit-apron" || loaded.legs.size() != 0)
+                    throw std::runtime_error("unsupported surface-only mission experiment");
+                std::set<LaneKey> seenSpans;
+                for (const auto& row : *spans) {
+                    MissionLaneSurfaceSpan span;
+                    span.lane = key(row.second.get_child("lane"));
+                    span.outgoingLane = key(row.second.get_child("outgoing_lane"));
+                    span.roadSMin = row.second.get<double>("road_s_min");
+                    span.roadSMax = row.second.get<double>("road_s_max");
+                    const auto& source = map.laneSegments.at(span.lane);
+                    const auto& exit = map.laneSegments.at(span.outgoingLane);
+                    const int junction = map.roads.at(span.lane.roadId).junction;
+                    const auto edges = map.laneGraph.find(span.lane);
+                    const bool sameExit = std::any_of(leg.targetLanes.begin(), leg.targetLanes.end(),
+                        [&](const LaneKey& target) {
+                            return target.roadId == span.outgoingLane.roadId &&
+                                   target.sectionIndex == span.outgoingLane.sectionIndex &&
+                                   (target.laneId > 0) == (span.outgoingLane.laneId > 0);
+                        });
+                    const bool sameJunction = std::any_of(leg.gatewayLanes.begin(), leg.gatewayLanes.end(),
+                        [&](const LaneKey& gateway) { return map.roads.at(gateway.roadId).junction == junction; });
+                    const double terminal = span.lane.laneId < 0 ? source.endS : source.startS;
+                    const double spanTerminal = span.lane.laneId < 0 ? span.roadSMax : span.roadSMin;
+                    if (!seenSpans.insert(span.lane).second || leg.allowedLanes.count(span.lane) ||
+                        !leg.allowedLanes.count(span.outgoingLane) || junction < 0 || !sameJunction ||
+                        !sameExit || map.roads.at(span.outgoingLane.roadId).junction >= 0 ||
+                        !std::isfinite(span.roadSMin) || !std::isfinite(span.roadSMax) ||
+                        span.roadSMin < source.startS-1e-3 || span.roadSMax > source.endS+1e-3 ||
+                        span.roadSMax <= span.roadSMin || span.roadSMax-span.roadSMin > 20. ||
+                        std::abs(terminal-spanTerminal) > 1e-3 || source.points.empty() || exit.points.empty() ||
+                        edges == map.laneGraph.end() ||
+                        std::find(edges->second.begin(), edges->second.end(), span.outgoingLane) == edges->second.end())
+                        throw std::runtime_error("surface apron is not a bounded same-exit XODR interface");
+                    const auto& end = source.points.back();
+                    const auto& begin = exit.points.front();
+                    if (std::hypot(end.x-begin.x, end.y-begin.y) > .1)
+                        throw std::runtime_error("surface apron endpoint is disconnected");
+                    for (const auto& point : source.points) {
+                        if (point.roadS < span.roadSMin || point.roadS > span.roadSMax) continue;
+                        if (std::abs(normalizeAngle(point.yaw-begin.yaw)) > .349065851)
+                            throw std::runtime_error("surface apron includes an incompatible direction");
+                    }
+                    leg.surfaceOnlySpans.push_back(span);
+                }
+                if (leg.surfaceOnlySpans.empty())
+                    throw std::runtime_error("empty surface-only mission experiment");
+            }
             for (const auto& row : record.get_child("witness_route")) {
                 const auto k = key(row.second);
                 if (!leg.allowedLanes.count(k)) throw std::runtime_error("witness leaves corridor");
@@ -975,6 +1097,19 @@ bool loadPrecomputedMission(MissionCorridorData& output,
         if (loaded.legs.empty() || !loaded.legs.back().finalLeg ||
             loaded.legs.back().toCheckpoint+1 != loaded.checkpoints.size())
             throw std::runtime_error("mission does not reach finish");
+        // Preserve the artifact's original acceptance checks. Only newly
+        // admitted lanes of the same gateway connector need the additional
+        // proof that their longitudinal exit continues into the next leg.
+        for(std::size_t index=0;index+1<loaded.legs.size();++index) {
+            auto& leg=loaded.legs[index];
+            expandSameExitGatewayLanes(leg,loaded.legs[index+1],map);
+            for(const auto& lane:leg.gatewayLanes) {
+                if(leg.routesToTargetByLane.count(lane)) continue;
+                std::vector<LaneKey> route;
+                if(findRestrictedRoute(map,leg.allowedLanes,leg.targetLanes,lane,route))
+                    leg.routesToTargetByLane.emplace(lane,std::move(route));
+            }
+        }
         loaded.initialized = loaded.valid = loaded.topologyAuthority = true;
         loaded.minimumTargetDistance = kInfinity;
         output = std::move(loaded);

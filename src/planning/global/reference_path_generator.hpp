@@ -18,6 +18,19 @@ bool loadCheckpointsCsv(PathGeneratorData& data, const std::string& csvPath);
 bool loadMap(PathGeneratorData& data, const std::string& xodrPath,
              double sampleInterval = 0.5);
 
+// Candidate-local road reference elevation. False leaves z unchanged when the
+// road/profile/station is unknown or invalid; never assume missing z is zero.
+// This is longitudinal elevation only, not lateral banking/superelevation.
+bool sampleRoadElevation(double& z, const PathGeneratorData& data,
+                         int roadId, double roadS);
+bool sampleRoadElevation(double& z, const Road& road, double roadS);
+// Conservative when elevation/metadata are unavailable. The comparison is
+// against the candidate road surface, never the current Ego elevation.
+bool roadPointSharesObjectLevel(const PathGeneratorData& data,
+                               const Waypoint& point, double objectX,
+                               double objectY, double objectZ,
+                               double maximumVerticalSeparation = 3.0);
+
 // VTD 월드 좌표 (x, y)를 가장 가까운 road/lane에 매칭한다.
 LaneMatch worldToLane(
     const PathGeneratorData& data,

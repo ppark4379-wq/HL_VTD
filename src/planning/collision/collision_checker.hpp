@@ -29,7 +29,9 @@ void resetPathSafety(PathSafetyResult& output);
 void checkCurrentCollisions(PathSafetyResult& output,
                             const Obb2D& egoObb,
                             const std::vector<WorldObjectState>& objects,
-                            int excludeObjectId = -1);
+                            int excludeObjectId = -1,
+                            const WorldState* world = nullptr,
+                            const PathGeneratorData* map = nullptr);
 
 // 현재 차선 전방 객체들의 TTC 중 최솟값을 기록한다.
 // Read : objects
@@ -37,7 +39,9 @@ void checkCurrentCollisions(PathSafetyResult& output,
 void updateMinimumTTC(PathSafetyResult& output,
                       const std::vector<WorldObjectState>& objects,
                       bool ignoreStaticObjects = false,
-                      int ignoredObjectId = -1);
+                      int ignoredObjectId = -1,
+                      const LocalPathData* path = nullptr,
+                      const PathGeneratorData* map = nullptr);
 
 // Ego가 지역경로를 따라 주행한다고 가정하고 미래 OBB 충돌을 검사한다.
 // 직선 등속 예측을 쓰면 곡선에서 반대 차선 차량과 가짜 충돌이 발생하므로
@@ -49,7 +53,8 @@ void checkPredictedCollisions(PathSafetyResult& output,
                               const LocalPathData& localPath,
                               double horizon,
                               double step,
-                              bool checkAllObjects = false);
+                              bool checkAllObjects = false,
+                              const PathGeneratorData* map = nullptr);
 
 // 현재 충돌이거나 충돌/TTC가 비상제동 임계 이내일 때만 true.
 // 차선 복귀 후보가 멀리서 막힌 사실은 복귀 속도를 낮추거나

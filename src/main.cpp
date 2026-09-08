@@ -24,6 +24,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -60,6 +61,7 @@ const char* stopReasonName(StopReason reason) {
         case StopReason::FlashingRed: return "flashing_red";
         case StopReason::Pedestrian: return "pedestrian";
         case StopReason::CrosswalkBlocked: return "crosswalk_blocked";
+        case StopReason::StationaryPathBlocked: return "stationary_path_blocked";
     }
     return "multiple";
 }
@@ -501,8 +503,28 @@ int main(int argc, char* argv[]) {
         const auto logStartTime = LogClock::now();
         std::size_t frameCount = 0;
         std::size_t reportedDroppedGtFrames = 0;
+        std::ofstream timingLog;
+        std::size_t timingDroppedGtFrames = 0;
+        if (options.decision_logging) {
+            const auto timingPath = options.decision_log_path.parent_path() / "timing.csv";
+            timingLog.open(timingPath);
+            if (!timingLog) throw std::runtime_error("Cannot open timing log: " + timingPath.string());
+            timingLog << "frame,loop_wall_start_s,sim_time_s,dt_s,world_ms,"
+                         "planning_ms,control_ms,visualization_ms,send_wall_s,"
+                         "send_done_wall_s,send_ms,loop_total_ms,"
+                         "dropped_gt_frames,dropped_gt_frames_total\n";
+            timingLog << std::fixed << std::setprecision(9);
+            std::cout << "[timing-log] output: " << timingPath << '\n';
+        }
+        const auto timingNow = [&]() {
+            return options.decision_logging ? LogClock::now() : LogClock::time_point{};
+        };
+        const auto timingMilliseconds = [](const auto& begin, const auto& end) {
+            return std::chrono::duration<double, std::milli>(end - begin).count();
+        };
 
         while (receiveGtFrame(receiver)) {
+            const auto loopStart = timingNow();
             const GtFrame& gt = getLatestGtFrame(receiver);
             if (!isRdbClockConnected(rdbClock) &&
                 frameCount >= nextRdbConnectionAttemptFrame) {
@@ -557,22 +579,29 @@ int main(int argc, char* argv[]) {
                 std::cout << "[network] ego speed now uses VTD simulation time\n";
                 simulationClockAnnounced = true;
             }
+            const auto worldStart = timingNow();
             runWorldProcess(world, gt, getLatestGtReceiveTime(receiver), clock.dt,
                             mapData, planning.pathPlanner.waypoints, vehicle,
                             &planning.missionCorridor);
+            const auto worldEnd = timingNow();
             runPlanningProcess(planning, gt, world.state, mapData, clock.dt,
                                trace);
+            const auto planningEnd = timingNow();
             runControlProcess(control, world.state, planning.result, clock.dt);
+            const auto controlEnd = timingNow();
 
             if (options.visualization_logging) {
                 writeVisualizationFrame(
                     visualization, frameCount, elapsedWallTime,
                     world.state, planning, control, trace);
             }
+            const auto visualizationEnd = timingNow();
 
+            const auto sendStart = timingNow();
             if (!options.receive_only) {
                 sendControlCommand(receiver.client, control.safeCommand);
             }
+            const auto sendEnd = timingNow();
 
             if (options.logging) {
                 const LogFrameInput logInput{
@@ -586,6 +615,29 @@ int main(int argc, char* argv[]) {
                 if (options.debug_objects) {
                     printWorldObjectStates(world.state);
                 }
+            }
+            if (options.decision_logging) {
+                const auto loopEnd = timingNow();
+                timingLog << frameCount << ','
+                          << std::chrono::duration<double>(loopStart - logStartTime).count() << ',';
+                if (simulationTime) timingLog << *simulationTime;
+                timingLog << ',' << clock.dt << ','
+                          << timingMilliseconds(worldStart, worldEnd) << ','
+                          << timingMilliseconds(worldEnd, planningEnd) << ','
+                          << timingMilliseconds(planningEnd, controlEnd) << ','
+                          << timingMilliseconds(controlEnd, visualizationEnd) << ',';
+                if (!options.receive_only) {
+                    timingLog << std::chrono::duration<double>(sendStart - logStartTime).count() << ','
+                              << std::chrono::duration<double>(sendEnd - logStartTime).count() << ','
+                              << timingMilliseconds(sendStart, sendEnd);
+                } else {
+                    timingLog << ",,";
+                }
+                // Buffered output, no per-frame flush; no operation reordering.
+                timingLog << ',' << timingMilliseconds(loopStart, loopEnd) << ','
+                          << receiver.droppedFrames - timingDroppedGtFrames << ','
+                          << receiver.droppedFrames << '\n';
+                timingDroppedGtFrames = receiver.droppedFrames;
             }
             ++frameCount;
 

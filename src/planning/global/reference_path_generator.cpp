@@ -72,6 +72,59 @@ double evaluatePiecewise(const std::vector<Polynomial>& polynomials, double s,
            selected->a;
 }
 
+bool sampleRoadElevation(double& z, const Road& road, double roadS) {
+    if (road.elevations.empty() || !std::isfinite(roadS) ||
+        !std::isfinite(road.length) || road.length < 0. ||
+        roadS < -1e-6 || roadS > road.length+1e-6) return false;
+    const double station = std::clamp(roadS, 0., road.length);
+    auto next = std::upper_bound(road.elevations.begin(), road.elevations.end(), station,
+        [](double s, const Polynomial& polynomial) { return s < polynomial.s; });
+    if (next == road.elevations.begin()) return false;
+    const auto& polynomial = *--next;
+    const double ds = station-polynomial.s;
+    const double value = ((polynomial.d*ds+polynomial.c)*ds+polynomial.b)*ds+polynomial.a;
+    if (!std::isfinite(value)) return false;
+    z = value;
+    return true;
+}
+
+bool sampleRoadElevation(double& z, const PathGeneratorData& data,
+                         int roadId, double roadS) {
+    const auto road = data.roads.find(roadId);
+    return road != data.roads.end() && sampleRoadElevation(z, road->second, roadS);
+}
+
+bool roadPointSharesObjectLevel(const PathGeneratorData& data,
+                               const Waypoint& point, double objectX,
+                               double objectY, double objectZ,
+                               double maximumVerticalSeparation) {
+    if(!std::isfinite(objectX) || !std::isfinite(objectY) ||
+       !std::isfinite(objectZ) || !std::isfinite(point.roadS) ||
+       maximumVerticalSeparation<=0.) return true;
+    const auto found=data.roads.find(point.roadId);
+    if(found==data.roads.end() || found->second.geometries.empty()) return true;
+    const auto& road=found->second;
+    double station=point.roadS;
+    double elevation{};
+    if(!sampleRoadElevation(elevation,road,station)) return true;
+    // Establish the object's CURRENT deck on the candidate road at its
+    // observed XY. Comparing current object z to FUTURE Ego z would discard
+    // moving actors on a steep continuous grade. Unknown/far projections are
+    // conservatively included, never rematched to another overlapping road.
+    for(int iteration=0;iteration<3;++iteration) {
+        const auto reference=roadToWorld(road,station);
+        const double dx=objectX-reference.x,dy=objectY-reference.y;
+        const double along=dx*std::cos(reference.yaw)+dy*std::sin(reference.yaw);
+        if(std::abs(along)<.25) break;
+        if(std::abs(along)>15.) return true; // uncertain road metadata
+        const double next=station+along;
+        if(next<0. || next>road.length) return true;
+        station=next;
+    }
+    if(!sampleRoadElevation(elevation,road,station)) return true;
+    return std::abs(objectZ-elevation)<=maximumVerticalSeparation;
+}
+
 // geometry 시작점에서 ds만큼 진행한 road 기준선의 월드 x/y/yaw를 계산한다.
 // geometry.x/y 자체가 VTD 월드 좌표이므로 반환값도 VTD 월드 좌표다.
 RoadPose evaluateGeometry(const Geometry& geometry, double ds) {
@@ -686,6 +739,7 @@ void parseRoads(PathGeneratorData& data, const XmlElement& root) {
             road.length = readAttribute<double>(node, "length", 0.0);
             parseRoadLinks(node, road);
             parseGeometries(node, road);
+            parseRoadElevations(node, road);
             parseLanes(node, road);
             parseRoadObjects(data, node, road);
             parseRoadSignals(data, node, road);

@@ -206,7 +206,7 @@ class HLVtdRvizBridge(Node):
                 markers.append(
                     self.line_marker(layer, points, 0.20, (1.0, 1.0, 1.0, 0.85))
                 )
-            elif layer == "corridor":
+            elif layer in {"corridor", "corridor_surface_only"}:
                 markers.append(
                     self.line_marker(layer, points, 2.8, (1.0, 0.80, 0.0, 0.13))
                 )

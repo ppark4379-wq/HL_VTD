@@ -207,6 +207,8 @@ struct PlanningProcessData {
     StopManagerData stopManager;
     LaneChangeData laneChange;
     LaneChangeConfig laneChangeConfig;
+    // Keep the local worker's speed contract across a cached-tail handoff;
+    // finishing the manoeuvre alone is not proof of a safe global rejoin.
     // 움직이던 차량이 정지하면 짧은 확인 후 정적 회피 대상으로
     // 전환하기 위한 ID별 이력이다. 사라진 ID는 다음 프레임에 제거된다.
     std::vector<StationaryObjectState> stationaryObjects;

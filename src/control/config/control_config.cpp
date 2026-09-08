@@ -2,6 +2,7 @@
 
 #include "utils/csv_utils.hpp"
 
+#include <cmath>
 #include <fstream>
 #include <map>
 
@@ -68,6 +69,9 @@ bool setSpeedConfigValue(const std::map<std::string, double>& values,
 }
 
 bool isDrivingConfigValid(const DrivingConfig& config) {
+    const auto positiveFinite = [](double value) {
+        return std::isfinite(value) && value > 0.0;
+    };
     return config.planner.sharpCurveThreshold >
                config.planner.curveThreshold &&
            config.planner.sharpCurveSpeed > 0.0 &&
@@ -117,6 +121,16 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.laneChange.obstacleMandatoryAvoidanceDistance > 0.0 &&
            config.laneChange.obstacleMandatoryAvoidanceDistance <=
                config.laneChange.obstacleTriggerMaximumDistance &&
+           positiveFinite(config.laneChange.localFallbackActivationDistance) &&
+           positiveFinite(config.laneChange.localFallbackTimeHeadway) &&
+           positiveFinite(config.laneChange.localFallbackHorizon) &&
+           positiveFinite(config.laneChange.localFallbackRetryInterval) &&
+           positiveFinite(config.laneChange.localFallbackSearchBudgetMs) &&
+           positiveFinite(config.laneChange.localFallbackSpeed) &&
+           config.laneChange.localFallbackActivationDistance <=
+               config.laneChange.localFallbackHorizon &&
+           config.laneChange.localFallbackSearchBudgetMs <=
+               1000.0 * config.laneChange.localFallbackRetryInterval &&
            config.laneChange.stoppedDynamicConfirmationTime >= 0.0 &&
            config.laneChange.roadConnectionPrepareDistance > 0.0 &&
            config.laneChange.transitionLength > 0.0 &&
@@ -264,6 +278,19 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.crosswalkPedestrianPrediction) &&
         setConfigValue(values, "planning.signal_stop_search_distance",
                        config.behavior.signalStopSearchDistance) &&
+        setOptionalConfigValue(values, "planning.local_fallback_activation_distance",
+                       config.laneChange.localFallbackActivationDistance) &&
+        setOptionalConfigValue(values, "planning.local_fallback_time_headway",
+                       config.laneChange.localFallbackTimeHeadway) &&
+        setOptionalConfigValue(values, "planning.local_fallback_horizon",
+                       config.laneChange.localFallbackHorizon) &&
+        setOptionalConfigValue(values, "planning.local_fallback_retry_interval",
+                       config.laneChange.localFallbackRetryInterval) &&
+        setOptionalConfigValue(values, "planning.local_fallback_search_budget_ms",
+                       config.laneChange.localFallbackSearchBudgetMs) &&
+        (values.count("planning.local_fallback_speed_kph") == 0 ||
+         setSpeedConfigValue(values, "planning.local_fallback_speed_kph",
+                       config.laneChange.localFallbackSpeed)) &&
         setConfigValue(values, "lane_change.obstacle_trigger_minimum_distance",
                        config.laneChange.obstacleTriggerMinimumDistance) &&
         setConfigValue(values, "lane_change.obstacle_trigger_maximum_distance",

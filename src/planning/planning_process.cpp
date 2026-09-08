@@ -671,7 +671,8 @@ bool evaluateLaneChangeCandidate(PathSafetyResult& safety,
                                  const LaneChangeData& laneChange,
                                  const WorldState& world,
                                  const PlanningBehaviorConfig& config,
-                                 double minimumPredictionSpeed) {
+                                 double minimumPredictionSpeed,
+                                 const PathGeneratorData& map) {
     LocalPathData candidate;
     makeLaneChangeLocalPath(candidate, laneChange);
     resetPathSafety(safety);
@@ -682,7 +683,8 @@ bool evaluateLaneChangeCandidate(PathSafetyResult& safety,
     // 취소하지 못하도록, 안전 재검사는 현재 횡이동 완료점 뒤 2 m까지만
     // 수행한다. committed path는 자르지 않으며 다음 장애물은 안착 직전의
     // 원자적 재계획이 담당한다.
-    if (laneChange.routeMode == LaneChangeRouteMode::KeepTargetLane &&
+    if (!laneChange.localCorridorAvoidance &&
+        laneChange.routeMode == LaneChangeRouteMode::KeepTargetLane &&
         candidate.points.size() >= 3) {
         const auto end = std::upper_bound(
             candidate.points.begin(), candidate.points.end(),
@@ -705,7 +707,7 @@ bool evaluateLaneChangeCandidate(PathSafetyResult& safety,
     const double fullManeuverHorizon =
         remainingLength / predictionWorld.egoSpeed +
         config.collisionPredictionStep;
-    checkCurrentCollisions(safety, world.egoObb, world.objects);
+    checkCurrentCollisions(safety, world.egoObb, world.objects,-1,&world,&map);
     if (safety.collision) return false;
 
     // 등속 예측을 수십 초까지 늘리면 움직이는 차량이 먼 미래에도 같은
@@ -722,7 +724,7 @@ bool evaluateLaneChangeCandidate(PathSafetyResult& safety,
         dynamicWorld.objects.end());
     checkPredictedCollisions(safety, dynamicWorld, candidate,
                              config.collisionPredictionHorizon,
-                             config.collisionPredictionStep);
+                             config.collisionPredictionStep,false,&map);
     if (safety.predictedCollision) return false;
 
     WorldState staticWorld = predictionWorld;
@@ -736,7 +738,7 @@ bool evaluateLaneChangeCandidate(PathSafetyResult& safety,
     checkPredictedCollisions(safety, staticWorld, candidate,
                              std::max(config.collisionPredictionHorizon,
                                       fullManeuverHorizon),
-                             config.collisionPredictionStep, true);
+                             config.collisionPredictionStep, true,&map);
     return !safety.collision && !safety.predictedCollision;
 }
 
@@ -1234,7 +1236,7 @@ void runPlanningProcess(PlanningProcessData& data,
                           "reason=no_replacement_may_not_stop");
         }
     }
-    const bool corridorTrackingPathValid =
+    bool corridorTrackingPathValid =
         roadLanePathValid || storedCorridorContinuityPathValid ||
         referenceRecoveryPathValid || physicalMobilityFallbackPathValid;
 
@@ -1388,6 +1390,10 @@ void runPlanningProcess(PlanningProcessData& data,
                : (missionActive &&
                   (corridorTrackingPathValid || guideContinuityPathValid)
                       ? tracking.nearestIndex : nearestGlobalIndex));
+    const auto laneAlignment=laneAlignmentBeforeStopLine(
+        sensedWorld,map,maneuverReference,data.config.stopSafetyMargin,
+        std::max(data.laneChangeConfig.obstacleTriggerMaximumDistance,
+                 data.laneChangeConfig.roadConnectionPrepareDistance));
     data.frame.constraints.mapMatchValid = world.inputValid;
     bool schoolZoneActive = false;
     bool crosswalkControlActive = false;
@@ -1403,17 +1409,92 @@ void runPlanningProcess(PlanningProcessData& data,
     // 추종하면 정지선에서 바로 크게 조향한다.
     updateStopRequests(data, sensedWorld, map.staticZones, dt, trace);
 
+    // A blocked whole-corridor route is not a reason to wait until the final
+    // stationary speed guard fires. Poll the bounded local worker before
+    // legacy one-shift planning; adoption is transactional and revalidates
+    // the measured pose and current scene. Signal/pedestrian requests above
+    // still gate execution below, including while a local job is running.
+    if (missionActive && map.corridorRuntime) {
+        map.corridorRuntime->localFallbackContinuationRequested =
+            data.laneChange.phase != LaneChangePhase::None &&
+            data.laneChange.localCorridorAvoidance &&
+            !data.laneChange.path.empty() &&
+            data.laneChange.path.back().s-world.egoPathS <
+                std::max(data.laneChangeConfig.localFallbackActivationDistance,
+                         std::abs(world.egoSpeed)*
+                    data.laneChangeConfig.localFallbackTimeHeadway+8.0);
+        LaneChangeData localReplacement;
+        // A tight but validated detour must not be reclassified as blocked
+        // using the nominal global margin on every frame. Keep it until its
+        // own clearance becomes unsafe or the rolling horizon needs renewal.
+        // Pending jobs are still polled so no asynchronous result is stranded.
+        bool retainSafeLocal = false;
+        if (data.laneChange.phase != LaneChangePhase::None &&
+            data.laneChange.localCorridorAvoidance &&
+            !map.corridorRuntime->localFallbackContinuationRequested &&
+            !map.corridorRuntime->localFallbackPending) {
+            PathSafetyResult localSafety;
+            retainSafeLocal = evaluateLaneChangeCandidate(
+                localSafety, data.laneChange, world, data.config,
+                std::max(std::abs(world.egoSpeed),
+                         data.laneChangeConfig.localFallbackSpeed), map);
+            const double localClearance = data.laneChange.validatedObstacleClearance >= 0.
+                ? data.laneChange.validatedObstacleClearance
+                : data.laneChangeConfig.latticeObstacleClearance;
+            retainSafeLocal = retainSafeLocal && std::isinf(
+                corridorStationaryFreeDistance(data.laneChange.path, world,
+                                               localClearance, &map));
+            if (retainSafeLocal) map.corridorRuntime->localFallbackEngaged = false;
+        }
+        if (!retainSafeLocal && prepareLocalCorridorFallback(
+                localReplacement, data.laneChangeConfig, data.config, world,
+                map, data.missionCorridor, maneuverReference.waypoints, trace)) {
+            WorldState replacementWorld = world;
+            if (projectWorldToActivePath(replacementWorld, localReplacement.path,
+                                         sensedWorld.frontBumperOffset)) {
+                world = std::move(replacementWorld);
+                data.laneChange = std::move(localReplacement);
+                traceDecision(trace, "lane_change", "local_fallback_adopted",
+                              "static_safe_multistage_path_replaces_reference_atomically=1");
+            } else {
+                traceDecision(trace, "lane_change", "local_fallback_not_attached",
+                              "previous_trajectory_retained=1");
+            }
+        }
+    }
+    bool localPathUnsafe = false;
+    if (data.laneChange.phase != LaneChangePhase::None &&
+        data.laneChange.localCorridorAvoidance) {
+        PathSafetyResult risk;
+        localPathUnsafe = !evaluateLaneChangeCandidate(risk, data.laneChange, world, data.config,
+                std::max(std::abs(world.egoSpeed),
+                         data.laneChangeConfig.localFallbackSpeed), map);
+        const double clearance = data.laneChange.validatedObstacleClearance >= 0.
+            ? data.laneChange.validatedObstacleClearance
+            : data.laneChangeConfig.latticeObstacleClearance;
+        localPathUnsafe = localPathUnsafe || !std::isinf(corridorStationaryFreeDistance(
+            data.laneChange.path, world, clearance, &map));
+    }
+    // Only an actually adopted, safe local path owns the manoeuvre. Merely
+    // searching (or failing) must NEVER suppress the existing local planner.
+    // This applies to static blockers as well as unexpected moving objects.
+    const bool localFallbackOwnsPlanning = !localPathUnsafe &&
+        data.laneChange.phase != LaneChangePhase::None &&
+        data.laneChange.localCorridorAvoidance;
+
     double pendingBlockerDistance = -1.0;
     bool mandatoryCommittedAvoidance = false;
-    if (data.laneChange.phase != LaneChangePhase::None && map.corridorRuntime) {
+    if (!localFallbackOwnsPlanning &&
+        data.laneChange.phase != LaneChangePhase::None && map.corridorRuntime) {
+        const auto footprint=vehicleFootprintFromObb(world.egoObb,
+            {world.ego.x,world.ego.y,world.ego.heading});
         for (const auto& point : data.laneChange.path) {
             const double ahead = point.s - world.egoPathS;
             if (ahead < 0.0) continue;
             if (ahead > data.laneChangeConfig.obstacleMandatoryAvoidanceDistance) break;
-            const auto box = makeObb2D(
-                point.x + 1.3725 * std::cos(point.yaw),
-                point.y + 1.3725 * std::sin(point.yaw), point.yaw, 4.855, 1.88);
+            const auto box=vehicleFootprintAt(footprint,{point.x,point.y,point.yaw});
             for (const auto& object : world.objects) {
+                if(!corridorObstacleAtPathLevel(map,point,object)) continue;
                 if (std::find(confirmedStationaryObjectIds.begin(),
                               confirmedStationaryObjectIds.end(), int(object.raw.id)) ==
                     confirmedStationaryObjectIds.end()) continue;
@@ -1433,7 +1514,7 @@ void runPlanningProcess(PlanningProcessData& data,
                 replacement, data.laneChangeConfig, data.config, world, map,
                 maneuverReference, nearestManeuverIndex, nullptr,
                 &confirmedStationaryObjectIds, trace, &data.missionCorridor,
-                maneuverReferenceIsMissionGuide);
+                maneuverReferenceIsMissionGuide,&laneAlignment);
             traceDecision(trace, "lane_change", "mandatory_avoidance_replan",
                           ready ? "replacement_ready=1" : "replacement_ready=0 retry_required=1");
             if (ready) data.laneChange = std::move(replacement);
@@ -1454,7 +1535,8 @@ void runPlanningProcess(PlanningProcessData& data,
     // 중심에 안착했으면 다음 Gateway 단계를 즉시 계획해
     // committed path를 원자적으로 이어 간다. 이 조건은 road/lane
     // ID를 특정하지 않고 모든 corridor leg에 동일하게 적용된다.
-    if (data.laneChange.phase != LaneChangePhase::None &&
+    if (!localFallbackOwnsPlanning &&
+        data.laneChange.phase != LaneChangePhase::None &&
         !data.missionCorridor.topologyAuthority &&
         data.laneChange.shiftCompletedLaneValid &&
         !mandatoryCommittedAvoidance &&
@@ -1470,7 +1552,7 @@ void runPlanningProcess(PlanningProcessData& data,
         const bool gatewayReady = tryPrepareRoadConnectionLaneChange(
                 chainedGateway, data.laneChangeConfig, data.config,
                 world, map, maneuverReference, nearestManeuverIndex,
-                trace, &data.missionCorridor);
+                trace, &data.missionCorridor,&laneAlignment);
         // Gateway 후보 자체가 전체 기동과 settling tail의 장애물
         // 여유를 통과해야 한다. 따라서 회피 기동 도중이라도 목표
         // 차선 중심에 안착했고 안전한 Gateway 단계가 있으면 방향과
@@ -1488,14 +1570,15 @@ void runPlanningProcess(PlanningProcessData& data,
     // 좌우 후보가 뒤집히고 결국 추종할 지역경로까지 사라진다. 현재 차가
     // 차로 중심에 안착한 경우에만 별도 상태에서 새 후보를 만들고, 안전한
     // 후보 생성이 성공했을 때 원자적으로 교체한다.
-    if ((data.laneChange.phase == LaneChangePhase::Prepare ||
+    if (!localFallbackOwnsPlanning &&
+        (data.laneChange.phase == LaneChangePhase::Prepare ||
          data.laneChange.phase == LaneChangePhase::Execute ||
          data.laneChange.phase == LaneChangePhase::Settle) &&
         map.corridorRuntime) {
         PathSafetyResult activeSafety;
         const bool activePathSafe = evaluateLaneChangeCandidate(
             activeSafety, data.laneChange, world, data.config,
-            data.laneChangeConfig.maximumLaneChangeSpeed);
+            data.laneChangeConfig.maximumLaneChangeSpeed,map);
         const bool staticRisk = activeSafety.riskObjectId >= 0 &&
             std::any_of(world.objects.begin(), world.objects.end(),
                         [&](const WorldObjectState& object) {
@@ -1583,7 +1666,7 @@ void runPlanningProcess(PlanningProcessData& data,
                 &replacementBlockerDistance,
                 &confirmedStationaryObjectIds, trace,
                 &data.missionCorridor,
-                maneuverReferenceIsMissionGuide);
+                maneuverReferenceIsMissionGuide,&laneAlignment);
             detail << " replacement_ready=" << replacementReady;
             traceDecision(trace, "lane_change",
                           replacementReady
@@ -1598,24 +1681,27 @@ void runPlanningProcess(PlanningProcessData& data,
     }
     // 먼 신호 정지 요청보다 현재 도로의 장애물 회피를 먼저 계획한다.
     // 아래에서 경로 종점이 정지선을 침범할 때만 실행을 막는다.
-    tryPrepareObstacleLaneChange(
-        data.laneChange, data.laneChangeConfig, data.config, world, map,
-        maneuverReference, nearestManeuverIndex, &pendingBlockerDistance,
-        &confirmedStationaryObjectIds, trace, &data.missionCorridor,
-        maneuverReferenceIsMissionGuide);
+    if (!localFallbackOwnsPlanning) {
+        tryPrepareObstacleLaneChange(
+            data.laneChange, data.laneChangeConfig, data.config, world, map,
+            maneuverReference, nearestManeuverIndex, &pendingBlockerDistance,
+            &confirmedStationaryObjectIds, trace, &data.missionCorridor,
+            maneuverReferenceIsMissionGuide,&laneAlignment);
+    }
     // 아직 확정 기동이 없을 때는 눈앞 장애물 후보를 먼저 검색한다.
     // 장애물이 mandatory 거리 밖이면 안전 검증된 gateway 정렬도
     // 계속 허용한다. 멀리 보이는 장애물 하나가 분기 진입을 막아
     // 버리는 것을 방지하고, 15 m 안에서는 회피 실패를 다른 경로로
     // 덮지 않는다.
-    if (data.laneChange.phase == LaneChangePhase::None &&
+    if (!localFallbackOwnsPlanning &&
+        data.laneChange.phase == LaneChangePhase::None &&
         (pendingBlockerDistance < 0.0 ||
          pendingBlockerDistance >
              data.laneChangeConfig.obstacleMandatoryAvoidanceDistance)) {
         tryPrepareRoadConnectionLaneChange(
             data.laneChange, data.laneChangeConfig, data.config, world,
             map, maneuverReference, nearestManeuverIndex, trace,
-            &data.missionCorridor);
+            &data.missionCorridor,&laneAlignment);
     }
     // gateway target/path는 한 번 선택하면 정지나 감속 중에도 고정한다.
     // Pure Pursuit가 실행 시점의 최근접점을 다시 찾으므로 prepare 동안
@@ -1628,7 +1714,7 @@ void runPlanningProcess(PlanningProcessData& data,
                   data.stopManager, data.laneChange.rejoinRouteS);
 
     const auto successorPlannerAttachedToEgo =
-        [&](const PathPlannerData& planner) {
+        [&](const PathPlannerData& planner,double clearance) {
             if (planner.waypoints.size() < 2) return false;
             WorldState projected = sensedWorld;
             if (!projectWorldToActivePath(
@@ -1644,15 +1730,53 @@ void runPlanningProcess(PlanningProcessData& data,
                 });
             const Waypoint& pose = nearest == planner.waypoints.end()
                 ? planner.waypoints.back() : *nearest;
-            return std::abs(projected.egoPathD) <= 1.25 &&
+            return planner.waypoints.back().s-projected.egoPathS>=5. &&
+                std::abs(projected.egoPathD) <= 1.25 &&
                 std::abs(normalizeAngle(
-                    pose.yaw - sensedWorld.ego.heading)) <= 0.8;
+                    pose.yaw - sensedWorld.ego.heading)) <= 0.8 &&
+                corridorTrackingPathIsSafe(planner.waypoints,sensedWorld,
+                    clearance,nullptr,&data.config,&map);
         };
-    const bool successorPathReady =
-        (corridorTrackingPathValid &&
-         successorPlannerAttachedToEgo(data.roadLanePlanner)) ||
-        (guideContinuityPathValid &&
-         successorPlannerAttachedToEgo(data.pathPlanner));
+    const bool needSuccessorCheck=data.laneChange.phase!=LaneChangePhase::None &&
+        (data.laneChange.phase==LaneChangePhase::Prepare ||
+         data.laneChange.phase==LaneChangePhase::Settle ||
+         successorActivePathFallbackUsed ||
+         world.egoPathS>=data.laneChange.rejoinRouteS-1.);
+    // Validate the exact successor selected below, not a different safe
+    // guide while an unsafe corridor path still owns tracking.
+    bool successorPathReady=needSuccessorCheck &&
+        (corridorTrackingPathValid
+            ?successorPlannerAttachedToEgo(data.roadLanePlanner,
+                data.laneChangeConfig.latticeObstacleClearance)
+            :(guideContinuityPathValid &&
+              successorPlannerAttachedToEgo(data.pathPlanner,
+                data.laneChangeConfig.latticeObstacleClearance)));
+    if(needSuccessorCheck && !successorPathReady &&
+       !data.laneChange.roadConnectionManeuver && map.corridorRuntime &&
+       (data.laneChange.phase==LaneChangePhase::Settle ||
+        world.egoPathS>=data.laneChange.rejoinRouteS-1.)) {
+        PathPlannerData tail;
+        tail.config=data.pathPlanner.config;
+        tail.waypoints=data.laneChange.path;
+        tail.nearestIndex=data.laneChange.nearestIndex;
+        const double clearance=data.laneChange.validatedObstacleClearance>=0.
+            ?data.laneChange.validatedObstacleClearance
+            :data.laneChangeConfig.latticeObstacleClearance;
+        if(successorPlannerAttachedToEgo(tail,clearance) &&
+           retainCorridorAvoidanceTail(map,data.missionCorridor,sensedWorld,
+                                      tail.waypoints,trace,clearance)) {
+            data.roadLanePlanner=std::move(tail);
+            stampRoadLanePlannerMissionLeg();
+            tracking=runPurePursuit(data.roadLanePlanner,gt,sensedWorld.egoSpeed);
+            corridorTrackingPathValid=tracking.valid;
+            successorPathReady=tracking.valid;
+            map.corridorRuntime->trackingPathApproved=tracking.valid;
+            map.corridorRuntime->trackingPathValidatedClearance=
+                tracking.valid?clearance:-1.;
+            traceDecision(trace,"lane_change","safe_avoidance_tail_handoff",
+                          "unsafe_successor_not_selected=1");
+        }
+    }
     if (data.missionCorridor.topologyAuthority && map.corridorRuntime &&
         data.laneChange.phase != LaneChangePhase::None &&
         !data.laneChange.roadConnectionManeuver &&
@@ -1698,7 +1822,10 @@ void runPlanningProcess(PlanningProcessData& data,
         data.laneChange.phase == LaneChangePhase::None ||
         evaluateLaneChangeCandidate(
             maneuverSpeedSafety, data.laneChange, world, data.config,
-            data.laneChangeConfig.maximumLaneChangeSpeed);
+            data.laneChange.localCorridorAvoidance
+                ? std::max(std::abs(world.egoSpeed),
+                           data.laneChangeConfig.localFallbackSpeed)
+                : data.laneChangeConfig.maximumLaneChangeSpeed,map);
     if (data.laneChange.phase != LaneChangePhase::None && trace != nullptr &&
         trace->enabled) {
         std::ostringstream detail;
@@ -1716,6 +1843,7 @@ void runPlanningProcess(PlanningProcessData& data,
     const bool maneuverObstacleStillConfirmed =
         data.laneChange.phase == LaneChangePhase::None ||
         data.laneChange.roadConnectionManeuver ||
+        data.laneChange.localCorridorAvoidance ||
         std::any_of(world.objects.begin(), world.objects.end(),
                     [&](const WorldObjectState& object) {
                         return static_cast<int>(object.raw.id) ==
@@ -1738,7 +1866,7 @@ void runPlanningProcess(PlanningProcessData& data,
 
     if (successorActivePathFallbackUsed &&
         !committedActivePathProjectionValid &&
-        data.laneChange.phase != LaneChangePhase::None) {
+        data.laneChange.phase != LaneChangePhase::None && successorPathReady) {
         // Complete the transactional hand-off in the state machine too.  On
         // the next frame normal gateway/obstacle planning may commit a new
         // manoeuvre from the measured successor lane; the stale path can no
@@ -1768,15 +1896,25 @@ void runPlanningProcess(PlanningProcessData& data,
     // 경로 공백이 생긴다. 후보 경로에는 prepare 시간 동안
     // 직진할 prefix가 이미 포함되어 있으므로 전 상태에서
     // 같은 경로를 지속 추종한다.
+    double selectedPathClearance=data.laneChangeConfig.latticeObstacleClearance;
+    const auto corridorClearance=[&] {
+        return corridorTrackingPathValid && map.corridorRuntime &&
+               map.corridorRuntime->trackingPathApproved &&
+               map.corridorRuntime->trackingPathValidatedClearance>=0.
+            ?map.corridorRuntime->trackingPathValidatedClearance
+            :data.laneChangeConfig.latticeObstacleClearance;
+    };
     if (data.laneChange.phase != LaneChangePhase::None) {
         const PathPlan successorTracking = tracking;
         PathPlan maneuverTracking = trackLaneChangePath(
             data.laneChange, data.pathPlanner.config, gt, world.egoSpeed);
-        const bool useSuccessorTracking = successorTracking.valid &&
+        const bool useSuccessorTracking = successorTracking.valid && successorPathReady &&
             (!maneuverTracking.valid || successorActivePathFallbackUsed);
         if (!useSuccessorTracking) {
             tracking = maneuverTracking;
             makeLaneChangeLocalPath(data.frame.localPath, data.laneChange);
+            if(data.laneChange.validatedObstacleClearance>=0.)
+                selectedPathClearance=data.laneChange.validatedObstacleClearance;
         } else {
             tracking = successorTracking;
             const PathPlannerData& selectedPlanner = corridorTrackingPathValid
@@ -1784,6 +1922,7 @@ void runPlanningProcess(PlanningProcessData& data,
             generateLocalPath(data.frame.localPath, selectedPlanner,
                               tracking.nearestIndex,
                               data.config.localPathHorizon);
+            selectedPathClearance=corridorClearance();
             traceDecision(trace, "road_corridor",
                           "exhausted_maneuver_tracking_handoff",
                           "reason=settle_path_finished successor_tracking_valid=1");
@@ -1794,6 +1933,7 @@ void runPlanningProcess(PlanningProcessData& data,
         generateLocalPath(data.frame.localPath, selectedPlanner,
                           tracking.nearestIndex,
                           data.config.localPathHorizon);
+        selectedPathClearance=corridorClearance();
     }
     // The competition checkpoints are approximate road anchors, not points
     // that Ego must touch.  Nevertheless every paired gateway denotes an
@@ -1948,19 +2088,57 @@ void runPlanningProcess(PlanningProcessData& data,
         }
     }
 
+    // No pending-search or sticky post-manoeuvre speed latch. Slow only
+    // while actually executing the new local detour or its certified tight tail.
+    if ((data.laneChange.localCorridorAvoidance &&
+         data.laneChange.phase != LaneChangePhase::None) ||
+        (selectedPathClearance >= 0.0 && selectedPathClearance + 1e-6 <
+             data.laneChangeConfig.latticeObstacleClearance)) {
+        data.frame.behavior.targetSpeed = std::min(
+            data.frame.behavior.targetSpeed,
+            data.laneChangeConfig.localFallbackSpeed);
+    }
+
+    // A stored trajectory may remain useful for replanning even when a new
+    // stationary body blocks it. Minimum-progress rules must not authorize
+    // driving through that body. Check the actual selected path and its
+    // certified clearance after all speed floors; retain its geometry.
+    int stationaryBlocker=-1;
+    const double freeDistance=data.frame.localPath.valid
+        ?corridorStationaryFreeDistance(data.frame.localPath.points,world,
+            selectedPathClearance,&map,&stationaryBlocker)
+        :std::numeric_limits<double>::infinity();
+    bool stationaryPathStop=false;
+    if(stationaryBlocker>=0 && std::isfinite(freeDistance)) {
+        const double usable=std::max(0.,freeDistance-data.config.stopSafetyMargin-
+            std::max(0.,world.egoSpeed)*data.config.emergencyReactionTime);
+        const double cap=std::sqrt(2.*data.config.comfortableDeceleration*usable);
+        data.frame.behavior.targetSpeed=std::min(data.frame.behavior.targetSpeed,cap);
+        stationaryPathStop=cap<=0.05;
+        if(!data.frame.stop.valid)
+            data.frame.behavior.longitudinal=stationaryPathStop?LonMode::Stop:LonMode::Follow;
+        if(map.corridorRuntime && !map.corridorRuntime->globalRouteReplanRequested)
+            requestCorridorGlobalReplan(*map.corridorRuntime);
+        std::ostringstream detail;
+        detail<<"object="<<stationaryBlocker<<" free_distance="<<freeDistance
+              <<" speed_cap="<<cap<<" clearance="<<selectedPathClearance
+              <<" geometry_retained=1 replan_required=1";
+        traceDecision(trace,"planning","selected_path_stationary_clearance_limit",detail.str());
+    }
+
     // 미래 충돌검사가 선택된 지역경로를 사용한다.
     resetPathSafety(data.frame.pathSafety);
     checkCurrentCollisions(data.frame.pathSafety, world.egoObb,
-                           world.objects);
+                           world.objects,-1,&world,&map);
     updateMinimumTTC(data.frame.pathSafety, world.objects,
                      safelyAvoidingObstacle,
                      safelyAvoidingObstacle
                          ? data.laneChange.obstacleId
-                         : -1);
+                         : -1,&data.frame.localPath,&map);
     checkPredictedCollisions(data.frame.pathSafety, world,
                              data.frame.localPath,
                              data.config.collisionPredictionHorizon,
-                             data.config.collisionPredictionStep);
+                             data.config.collisionPredictionStep,false,&map);
     // 비상제동은 급정거·끼어들기 같은 동적 위험과 현재 실제
     // 충돌에만 적용한다. 앞에 멈춰 있는 정적 장애물의 미래
     // 충돌은 속도 0 명령으로 해결할 대상이 아니라 차선회피 대상이다.
@@ -1975,13 +2153,14 @@ void runPlanningProcess(PlanningProcessData& data,
     PathSafetyResult dynamicEmergencySafety;
     resetPathSafety(dynamicEmergencySafety);
     checkCurrentCollisions(dynamicEmergencySafety, world.egoObb,
-                           dynamicEmergencyWorld.objects);
+                           dynamicEmergencyWorld.objects,-1,&world,&map);
     updateMinimumTTC(dynamicEmergencySafety,
-                     dynamicEmergencyWorld.objects, false);
+                     dynamicEmergencyWorld.objects, false,-1,
+                     &data.frame.localPath,&map);
     checkPredictedCollisions(dynamicEmergencySafety, dynamicEmergencyWorld,
                              data.frame.localPath,
                              data.config.collisionPredictionHorizon,
-                             data.config.collisionPredictionStep);
+                             data.config.collisionPredictionStep,false,&map);
     // 복귀 경로가 멀리서 막혀 있을 때는 검증된 저속 복귀를 하거나
     // 위의 대기 지점 속도로 감속한다. 충돌 예측이 있다는
     // 사실만으로 즉시 -4 m/s^2를 명령하지 않고, 현재 충돌이거나
@@ -2097,7 +2276,8 @@ void runPlanningProcess(PlanningProcessData& data,
     data.result.valid = tracking.valid && world.inputValid;
     data.result.goalReached = tracking.goalReached;
     data.result.targetSpeed = tracking.targetSpeed;
-    data.result.stopReason = data.frame.stop.reason;
+    data.result.stopReason = !data.frame.stop.valid && stationaryPathStop
+        ?StopReason::StationaryPathBlocked:data.frame.stop.reason;
     data.result.longitudinal = data.frame.behavior.longitudinal;
     data.result.health = data.frame.behavior.health;
     data.result.trackingPlan = tracking;

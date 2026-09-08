@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <memory>
 
 // ROS에 의존하지 않는 RViz 중계용 출력기다. 주행 프로세스는 정적 지도
 // CSV와 최신 프레임 JSON만 쓰고, tools/visualization/rviz_bridge.py가 이를
@@ -17,6 +18,7 @@ struct VisualizationLoggerData {
     std::filesystem::path outputDirectory;
     std::filesystem::path staticMapPath;
     std::filesystem::path latestFramePath;
+    std::weak_ptr<CorridorRuntime> corridorRuntime;
 };
 
 void initializeVisualizationLogger(

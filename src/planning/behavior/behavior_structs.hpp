@@ -48,6 +48,7 @@ enum class StopReason : std::uint32_t {
     FlashingRed = 1U << 1,
     Pedestrian = 1U << 2,
     CrosswalkBlocked = 1U << 4,
+    StationaryPathBlocked = 1U << 5,
 };
 
 // 황색신호는 매 프레임 판단이 뒤집히면 안 되므로 한 번 정한 결과를 고정한다.

@@ -30,7 +30,8 @@ bool tryPrepareRoadConnectionLaneChange(
     const PathPlannerData& globalPath,
     std::size_t nearestGlobalIndex,
     DecisionTraceData* trace = nullptr,
-    const MissionCorridorData* mission = nullptr);
+    const MissionCorridorData* mission = nullptr,
+    const LaneAlignmentContext* alignment = nullptr);
 
 // pendingBlockerDistance가 non-null이면, 이번 프레임에 확인된 정지 장애물의
 // relativeS를 채운다(없으면 -1). 차선변경 후보를 아직 못 찾았어도(반환값이
@@ -47,7 +48,12 @@ bool tryPrepareObstacleLaneChange(
     const std::vector<int>* confirmedStationaryObjectIds = nullptr,
     DecisionTraceData* trace = nullptr,
     const MissionCorridorData* mission = nullptr,
-    bool activeReferenceIsMissionGuide = false);
+    bool activeReferenceIsMissionGuide = false,
+    const LaneAlignmentContext* alignment = nullptr);
+
+LaneAlignmentContext laneAlignmentBeforeStopLine(
+    const WorldState& world,const PathGeneratorData& map,
+    const PathPlannerData& reference,double stopMargin,double searchDistance);
 
 void advanceLaneChangePhase(LaneChangeData& state,
                             const LaneChangeConfig& config,

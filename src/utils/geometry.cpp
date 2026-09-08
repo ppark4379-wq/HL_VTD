@@ -98,6 +98,33 @@ Obb2D makeObb2D(double centerX, double centerY, double heading,
     return result;
 }
 
+VehicleFootprint2D vehicleFootprintFromObb(const Obb2D& body,
+                                         const Pose2D& reference) {
+    VehicleFootprint2D footprint;
+    footprint.width = std::hypot(body.corners[0].x - body.corners[1].x,
+                                 body.corners[0].y - body.corners[1].y);
+    footprint.length = std::hypot(body.corners[1].x - body.corners[2].x,
+                                  body.corners[1].y - body.corners[2].y);
+    Point2D center;
+    for (const auto& corner : body.corners) {
+        center.x += 0.25 * corner.x;
+        center.y += 0.25 * corner.y;
+    }
+    footprint.centerOffset =
+        (center.x - reference.x) * std::cos(reference.heading) +
+        (center.y - reference.y) * std::sin(reference.heading);
+    return footprint;
+}
+
+Obb2D vehicleFootprintAt(const VehicleFootprint2D& footprint,
+                        const Pose2D& reference, double margin) {
+    return makeObb2D(
+        reference.x + footprint.centerOffset * std::cos(reference.heading),
+        reference.y + footprint.centerOffset * std::sin(reference.heading),
+        reference.heading, footprint.length + 2.0 * margin,
+        footprint.width + 2.0 * margin);
+}
+
 bool intersects(const Obb2D& first, const Obb2D& second) {
     const Point2D firstEdge0 = subtract(first.corners[1], first.corners[0]);
     const Point2D firstEdge1 = subtract(first.corners[3], first.corners[0]);

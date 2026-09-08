@@ -18,6 +18,16 @@ struct MissionCheckpointData {
     std::set<LaneKey> lanes;
 };
 
+// A clipped physical junction apron, not permission to follow that connector.
+// Only swept-surface validation may use these stations. Routing, tracking and
+// gateway target masks must continue to use allowedLanes/targetLanes alone.
+struct MissionLaneSurfaceSpan {
+    LaneKey lane;
+    double roadSMin{};
+    double roadSMax{};
+    LaneKey outgoingLane;
+};
+
 // 두 교차로 진출 anchor 사이에서 사용할 수 있는 굵은 회랑.
 // allowedLanes는 최단
 // 연결과 지나치게 우회하지 않는 대안 연결에 포함되는 모든 차선이다.
@@ -46,6 +56,8 @@ struct MissionLegData {
     bool topologyAuthority{};
     bool finalLeg{};
     std::set<LaneKey> gatewayLanes;
+    std::vector<MissionLaneSurfaceSpan> surfaceOnlySpans;
+    std::string surfaceOnlyTrial;
     std::map<LaneKey, double> targetRoadS;
     std::set<LaneKey> allowedLanes;
     std::set<LaneKey> targetLanes;
@@ -83,6 +95,9 @@ bool loadPrecomputedMission(MissionCorridorData& output,
                             std::string* error = nullptr);
 bool exportMissionMap(const PathGeneratorData& map,
                       const std::string& directory);
+// Non-final topology-authoritative exits accept permitted parallel lanes on
+// the same directed exit road after the target road-s station. Final/legacy
+// targets retain exact lane membership. This does not certify a trajectory.
 bool missionPointIsTarget(const MissionLegData& leg, const Waypoint& point);
 
 // CSV checkpoint를 road 구역으로 변환하고, 각 구간의 자유 주행 회랑과

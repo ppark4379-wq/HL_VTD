@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Headless startup adapter for the same XODR network used by the gallery.
 
-No scenario name, route.csv, simulator, or graphics dependency. Checkpoints
-identify road regions; only XODR lane connections define gateway targets.
+Checkpoints identify road regions; only XODR lane connections define gateway
+targets. An explicit M12 first-exit experiment may add clipped physical surface
+spans, never routing edges or targets. No simulator or graphics dependency.
 """
 import argparse
 import csv
@@ -12,6 +13,87 @@ from pathlib import Path
 
 import numpy as np
 from whole_mission_corridors import Network
+
+
+def same_exit_surface_spans(network, leg, candidate_roads, maximum_length=15.,
+                            maximum_heading_error=np.deg2rad(20.)):
+    """Verified terminal apron only; do not extend the leg's routing graph.
+
+    The 15m trial envelope covers the observed ~12m upstream body/prefix
+    rejection, with room for the full vehicle. Actual terminal arc length and
+    direction bound each span; unrelated/crossing connector parts stay out.
+    """
+    if maximum_length <= 0. or not np.isfinite(maximum_length):
+        raise ValueError('Invalid apron length')
+    allowed = set(map(tuple, leg['allowed']))
+    targets = {tuple(t['lane']) for t in leg['targets']}
+    exit_sections = {(k[0], k[1], k[2] > 0) for k in targets}
+    junctions = {network.geometry[tuple(k)]['junction'] for k in leg['gateway_lanes']}
+    spans = []
+    for outgoing in sorted(allowed):
+        if (outgoing[0], outgoing[1], outgoing[2] > 0) not in exit_sections:
+            continue
+        outgoing_geometry = network.geometry[outgoing]
+        if outgoing_geometry['junction'] >= 0:
+            continue
+        outgoing_start = np.asarray(outgoing_geometry['points'])[0]
+        for source in sorted(network.reverse[outgoing]):
+            if source[0] not in candidate_roads or source in allowed:
+                continue
+            geometry = network.geometry[source]
+            if geometry['junction'] < 0 or geometry['junction'] not in junctions:
+                continue
+            points = np.asarray(geometry['points'])
+            if len(points) < 2 or np.linalg.norm(points[-1, :2]-outgoing_start[:2]) > .1:
+                continue
+            heading = np.abs(np.arctan2(np.sin(points[:, 2]-outgoing_start[2]),
+                                       np.cos(points[:, 2]-outgoing_start[2])))
+            if heading[-1] > maximum_heading_error:
+                continue
+            end_station = start_station = float(points[-1, 3])
+            distance = 0.
+            for i in range(len(points)-2, -1, -1):
+                if heading[i] > maximum_heading_error:
+                    break
+                step = float(np.linalg.norm(points[i+1, :2]-points[i, :2]))
+                if distance+step > maximum_length:
+                    fraction = (maximum_length-distance)/step if step else 0.
+                    start_station = float(points[i+1, 3] + fraction*(points[i, 3]-points[i+1, 3]))
+                    distance = maximum_length
+                    break
+                start_station = float(points[i, 3])
+                distance += step
+            if distance < 4.855:
+                continue  # No useful full-body envelope; never fabricate one.
+            spans.append(dict(lane=source, road_s_min=min(start_station, end_station),
+                              road_s_max=max(start_station, end_station),
+                              outgoing_lane=outgoing, arc_length_m=distance,
+                              maximum_heading_error_rad=maximum_heading_error,
+                              provenance='xodr_same_exit_terminal_surface_only'))
+    return spans
+
+
+def apply_surface_trial(network, result, legs, trial=None):
+    if trial is None:
+        return
+    if trial != 'm12-g1-exit-apron':
+        raise ValueError('Unknown surface-only trial')
+    if not legs or set(map(tuple, legs[0]['gateway_lanes'])) != {(2653, 0, -1)} or \
+            {tuple(t['lane']) for t in legs[0]['targets']} != {(2445, 3, 4)}:
+        raise ValueError('M12 G1 surface trial does not match the requested gateway')
+    first = next((g for g in result['legs'] if g.get('declared_gateway_index') == 1), None)
+    if first is None or ((2625, 3, -4), (2653, 0, -1)) not in \
+            {(tuple(a), tuple(b)) for a, b in first['entry_edges']}:
+        raise ValueError('M12 G1 surface trial has a different incoming road')
+    spans = same_exit_surface_spans(network, legs[0], {2659})
+    if {tuple(s['lane']) for s in spans} != {(2659, 0, -1), (2659, 0, -2)}:
+        raise ValueError('M12 G1 same-exit apron interfaces were not validated')
+    legs[0]['surface_only_trial'] = trial
+    legs[0]['surface_only_spans'] = spans
+    result['surface_only_trial'] = dict(name=trial, runtime_leg=0,
+                                       routing_graph_unchanged=True,
+                                       gateway_targets_unchanged=True,
+                                       spans=spans)
 
 
 def runtime_legs(network, result):
@@ -79,6 +161,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--xodr', type=Path)
     parser.add_argument('--point-network', type=Path)
+    parser.add_argument('--surface-trial', choices=['m12-g1-exit-apron'])
     args = parser.parse_args()
     if bool(args.xodr) != bool(args.point_network):
         parser.error('--xodr and --point-network must be provided together')
@@ -98,6 +181,7 @@ def main():
         json.loads((args.geometry / 'lane_graph.json').read_text()))
     result = network.build(dict(checkpoints=checkpoints))
     result['runtime_legs'] = runtime_legs(network, result)
+    apply_surface_trial(network, result, result['runtime_legs'], args.surface_trial)
     result['runtime_schema_version'] = 1
     result['checkpoint_sha256'] = hashlib.sha256(args.checkpoints.read_bytes()).hexdigest()
     result['xodr_sha256'] = source_sha

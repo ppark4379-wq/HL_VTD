@@ -34,6 +34,16 @@ bool preparePrecomputedMission(MissionCorridorData& output,
             "--geometry", dest.string(), "--checkpoints", fs::absolute(checkpoints).string(),
             "--output", artifact.string(), "--xodr", fs::absolute(xodrPath).string(),
             "--point-network", fs::absolute(pointNetworkDirectory).string()};
+        // Explicitly scoped first-junction experiment requested for M12. The
+        // Python adapter also verifies the exact XODR gateway before adding
+        // surface-only spans; other scenarios retain identical route data.
+        const auto trialCheckpoints = fs::path(HL_VTD_SOURCE_DIR) /
+                                      "scenario/mixed/M12/checkpoints.csv";
+        if (fs::weakly_canonical(checkpoints) ==
+            fs::weakly_canonical(trialCheckpoints)) {
+            arguments.insert(arguments.end(),
+                             {"--surface-trial", "m12-g1-exit-apron"});
+        }
         std::cout << "[mission] precomputing checkpoint/XODR network before VTD connection\n" << std::flush;
 #ifndef _WIN32
         // No shell interpolation: spaces, Korean paths and metacharacters in

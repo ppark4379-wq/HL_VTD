@@ -1,11 +1,13 @@
 #include "planning/local/lane_change_planner.hpp"
 #include "planning/local/corridor_lattice.hpp"
+#include "data/gt/gt_processor.hpp"
 
 #include "logger/decision_trace.hpp"
 #include "planning/collision/collision_checker.hpp"
 #include "planning/global/reference_path_generator.hpp"
 #include "planning/local/path_planner.hpp"
 #include "utils/math_utils.hpp"
+#include "utils/geometry.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1898,7 +1900,8 @@ bool candidatePathIsSafe(const std::vector<Waypoint>& points,
                          const PlanningBehaviorConfig& config,
                           const LaneChangeConfig& laneChangeConfig,
                           const WorldState& world,
-                          DecisionTraceData* trace) {
+                          DecisionTraceData* trace,
+                          const PathGeneratorData& map) {
     LocalPathData candidate;
     candidate.valid = points.size() >= 2;
     candidate.points = points;
@@ -1945,7 +1948,7 @@ bool candidatePathIsSafe(const std::vector<Waypoint>& points,
 
     PathSafetyResult safety;
     resetPathSafety(safety);
-    checkCurrentCollisions(safety, world.egoObb, world.objects);
+    checkCurrentCollisions(safety, world.egoObb, world.objects,-1,&world,&map);
     if (!safety.collision) {
         // 정적 장애물은 기동 전체에서 배제해야 하지만, 동적 객체의 등속
         // 예측을 먼 미래까지 늘리면 실제로는 지나갈 차량 때문에 안전한
@@ -1960,7 +1963,7 @@ bool candidatePathIsSafe(const std::vector<Waypoint>& points,
             dynamicWorld.objects.end());
         checkPredictedCollisions(safety, dynamicWorld, candidate,
                                  config.collisionPredictionHorizon,
-                                 config.collisionPredictionStep);
+                                 config.collisionPredictionStep,false,&map);
     }
     if (!safety.collision && !safety.predictedCollision) {
         WorldState staticWorld = predictionWorld;
@@ -1973,7 +1976,7 @@ bool candidatePathIsSafe(const std::vector<Waypoint>& points,
             staticWorld.objects.end());
         checkPredictedCollisions(safety, staticWorld, candidate,
                                  predictionHorizon,
-                                 config.collisionPredictionStep, true);
+                                 config.collisionPredictionStep, true,&map);
     }
     {
         std::ostringstream detail;
@@ -2360,7 +2363,8 @@ bool tryPrepareRoadConnectionLaneChange(
     const PathPlannerData& globalPath,
     std::size_t nearestGlobalIndex,
     DecisionTraceData* trace,
-    const MissionCorridorData* mission) {
+    const MissionCorridorData* mission,
+    const LaneAlignmentContext* alignment) {
     if(map.corridorRuntime && mission && activeMissionLeg(*mission)) {
         const LaneKey current{world.egoRoadId,world.egoSectionIndex,
                               world.egoLaneId};
@@ -2370,7 +2374,7 @@ bool tryPrepareRoadConnectionLaneChange(
         if(guideRequired) return false;
         return prepareCorridorLattice(state,config,safetyConfig,world,map,
                                       *mission,nullptr,nullptr,true,trace,
-                                      &globalPath);
+                                      &globalPath,false,alignment);
     }
     if (state.phase != LaneChangePhase::None || !world.egoLaneValid ||
         !world.egoPathValid) return false;
@@ -2670,7 +2674,7 @@ bool tryPrepareRoadConnectionLaneChange(
                 (missionActive || (reconnectValid && awaitReconnect)) &&
                 candidatePathIsSafe(
                     safetyCandidate.empty() ? candidate : safetyCandidate,
-                    safetyConfig, config, world, trace);
+                    safetyConfig, config, world, trace,map);
             if (safe) {
                 selectedTransitionLength = transitionLength;
                 break;
@@ -2748,7 +2752,8 @@ bool tryPrepareObstacleLaneChange(
     const std::vector<int>* confirmedStationaryObjectIds,
     DecisionTraceData* trace,
     const MissionCorridorData* mission,
-    bool activeReferenceIsMissionGuide) {
+    bool activeReferenceIsMissionGuide,
+    const LaneAlignmentContext* alignment) {
     if(map.corridorRuntime && mission && activeMissionLeg(*mission)) {
         const LaneKey current{world.egoRoadId,world.egoSectionIndex,
                               world.egoLaneId};
@@ -2765,7 +2770,7 @@ bool tryPrepareObstacleLaneChange(
         const bool corridorCandidate = prepareCorridorLattice(
             state,config,safetyConfig,world,map,*mission,
             confirmedStationaryObjectIds,pendingBlockerDistance,false,
-            trace,&globalPath,activeReferenceIsMissionGuide);
+            trace,&globalPath,activeReferenceIsMissionGuide,alignment);
         if(corridorCandidate) return true;
         // The lattice scan is deliberately split across control frames.  Do
         // not start the exhaustive legacy scan while that same all-lane scan
@@ -3194,7 +3199,7 @@ bool tryPrepareObstacleLaneChange(
                               "longitudinal_variant_checked", detail.str());
             }
             const bool safe = candidatePathIsSafe(
-                safetyCandidate, safetyConfig, config, world, trace);
+                safetyCandidate, safetyConfig, config, world, trace,map);
             traceCandidatePath(trace, obstacleTargetKey, candidate,
                                safe ? "viable" : "rejected",
                                safe ? variant.name :
@@ -3345,7 +3350,7 @@ bool tryPrepareObstacleLaneChange(
                 continue;
             }
             const bool safe = candidatePathIsSafe(
-                candidate, safetyConfig, config, world, trace);
+                candidate, safetyConfig, config, world, trace,map);
             traceCandidatePath(trace, obstacleTargetKey, candidate,
                                safe ? "viable" : "rejected",
                                safe ? "return_candidate" :
@@ -3412,6 +3417,50 @@ bool tryPrepareObstacleLaneChange(
     return false;
 }
 
+LaneAlignmentContext laneAlignmentBeforeStopLine(
+    const WorldState& world,const PathGeneratorData& map,
+    const PathPlannerData& reference,double stopMargin,double searchDistance) {
+    LaneAlignmentContext result;
+    if(reference.waypoints.size()<2) return result;
+    WorldState projected=world;
+    if(!projectWorldToActivePath(projected,reference.waypoints,
+                                world.frontBumperOffset)) return result;
+    const auto body=vehicleFootprintFromObb(world.egoObb,
+        {world.ego.x,world.ego.y,world.ego.heading});
+    const auto& path=reference.waypoints;
+    auto begin=std::lower_bound(path.begin(),path.end(),projected.egoPathS,
+        [](const Waypoint& point,double station) {return point.s<station;});
+    std::size_t first=begin==path.begin()?1:std::size_t(begin-path.begin());
+    const auto cross=[](double ax,double ay,double bx,double by) {
+        return ax*by-ay*bx;
+    };
+    for(std::size_t i=first;i<path.size();++i) {
+        const auto& a=path[i-1];const auto& b=path[i];
+        if(a.s-projected.egoPathS>searchDistance) break;
+        for(const auto& line:map.staticZones.stopLines) {
+            // Same XY on another road/deck is not this approach's deadline.
+            if(line.roadId>=0 && line.roadId!=a.roadId && line.roadId!=b.roadId)
+                continue;
+            const double rx=b.x-a.x,ry=b.y-a.y;
+            const double sx=line.end.x-line.begin.x,sy=line.end.y-line.begin.y;
+            const double denominator=cross(rx,ry,sx,sy);
+            if(std::abs(denominator)<1e-9) continue;
+            const double dx=line.begin.x-a.x,dy=line.begin.y-a.y;
+            const double t=cross(dx,dy,sx,sy)/denominator;
+            const double u=cross(dx,dy,rx,ry)/denominator;
+            if(t<0. || t>1. || u<0. || u>1.) continue;
+            const double ahead=a.s+t*(b.s-a.s)-projected.egoPathS;
+            if(ahead<=.05 || ahead>searchDistance) continue;
+            const double deadline=std::max(0.,ahead-body.frontExtent()-stopMargin);
+            if(deadline<result.maximumCompletionDistance) {
+                result.maximumCompletionDistance=deadline;
+                result.stopLineId=line.id;
+            }
+        }
+    }
+    return result;
+}
+
 void advanceLaneChangePhase(LaneChangeData& state,
                             const LaneChangeConfig& config,
                             const WorldState& world,
@@ -3427,7 +3476,7 @@ void advanceLaneChangePhase(LaneChangeData& state,
         // 재출발하면 보관된 경로를 실행하지 않고 취소한다. Execute 진입 후에는
         // 판단을 뒤집지 않고 기동을 완주해 좌우 와리가리를 막는다.
         if (!state.roadConnectionManeuver &&
-            !obstacleStillRequiresManeuver) {
+            !obstacleStillRequiresManeuver && successorPathReady) {
             traceDecision(trace, "lane_change", "phase_transition",
                           "prepare->none reason=blocking_object_moved_or_disappeared");
             resetLaneChange(state);

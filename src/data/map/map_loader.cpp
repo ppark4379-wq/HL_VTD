@@ -1,7 +1,10 @@
 #include "map_loader.hpp"
 
 #include <cctype>
+#include <algorithm>
+#include <cmath>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -130,4 +133,37 @@ XmlElement loadOpenDrive(const std::string& xodrPath) {
 
     if (!root) throw std::runtime_error("OpenDRIVE root not found");
     return *root;
+}
+
+void parseRoadElevations(const XmlElement& roadNode, Road& road) {
+    road.elevations.clear();
+    const auto* profile = findFirstChild(roadNode, "elevationProfile");
+    if (profile == nullptr) return;
+    const double unknown = std::numeric_limits<double>::quiet_NaN();
+    std::vector<Polynomial> records;
+    for (const auto& child : profile->children) {
+        if (child.first != "elevation") continue;
+        const auto& node = child.second;
+        Polynomial polynomial{readAttribute<double>(node, "s", unknown),
+                              readAttribute<double>(node, "a", unknown),
+                              readAttribute<double>(node, "b", unknown),
+                              readAttribute<double>(node, "c", unknown),
+                              readAttribute<double>(node, "d", unknown)};
+        if (!std::isfinite(polynomial.s) || !std::isfinite(polynomial.a) ||
+            !std::isfinite(polynomial.b) || !std::isfinite(polynomial.c) ||
+            !std::isfinite(polynomial.d) || polynomial.s < 0. ||
+            polynomial.s > road.length) {
+            // Do not use the preceding polynomial across a corrupt record.
+            // Keep the prior map-loading behavior but mark z as unknown.
+            return;
+        }
+        records.push_back(polynomial);
+    }
+    std::stable_sort(records.begin(), records.end(),
+                     [](const Polynomial& a, const Polynomial& b) { return a.s < b.s; });
+    for (const auto& record : records) {
+        if (!road.elevations.empty() && road.elevations.back().s == record.s)
+            road.elevations.back() = record;
+        else road.elevations.push_back(record);
+    }
 }

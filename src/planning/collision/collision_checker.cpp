@@ -1,4 +1,5 @@
 #include "planning/collision/collision_checker.hpp"
+#include "planning/global/reference_path_generator.hpp"
 
 #include "utils/geometry.hpp"
 #include "utils/math_utils.hpp"
@@ -30,37 +31,6 @@ constexpr double kRadiusPerSpeed = 5.0;
 constexpr double kRadiusBase = 20.0;
 constexpr double kRadiusMinimum = 40.0;
 constexpr double kRadiusMaximum = 100.0;
-
-struct EgoShape {
-    double length{};
-    double width{};
-    double centerOffset{};  // 후륜축(Ego 좌표)에서 OBB 중심까지의 종방향 거리
-};
-
-double distanceBetween(const Point2D& first, const Point2D& second) {
-    return std::hypot(first.x - second.x, first.y - second.y);
-}
-
-// 현재 프레임의 Ego OBB에서 차량 치수와 중심 오프셋을 역산한다.
-// World process가 만든 OBB를 그대로 쓰므로 vehicle.yaml을 다시 읽지 않는다.
-EgoShape makeEgoShape(const WorldState& world) {
-    EgoShape shape;
-    shape.width = distanceBetween(world.egoObb.corners[0],
-                                  world.egoObb.corners[1]);
-    shape.length = distanceBetween(world.egoObb.corners[1],
-                                   world.egoObb.corners[2]);
-    double centerX = 0.0;
-    double centerY = 0.0;
-    for (const auto& corner : world.egoObb.corners) {
-        centerX += 0.25 * corner.x;
-        centerY += 0.25 * corner.y;
-    }
-    const double offsetX = centerX - static_cast<double>(world.ego.x);
-    const double offsetY = centerY - static_cast<double>(world.ego.y);
-    shape.centerOffset = offsetX * std::cos(world.ego.heading) +
-                         offsetY * std::sin(world.ego.heading);
-    return shape;
-}
 
 // 속도가 빠를수록 넓게 본다. 저속 40 m ~ 고속 100 m.
 double predictionRadius(double egoSpeed) {
@@ -190,10 +160,18 @@ void resetPathSafety(PathSafetyResult& output) {
 void checkCurrentCollisions(PathSafetyResult& output,
                             const Obb2D& egoObb,
                             const std::vector<WorldObjectState>& objects,
-                            int excludeObjectId) {
+                            int excludeObjectId, const WorldState* world,
+                            const PathGeneratorData* map) {
     for (const auto& object : objects) {
         if (static_cast<int>(object.raw.id) == excludeObjectId) continue;
         if (!intersects(egoObb, object.obb)) continue;
+        if(map && world && world->egoLaneValid) {
+            Waypoint point;
+            point.x=world->ego.x;point.y=world->ego.y;
+            point.roadId=world->egoRoadId;point.roadS=world->egoRoadS;
+            if(!roadPointSharesObjectLevel(*map,point,
+                    object.raw.x,object.raw.y,object.raw.z)) continue;
+        }
         output.collision = true;
         output.minimumTTC = 0.0;
         output.riskObjectId = static_cast<int>(object.raw.id);
@@ -204,12 +182,23 @@ void checkCurrentCollisions(PathSafetyResult& output,
 void updateMinimumTTC(PathSafetyResult& output,
                       const std::vector<WorldObjectState>& objects,
                       bool ignoreStaticObjects,
-                      int ignoredObjectId) {
+                      int ignoredObjectId,const LocalPathData* path,
+                      const PathGeneratorData* map) {
     for (const auto& object : objects) {
         if (!object.isAhead || !object.isOnEgoPath) continue;
         if (ignoreStaticObjects && std::abs(object.raw.speed) < 0.3) continue;
         if (static_cast<int>(object.raw.id) == ignoredObjectId) continue;
         if (object.ttc >= output.minimumTTC) continue;
+        if(map && path && !path->points.empty()) {
+            const Waypoint* nearest=nullptr;double best=kInfinity;
+            for(const auto& point:path->points) {
+                const double dx=point.x-object.raw.x,dy=point.y-object.raw.y;
+                const double distance=dx*dx+dy*dy;
+                if(distance<best) {best=distance;nearest=&point;}
+            }
+            if(nearest && !roadPointSharesObjectLevel(*map,*nearest,
+                    object.raw.x,object.raw.y,object.raw.z)) continue;
+        }
         output.minimumTTC = object.ttc;
         output.riskObjectId = static_cast<int>(object.raw.id);
     }
@@ -220,12 +209,13 @@ void checkPredictedCollisions(PathSafetyResult& output,
                               const LocalPathData& localPath,
                               double horizon,
                               double step,
-                              bool checkAllObjects) {
+                              bool checkAllObjects,const PathGeneratorData* map) {
     if (output.collision) return;
     if (!localPath.valid || !world.egoPathValid) return;
     if (step <= 0.0 || horizon <= 0.0) return;
 
-    const EgoShape ego = makeEgoShape(world);
+    const auto ego = vehicleFootprintFromObb(
+        world.egoObb, {world.ego.x, world.ego.y, world.ego.heading});
     const double egoSpeed = std::max(0.0, world.egoSpeed);
     const double radius = predictionRadius(world.egoSpeed);
 
@@ -235,10 +225,7 @@ void checkPredictedCollisions(PathSafetyResult& output,
                           world.egoPathS + egoSpeed * time)) {
             break;  // 지역경로 끝까지 예측했으면 더 볼 필요가 없다.
         }
-        const Obb2D predictedEgo = makeObb2D(
-            egoPose.x + ego.centerOffset * std::cos(egoPose.heading),
-            egoPose.y + ego.centerOffset * std::sin(egoPose.heading),
-            egoPose.heading, ego.length, ego.width);
+        const Obb2D predictedEgo = vehicleFootprintAt(ego, egoPose);
 
         for (const auto& object : world.objects) {
             // 일반 주행은 현재 route corridor/근접 반경으로 계산량과 오탐을
@@ -276,6 +263,15 @@ void checkPredictedCollisions(PathSafetyResult& output,
                 object.raw.length + 2.0 * uncertaintyMargin,
                 object.raw.width + 2.0 * uncertaintyMargin);
             if (!intersects(predictedEgo, predictedObject)) continue;
+            if(map) {
+                const double station=world.egoPathS+egoSpeed*time;
+                auto it=std::lower_bound(localPath.points.begin(),localPath.points.end(),
+                    station,[](const Waypoint& p,double s){return p.s<s;});
+                Waypoint point=it==localPath.points.end()?localPath.points.back():*it;
+                point.x=egoPose.x;point.y=egoPose.y;point.yaw=egoPose.heading;
+                if(!roadPointSharesObjectLevel(*map,point,
+                        object.raw.x,object.raw.y,object.raw.z)) continue;
+            }
 
             output.predictedCollision = true;
             output.predictedCollisionTTC = time;

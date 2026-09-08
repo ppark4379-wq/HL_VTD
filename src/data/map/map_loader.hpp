@@ -12,6 +12,9 @@ XmlElement loadOpenDrive(const std::string& xodrPath);
 const XmlElement* findFirstChild(const XmlElement& parent,
                                  const std::string& childName);
 
+// Read XODR road reference-line z(s). Missing/invalid profiles stay unknown.
+void parseRoadElevations(const XmlElement& roadNode, Road& road);
+
 // 기능 2: XML 속성 문자열을 int/double 등 요청한 자료형으로 변환한다.
 template <typename T>
 T readAttribute(const XmlElement& element,

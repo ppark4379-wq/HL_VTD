@@ -256,6 +256,20 @@ void writeMission(std::ofstream& output,
     }
     for (std::size_t legIndex = 0; legIndex < mission.legs.size(); ++legIndex) {
         const auto& leg = mission.legs[legIndex];
+        for (std::size_t spanIndex = 0; spanIndex < leg.surfaceOnlySpans.size(); ++spanIndex) {
+            const auto& span = leg.surfaceOnlySpans[spanIndex];
+            const auto lane = map.laneSegments.find(span.lane);
+            if (lane == map.laneSegments.end()) continue;
+            std::size_t pointIndex = 0;
+            for (const auto& point : lane->second.points) {
+                if (point.roadS < span.roadSMin || point.roadS > span.roadSMax) continue;
+                writeStaticPoint(output, "corridor_surface_only",
+                    std::to_string(legIndex) + ":" + std::to_string(spanIndex),
+                    span.lane.roadId, span.lane.sectionIndex, span.lane.laneId,
+                    pointIndex++, point.x, point.y, 0.017,
+                    "leg=" + std::to_string(legIndex), leg.surfaceOnlyTrial);
+            }
+        }
         for (const auto& key : leg.allowedLanes) {
             const auto found = map.laneSegments.find(key);
             if (found == map.laneSegments.end()) continue;
@@ -344,6 +358,9 @@ std::string stopReasonText(StopReason reason) {
     if ((bits & static_cast<std::uint32_t>(StopReason::CrosswalkBlocked)) != 0U) {
         append("crosswalk_blocked");
     }
+    if ((bits & static_cast<std::uint32_t>(StopReason::StationaryPathBlocked)) != 0U) {
+        append("stationary_path_blocked");
+    }
     return result.empty() ? "unknown" : result;
 }
 
@@ -410,6 +427,7 @@ void initializeVisualizationLogger(
                                  data.staticMapPath.string());
     }
     data.enabled = true;
+    data.corridorRuntime = map.corridorRuntime;
 }
 
 void writeVisualizationFrame(
@@ -428,6 +446,7 @@ void writeVisualizationFrame(
     output << std::fixed << std::setprecision(4);
     output << "{\"frame\":" << frameIndex
            << ",\"time_s\":" << elapsedTime
+           << ",\"receive_time_s\":" << world.receiveTime
            << ",\"ego\":{\"x\":" << world.ego.x
            << ",\"y\":" << world.ego.y
            << ",\"z\":" << world.ego.z
@@ -443,6 +462,13 @@ void writeVisualizationFrame(
         if (index != 0) output << ',';
         const auto& object = world.objects[index];
         output << "{\"id\":" << object.raw.id
+               << ",\"x\":" << object.raw.x
+               << ",\"y\":" << object.raw.y
+               << ",\"z\":" << object.raw.z
+               << ",\"heading\":" << object.raw.heading
+               << ",\"length\":" << object.raw.length
+               << ",\"width\":" << object.raw.width
+               << ",\"height\":" << object.raw.height
                << ",\"speed\":" << object.raw.speed
                << ",\"road_id\":" << object.roadId
                << ",\"section_index\":" << object.sectionIndex
@@ -496,6 +522,19 @@ void writeVisualizationFrame(
     writePointArray(output, planning.result.localPath.points, 0.42, 2);
     output << ",\"maneuver_path\":";
     writePointArray(output, planning.laneChange.path, 0.38, 2);
+    // Metadata only: no repeated full global geometry or extra frame history I/O.
+    if (const auto runtime = data.corridorRuntime.lock()) {
+        output << ",\"global_route\":{\"revision\":" << runtime->routeRevision
+               << ",\"request_revision\":" << runtime->globalRouteRequestRevision
+               << ",\"leg\":" << runtime->committedGlobalPathLeg
+               << ",\"progress\":" << runtime->committedGlobalPathProgress
+               << ",\"point_count\":" << runtime->committedGlobalPath.size()
+               << ",\"reaches_gateway\":" << (runtime->committedGlobalPathReachesGateway ? "true" : "false")
+               << ",\"includes_exit_preview\":" << (runtime->committedGlobalPathHasExitPreview ? "true" : "false")
+               << ",\"replan_requested\":" << (runtime->globalRouteReplanRequested ? "true" : "false")
+               << ",\"search_failed\":" << (runtime->globalRouteSearchFailed ? "true" : "false")
+               << '}';
+    }
     output << ",\"decision\":{\"target_speed\":"
            << planning.result.targetSpeed
            << ",\"steering\":" << control.safeCommand.steering

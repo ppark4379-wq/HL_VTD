@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 struct LaneChangeConfig {
@@ -24,6 +25,14 @@ struct LaneChangeConfig {
     double obstacleTriggerMinimumDistance{5.0};
     double obstacleTriggerMaximumDistance{70.0};
     double obstacleMandatoryAvoidanceDistance{15.0};
+    // Bounded local recovery when the currently tracked corridor path is
+    // blocked while a complete obstacle-aware gateway route is unavailable.
+    double localFallbackActivationDistance{35.0};
+    double localFallbackTimeHeadway{5.0};
+    double localFallbackHorizon{60.0};
+    double localFallbackRetryInterval{0.5};
+    double localFallbackSearchBudgetMs{80.0};
+    double localFallbackSpeed{5.0 / 3.6};
     double stoppedDynamicConfirmationTime{0.75};
     // 현재 차선이 다음 road로 연결되지 않을 때만 도로 끝에서
     // 이 거리 이내에 들어오면 연결 차선으로 정렬한다.
@@ -48,8 +57,16 @@ enum class LaneChangeRouteMode {
     KeepTargetLane,
 };
 
+// Measured forward distance available to finish gateway lane alignment.
+// Infinity means no relevant physical stop line was found ahead.
+struct LaneAlignmentContext {
+    double maximumCompletionDistance{std::numeric_limits<double>::infinity()};
+    int stopLineId{-1};
+};
+
 struct LaneChangeData {
     LaneChangePhase phase{LaneChangePhase::None};
+    double validatedObstacleClearance{-1.0};
     int obstacleId{-1};
     int sourceRoadId{-1};
     int sourceLaneId{};
@@ -69,6 +86,7 @@ struct LaneChangeData {
     // Keep the authority on the trajectory itself: a lane key is not enough
     // to distinguish outgoing branches that overlap before a split.
     bool missionRouteAuthority{};
+    bool localCorridorAvoidance{};
     std::uint8_t turnSignal{};
     std::uint8_t outwardTurnSignal{};
     std::uint8_t returnTurnSignal{};
