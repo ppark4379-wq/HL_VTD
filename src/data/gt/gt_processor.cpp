@@ -302,8 +302,8 @@ bool projectWorldToActivePath(WorldState& world,
             objectLateralHalfExtent + lateralMargin;
         object.isOnEgoPath = std::abs(object.relativeD) <= allowedLateral;
         const double longitudinalSpeed =
-            static_cast<double>(object.raw.speed) *
-            std::cos(object.raw.heading - world.ego.heading);
+            objectVelocityX(object) * std::cos(world.ego.heading) +
+            objectVelocityY(object) * std::sin(world.ego.heading);
         const double closingSpeed = world.egoSpeed - longitudinalSpeed;
         if (object.relativeS <= 0.0) {
             object.ttc = 0.0;

@@ -94,12 +94,10 @@ bool oncomingTrajectoryConverges(const WorldObjectState& object,
     const double relativeY =
         static_cast<double>(object.raw.y) - static_cast<double>(world.ego.y);
     const double relativeVelocityX =
-        static_cast<double>(object.raw.speed) *
-            std::cos(static_cast<double>(object.raw.heading)) -
+        objectVelocityX(object) -
         world.egoSpeed * std::cos(static_cast<double>(world.ego.heading));
     const double relativeVelocityY =
-        static_cast<double>(object.raw.speed) *
-            std::sin(static_cast<double>(object.raw.heading)) -
+        objectVelocityY(object) -
         world.egoSpeed * std::sin(static_cast<double>(world.ego.heading));
     const double relativeSpeedSquared =
         relativeVelocityX * relativeVelocityX +
@@ -135,7 +133,7 @@ bool isPredictionCandidate(const WorldObjectState& object,
                            double egoWidth,
                            double horizon) {
     const double headingDifference = std::abs(normalizeAngle(
-        static_cast<double>(object.raw.heading) -
+        objectMotionHeading(object) -
         static_cast<double>(world.ego.heading)));
 
     if (headingDifference > kOncomingHeadingDifference) {
@@ -191,8 +189,10 @@ void resetPathSafety(PathSafetyResult& output) {
 
 void checkCurrentCollisions(PathSafetyResult& output,
                             const Obb2D& egoObb,
-                            const std::vector<WorldObjectState>& objects) {
+                            const std::vector<WorldObjectState>& objects,
+                            int excludeObjectId) {
     for (const auto& object : objects) {
+        if (static_cast<int>(object.raw.id) == excludeObjectId) continue;
         if (!intersects(egoObb, object.obb)) continue;
         output.collision = true;
         output.minimumTTC = 0.0;
@@ -250,12 +250,31 @@ void checkPredictedCollisions(PathSafetyResult& output,
                     object, world, radius, ego.width, horizon)) continue;
             const double objectHeading =
                 static_cast<double>(object.raw.heading);
-            const double travel =
-                static_cast<double>(object.raw.speed) * time;
+            // Constant-velocity prediction is exact only for the current
+            // sample.  Give moving actors a small time-growing envelope so a
+            // candidate that merely grazes today's extrapolated box is not
+            // committed.  A stopped vehicle whose body crosses the Ego path
+            // can start suddenly (M14 object 12); reserve additional side
+            // room for that case while leaving cones and parallel parked
+            // vehicles at their ordinary dimensions.
+            const double motionSpeed = objectMotionSpeed(object);
+            const double headingDifference = std::abs(normalizeAngle(
+                objectHeading - egoPose.heading));
+            const bool vehicleSized = object.raw.length >= 2.5F &&
+                object.raw.length <= 7.5F && object.raw.width >= 1.4F &&
+                object.raw.width <= 2.8F;
+            const bool crossingOrientation =
+                headingDifference >= 0.6108652382 &&
+                headingDifference <= 2.5307274154;
+            const double uncertaintyMargin = motionSpeed >= 0.3
+                ? std::min(0.45, 0.15 + 0.06 * time)
+                : (vehicleSized && crossingOrientation ? 1.50 : 0.0);
             const Obb2D predictedObject = makeObb2D(
-                object.raw.x + travel * std::cos(objectHeading),
-                object.raw.y + travel * std::sin(objectHeading),
-                objectHeading, object.raw.length, object.raw.width);
+                object.raw.x + objectVelocityX(object) * time,
+                object.raw.y + objectVelocityY(object) * time,
+                objectHeading,
+                object.raw.length + 2.0 * uncertaintyMargin,
+                object.raw.width + 2.0 * uncertaintyMargin);
             if (!intersects(predictedEgo, predictedObject)) continue;
 
             output.predictedCollision = true;

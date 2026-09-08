@@ -322,11 +322,27 @@ def build_lane_transitions(network):
         return track_cache[key]
     for key,lane in network.lanes.items():
         road=network.roads[key.road]
-        if road.junction!=-1:
-            continue
+        # Junction connector roads can themselves widen from one usable lane
+        # into two (or taper back to one).  OpenDRIVE often expresses that as
+        # a zero-width lane birth/drop inside a junction road, without an
+        # incoming laneLink for the newborn lane.  Skipping every junction
+        # road therefore removed exactly the precomputed branch needed to
+        # enter that lane.  Treat lifecycle geometry identically everywhere;
+        # the same footprint, curvature and road-mark guards below decide
+        # whether a transition is usable.
         direction=-1 if key.lane>0 else 1
         for kind,event in (('merge',lane.points[-1]),('split',lane.points[0])):
-            if not .01<event.road_s<road.length-.01:
+            # A connector can declare a lane at its road boundary with zero
+            # width and then widen it inside the road (or taper it to zero at
+            # the far boundary).  It has no incoming/outgoing laneLink by
+            # construction, but it is still a real XODR lifecycle event.
+            # Keep ordinary full-width map boundaries terminal; admit only a
+            # narrow endpoint whose width polynomial supplies the taper.
+            interior=.01<event.road_s<road.length-.01
+            endpoint_taper=event.width<=.20 and (
+                kind=='split' and event.road_s<=.01 or
+                kind=='merge' and event.road_s>=road.length-.01)
+            if not interior and not endpoint_taper:
                 continue
             edges=[network.connections[i] for i in lane.outgoing] if kind=='merge' else incoming.get(key,[])
             if edges:

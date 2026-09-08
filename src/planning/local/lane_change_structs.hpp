@@ -9,15 +9,21 @@
 
 struct LaneChangeConfig {
     double latticeShortDistance{12.0};
+    double latticeSearchBudgetMs{15.0};
     double latticeMediumDistance{20.0};
     double latticeLongDistance{30.0};
     double latticeLaneCost{2.0};
     double latticeCurvatureCost{30.0};
     double latticeProgressCost{1.0};
     double latticeObstacleClearance{0.30};
+    // Minimum tracking allowance used only after the nominal-clearance
+    // search proves that a mandatory static-obstacle passage is too narrow.
+    // The physical OBB must still remain collision-free.
+    double latticeTightObstacleClearance{0.05};
     double gatewayReserveDistance{8.0};
     double obstacleTriggerMinimumDistance{5.0};
     double obstacleTriggerMaximumDistance{70.0};
+    double obstacleMandatoryAvoidanceDistance{15.0};
     double stoppedDynamicConfirmationTime{0.75};
     // 현재 차선이 다음 road로 연결되지 않을 때만 도로 끝에서
     // 이 거리 이내에 들어오면 연결 차선으로 정렬한다.
@@ -58,6 +64,11 @@ struct LaneChangeData {
     bool awaitExactReconnect{};
     // 장애물 회피가 아니라 다음 road 연결 차선으로 정렬하는 기동.
     bool roadConnectionManeuver{};
+    // This trajectory was built from an official mission-guide or from a
+    // checked recovery/avoidance trajectory that rejoins that same guide.
+    // Keep the authority on the trajectory itself: a lane key is not enough
+    // to distinguish outgoing branches that overlap before a split.
+    bool missionRouteAuthority{};
     std::uint8_t turnSignal{};
     std::uint8_t outwardTurnSignal{};
     std::uint8_t returnTurnSignal{};
@@ -78,6 +89,16 @@ struct LaneChangeData {
     // 모든 목표 차선에 후속 장애물이 가까운 경우에도 후보를 없애지 않고
     // 가장 멀리 진행 가능한 안전한 1단계 경로를 선택했는지 표시한다.
     bool bestProgressFallback{};
+    // 같은 장애물/차선에서 모든 후보가 기하·OBB 검사에
+    // 탈락하면 다음 20 Hz 프레임에서 수백 후보를 즉시 다시
+    // 계산하지 않는다. Ego가 2 m 이동하거나 짧은 simulation
+    // cooldown이 끝나면 재탐색한다. 이 상태는 phase=None에서도
+    // 유지되어 VTD command 전송이 멈추는 것을 막는다.
+    int failedObstacleId{-1};
+    LaneKey failedSearchLane;
+    bool failedSearchLaneValid{};
+    double failedSearchRoadS{};
+    double retrySearchAfter{};
     std::size_t nearestIndex{};
     std::vector<Waypoint> path;
 };

@@ -29,7 +29,19 @@ struct MissionLegData {
     std::size_t gatewayCheckpoint{};
     std::size_t toCheckpoint{};
     bool valid{};
+    // from -> gateway, gateway -> exit 각각의 최소 그래프 비용.
+    // 교차로 진입/진출 쌍 중 한쪽만 XODR successor가 끊긴
+    // 경우를 전체 거리에 묻히지 않고 판정할 수 있게 보관한다.
+    double gatewayBestCost{};
+    double exitBestCost{};
     double bestCost{};
+    // The official sampled route is the immutable authority for which road
+    // sections form this corridor and which exit is required. Its samples are
+    // not necessarily lane-centre connected: an approximate competition path
+    // may draw across two junction branches that XODR says are disconnected.
+    // Legal lane selection therefore still comes from the restricted XODR
+    // graph; the sampled guide is used only when that graph has a real gap.
+    bool guideRouteAuthority{};
     std::set<LaneKey> allowedLanes;
     std::set<LaneKey> targetLanes;
     std::vector<LaneKey> preferredRoute;
@@ -54,7 +66,8 @@ struct MissionCorridorData {
 // 마지막 gateway를 lane graph에서 계산한다.
 bool initializeMissionCorridor(MissionCorridorData& output,
                                PathGeneratorData& map,
-                               const std::string& checkpointCsv);
+                               const std::string& checkpointCsv,
+                               const std::vector<Waypoint>* guidePath = nullptr);
 
 // Checkpoint는 반드시 좌표를 밟지 않아도 된다. 목표 구역 진입, 근접 통과,
 // 또는 충분히 가까워졌다가 지나친 사실을 이용해 구간을 단조롭게 전진시킨다.
@@ -62,6 +75,18 @@ void updateMissionCorridorProgress(MissionCorridorData& mission,
                                    const WorldState& world);
 
 const MissionLegData* activeMissionLeg(const MissionCorridorData& mission);
+
+// XODR successor graph가 교차로 내부의 제공 경로 연결을 표현하지 못해,
+// 가까운 두 seq 사이를 수백 m 이상 우회해야 하는지 판정한다. 이 구간은
+// packaged map-derived guide geometry를 continuity source로 사용한다.
+bool missionLegRequiresGuideContinuity(const MissionCorridorData& mission);
+
+// 미션 전체는 정상이어도 현재 map-matched lane에서 선택한
+// gateway/exit로 이어지는 제한 경로가 없으면 guide continuity가
+// 필요하다. 분기 직전의 잘못된 차선에서 임의 직진 후보를
+// gateway 후보로 오판하는 것을 막는다.
+bool missionLaneRequiresGuideContinuity(const MissionCorridorData& mission,
+                                        const LaneKey& currentLane);
 
 // 횡방향 차선변경 edge는 제외하고 실제 lane successor/junction 연결만 따라
 // 현재 차선에서 활성 checkpoint gateway까지 가는 경로를 찾는다.

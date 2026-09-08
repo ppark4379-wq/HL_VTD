@@ -11,6 +11,7 @@ runtime:
   simulator: VTD
   simulator_version: '2025.2'
   sync_source_before_run: /home/autonav/VIRES/VTD.2025.2/Data/Projects/Current/Scenarios/M10.xml
+  mission_start_leg: 0
 route:
   default: route.csv
   mode: packaged

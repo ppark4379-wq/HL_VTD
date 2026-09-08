@@ -107,6 +107,7 @@ struct StopDecision {
 
 // 프레임 간 유지하는 행동 상태. hysteresis와 최소 유지시간에 쓴다.
 struct BehaviorState {
+    double denseStaticHoldRemaining{};
     LonMode longitudinal{LonMode::Cruise};
     LaneChangePhase laneChange{LaneChangePhase::None};
     SystemHealth health{SystemHealth::Ok};

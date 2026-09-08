@@ -2,6 +2,8 @@
 #include "data/map/precomputed_lane_network.hpp"
 #include "planning/planning_structs.hpp"
 #include <memory>
+#include <chrono>
+#include <array>
 
 struct DecisionTraceData;
 struct CorridorEdge {
@@ -14,6 +16,48 @@ struct CorridorRuntime {
     PrecomputedLaneNetwork network;
     std::vector<std::vector<CorridorEdge>> forward, reverse;
     std::vector<double> gatewayCost;
+    // Deterministic shortest-path policy to the active gateway.  This is the
+    // corridor-wide global route: it is computed once when the mission leg is
+    // entered and does not change from frame to frame.  A lateral next edge is
+    // materialized by the checked quintic planner; longitudinal/merge/split
+    // edges are followed directly by the tracker.
+    std::vector<std::int64_t> gatewayNext;
+    std::vector<bool> gatewaySpine;
+    // Obstacle-aware route materialized from the current corridor entry all
+    // the way to the checkpoint gateway.  Unlike the old per-frame greedy
+    // lane choice, this path sees every stationary obstacle before choosing
+    // the first lateral move.  It is kept until the leg changes, the vehicle
+    // leaves it after a dynamic avoidance, or a newly stationary object
+    // physically blocks it.
+    std::vector<Waypoint> committedGlobalPath;
+    std::size_t committedGlobalPathLeg{static_cast<std::size_t>(-1)};
+    std::size_t committedGlobalPathProgress{};
+    bool committedGlobalPathReachesGateway{};
+    // Short physical C2 bridge from the measured post-manoeuvre pose back to
+    // sampled XODR lanes.  It is cached because rebuilding the same 80 m
+    // bridge in every 20 Hz frame is both unnecessary and too expensive.
+    std::vector<Waypoint> recoveryTrackingPath;
+    std::size_t recoveryTrackingPathLeg{static_cast<std::size_t>(-1)};
+    std::size_t recoveryTrackingPathProgress{};
+    // True when this bridge ends on a caller-supplied map-derived mission
+    // reference, rather than merely on the nearest physical driving lane.
+    bool recoveryTrackingPathReachesReference{};
+    // A failed measured-pose -> mission-reference bridge is expensive and
+    // its geometry does not change every control tick. Retry after meaningful
+    // motion or a short simulation-time cooldown while physical lane tracking
+    // keeps commands flowing.
+    LaneKey referenceRecoveryFailureLane;
+    bool referenceRecoveryFailureValid{};
+    double referenceRecoveryFailureRoadS{};
+    double referenceRecoveryRetryAfter{};
+    // A failed full-corridor search is retried when the physical lane or the
+    // stationary-object set changes, not in every 20 Hz frame.  The current
+    // path remains available to the local avoidance planner meanwhile.
+    bool globalRouteSearchFailed{};
+    LaneKey globalRouteFailureLane;
+    std::size_t globalRouteFailureStaticCount{};
+    double globalRouteFailureRoadS{};
+    double globalRouteRetryAfter{};
     // Cost through the current gateway and the next mission leg.  This is a
     // tracking-only handoff route: it prevents a valid precomputed merge from
     // disappearing during the one or two frames in which mission progress is
@@ -29,10 +73,32 @@ struct CorridorRuntime {
     std::vector<std::pair<double,double>> tangent;
     std::map<std::pair<int,int>,std::vector<std::int64_t>> spatial;
     std::size_t activeLeg{static_cast<std::size_t>(-1)};
+    std::uint64_t routeRevision{};
     double lateralLength{};
+    LaneChangeConfig laneConfig;
     double previousX{},previousY{},previousYaw{},curvature{};
     bool poseValid{};
+    // Live planning shares one budget across all searches in a control frame.
+    // Offline callers retain exhaustive search unless they start a frame.
+    bool budgetedSearch{}, searchStarted{}, obstacleSearchCalled{}, gatewaySearchCalled{};
+    std::chrono::steady_clock::time_point searchDeadline;
+    std::array<std::size_t,2> searchCursor{};
+    std::size_t searchLeg{static_cast<std::size_t>(-1)};
+    int obstacleSearchObject{-1};
+    // Set only after a complete nominal-margin scan fails for the same
+    // mandatory blocker. Compact road furniture starts in this mode because
+    // its usable passage can be narrower than the ordinary comfort margin.
+    bool obstacleTightClearanceMode{};
+    // A generated merge/split has no ordinary lane points in its interior.
+    // Latch the selected transition so nearest-lane rematching cannot replace
+    // it with the visually adjacent straight branch halfway through.
+    int committedTransition{-1};
+    std::size_t committedTransitionLeg{static_cast<std::size_t>(-1)};
+    std::size_t committedTransitionProgress{};
+    bool committedTransitionEntered{};
 };
+
+void beginCorridorSearchFrame(CorridorRuntime& runtime);
 
 bool initializeCorridorRuntime(PathGeneratorData& map,const std::string& directory,
                               const LaneChangeConfig& config,std::string* error);
@@ -42,14 +108,28 @@ bool buildCorridorTrackingPath(PathPlannerData& output,const PathPlannerConfig& 
                               const WorldState& world,const PathGeneratorData& map,
                               const MissionCorridorData& mission,double horizon,
                               DecisionTraceData* trace);
+bool buildReferenceRecoveryTrackingPath(
+    PathPlannerData& output,const PathPlannerConfig& config,
+    const std::vector<Waypoint>& reference,std::size_t referenceProgress,
+    const WorldState& world,const PathGeneratorData& map,
+    const MissionCorridorData& mission,double horizon,
+    DecisionTraceData* trace);
 // The ordinary XODR lane graph does not contain every validated, precomputed
 // merge/split curve.  Tracking validation uses this query so those curves are
 // not rejected as disconnected paths.
 bool corridorHasLongitudinalConnection(const PathGeneratorData& map,
                                        const LaneKey& from,
                                        const LaneKey& to);
+// A materialized corridor route may cross into the target lane one or two
+// frames before VTD's lane matcher changes IDs.  Accept only lane-key changes
+// that are actually present on that already validated committed route.
+bool corridorCommittedRouteConnects(const PathGeneratorData& map,
+                                    const LaneKey& from,
+                                    const LaneKey& to);
 bool prepareCorridorLattice(LaneChangeData& state,const LaneChangeConfig& config,
                            const PlanningBehaviorConfig& safetyConfig,const WorldState& world,
                            const PathGeneratorData& map,const MissionCorridorData& mission,
                            const std::vector<int>* confirmed,double* blockerDistance,
-                           bool gatewayOnly,DecisionTraceData* trace);
+                           bool gatewayOnly,DecisionTraceData* trace,
+                           const PathPlannerData* activeReference=nullptr,
+                           bool activeReferenceIsMissionGuide=false);

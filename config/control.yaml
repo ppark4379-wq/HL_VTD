@@ -46,19 +46,30 @@ planning:
   # 대비해 가까운 구간에서만 미리 감속한다. 작은 콘과 큰 수목·구조물은 제외한다.
   stationary_adjacent_vehicle_caution_kph: 20.0 # [km/h] 정차 차량 옆 통과 주의속도
   stationary_adjacent_vehicle_maximum_distance: 25.0 # [m] 너무 먼 주차 차량은 무시
+  # 교차 진행방향으로 대기 중인 차량은 speed=0이어도 갑자기 출발할 수 있다.
+  # Ego 진행선과 객체 진행선의 교점이 아래 범위에 있으면 출발 전부터 감속한다.
+  cross_traffic_caution_kph: 10.0 # [km/h] 횡단 차량 출발 확인 전에 확보할 대응속도
+  cross_traffic_forward_distance: 55.0 # [m] Ego에서 예상 교차점까지 최대거리
+  cross_traffic_approach_distance: 35.0 # [m] 객체에서 예상 교차점까지 최대거리
+  cross_traffic_minimum_angle: 0.610865 # [rad] 35도 이상 교차하는 진행방향만 적용
+  dense_static_speed_kph: 10.0 # 밀집 정적장애물 구간 속도 상한; 회피 상태와 무관
+  dense_static_forward_distance: 35.0 # [m] 전방 탐색, 직전에 지난 객체는 후방 5m까지 포함
+  dense_static_lateral_distance: 7.0 # [m] 차량 진행방향 기준 좌우 탐색 반폭
+  dense_static_pair_distance: 15.0 # [m] 정적객체 2개 사이 거리 이하면 밀집 진입
+  dense_static_release_time: 3.0 # [s] 전방 정적객체가 모두 사라진 뒤 제한 해제 지연
   stationary_vehicle_minimum_length: 2.5 # [m] 차량형 bounding box 길이 하한
   stationary_vehicle_maximum_length: 7.5 # [m] 차량형 bounding box 길이 상한
   stationary_vehicle_minimum_width: 1.4  # [m] 차량형 bounding box 폭 하한
   stationary_vehicle_maximum_width: 2.8  # [m] 차량형 bounding box 폭 상한
-  emergency_ttc: 1.5               # [s] 긴급제동 TTC
+  emergency_ttc: 2.0               # [s] 동적 객체 회피 후보가 없을 때 정지 위치를 앞당기는 TTC
   emergency_braking_deceleration: 4.0 # [m/s^2] 속도별 비상제동 문턱 계산
   emergency_reaction_time: 0.4     # [s] 인지·명령·차량 응답 여유
   emergency_minimum_hold_time: 0.5 # [s] 순간 예측 누락에도 비상제동 유지
-  collision_prediction_horizon: 3.0 # [s] OBB 예측 범위
+  collision_prediction_horizon: 5.0 # [s] 동적 정면접근에서 준비+차선변경을 완료할 수 있게 조기 탐색
   collision_prediction_step: 0.2   # [s] OBB 예측 간격
   # [m] 지역경로 길이. 미래 OBB 검사에서 Ego 예측 위치를 이 경로 위에서 찾으므로
   # (최대속도 x collision_prediction_horizon)보다 길어야 예측이 잘리지 않는다.
-  #   50 km/h = 13.9 m/s, x 3.0 s = 41.7 m  ->  여유 포함 80 m
+  #   50 km/h = 13.9 m/s, x 5.0 s = 69.5 m  ->  여유 포함 80 m
   local_path_horizon: 80.0
   # 패킷 신호 ID와 XODR ID가 다르면 같은 road/lane의 가장 가까운 정지선을 사용한다.
   signal_stop_search_distance: 80.0 # [m] 보조 매칭 전방 한계
@@ -77,15 +88,18 @@ planning:
 
 lane_change:
   lattice_short_distance: 12.0   # [m] 제어 룩어헤드와 별개인 5차 후보 완료거리
+  lattice_search_budget_ms: 15.0 # 프레임당 후보 탐색 예산(후보 검사 사이 확인); 미검사 후보는 다음 프레임에 계속
   lattice_medium_distance: 20.0
   lattice_long_distance: 30.0
   lattice_lane_cost: 2.0
   lattice_curvature_cost: 30.0
   lattice_progress_cost: 1.0
   lattice_obstacle_clearance: 0.30 # [m] 정적 장애물과 nominal OBB 사이 추종 오차 여유
+  lattice_tight_obstacle_clearance: 0.05 # [m] 0.30m 후보가 전부 막힌 필수 회피에만 쓰는 최소 여유
   gateway_reserve_distance: 8.0  # [m] 마지막 합법적 횡이동 앞 여유
   obstacle_trigger_minimum_distance: 5.0  # [m] 정적으로 판단되면 대기 없이 즉시 회피 검토
   obstacle_trigger_maximum_distance: 70.0 # [m] 정적 장애물 탐색거리
+  obstacle_mandatory_avoidance_distance: 15.0 # [m] 현재 경로의 정적 장애물: 통과하지 못하는 직진/지연 후보 제외
   # 끼어들어 정지한 차량은 잠깐 정지/추종한 뒤 정적 회피 대상으로 전환한다.
   # 처음부터 정지해 있던 장애물은 이 대기 없이 즉시 회피를 검토한다.
   stopped_dynamic_confirmation_time: 0.75 # [s]
@@ -97,7 +111,7 @@ lane_change:
   minimum_target_ahead_gap: 12.0          # [m] 목표 차선 전방 최소 간격
   minimum_target_behind_gap: 9.0         # [m] 목표 차선 후방 최소 간격
   minimum_target_ttc: 3.0                 # [s] 목표 차선 최소 TTC
-  maximum_lane_change_speed_kph: 15.0     # 빽빽한 연속 장애물에서도 다음 회피를 준비할 수 있도록 횡이동 중 감속
+  maximum_lane_change_speed_kph: 20.0     # 일반 회피·게이트웨이 정렬 상한; 밀집 장애물은 planning.dense_static_speed_kph=10이 우선
   return_waiting_speed_kph: 15.0          # 복귀 경로가 잠시 막혔을 때 목표속도 상한
   # 장애물이 옆 차선을 이 값 이하로 침범했을 때만 중앙 밖 회피 후보를 만든다.
   maximum_obstacle_lane_intrusion: 1.55   # [m] 횡오프셋 허용 최대 침범량

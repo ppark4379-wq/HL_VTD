@@ -19,11 +19,17 @@ bool routeToWorld(Pose2D& output,
 void resetPathSafety(PathSafetyResult& output);
 
 // 현재 Ego OBB와 모든 객체 OBB의 교차 여부를 검사한다.
+// excludeObjectId는 지금 바로 그 객체를 회피하려고 새 후보를 찾는
+// 상황에서만 쓴다. 이미 접촉한 정적 장애물을 "현재 충돌"로만 계속
+// 판정하면 그 즉시 상태만으로 모든 회피 후보가 영원히 거부돼 탈출할
+// 방법이 없어진다. 미래 예측 충돌 검사는 그대로 이 객체를 포함해,
+// 실제로 벗어나지 못하는 후보는 계속 걸러낸다.
 // Read : egoObb, objects
 // Write: output.collision, output.riskObjectId, output.minimumTTC
 void checkCurrentCollisions(PathSafetyResult& output,
                             const Obb2D& egoObb,
-                            const std::vector<WorldObjectState>& objects);
+                            const std::vector<WorldObjectState>& objects,
+                            int excludeObjectId = -1);
 
 // 현재 차선 전방 객체들의 TTC 중 최솟값을 기록한다.
 // Read : objects

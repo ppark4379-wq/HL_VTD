@@ -128,6 +128,11 @@ LogRecord makeLogRecord(const LogFrameInput& input) {
     record.nearestObject = objects.nearest;
     record.trafficLight = input.gt.trafficLight;
     record.plan = input.planning.trackingPlan;
+    // trackingPlan.valid only says that Pure Pursuit produced a numerical
+    // command.  The controller gates that command with PlanningResult::valid
+    // (active-path projection included), so log the same validity that is
+    // actually sent to the safety limiter.
+    record.plan.valid = input.planning.valid;
     record.command = input.control.latestCommand;
     record.currentSpeedLimit = input.planning.currentSpeedLimit;
     record.schoolZoneActive = input.planning.schoolZoneActive;

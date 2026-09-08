@@ -428,11 +428,15 @@ class LaneNetwork:
                     marks = road.lanes[key.section][owner].findall("roadMark")
                     valid = [m for m in marks if road.starts[key.section]+number(m,"sOffset") <= p.road_s+1e-9]
                     if not valid:
+                        # An absent marking is open pavement, not a solid
+                        # boundary.  Junction taper lanes frequently omit the
+                        # mark while their width grows from zero.
+                        setattr(p, side+"_change", True)
                         continue
                     mark = valid[-1]
                     permission = mark.get("laneChange", "none")
                     # Conservative metadata only. Full maneuver still needs online validation.
-                    allowed = mark.get("type") == "broken" and (
+                    allowed = mark.get("type") == "none" or mark.get("type") == "broken" and (
                         permission == "both" or permission == "increase" and tid > key.lane or
                         permission == "decrease" and tid < key.lane)
                     setattr(p, side+"_change", bool(allowed))

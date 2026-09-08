@@ -2,6 +2,7 @@
 #include "data/map/map_matcher.hpp"
 #include "data/gt/gt_processor.hpp"
 #include "control/control_process.hpp"
+#include "control/longitudinal/longitudinal_controller.hpp"
 #include "network/receive/rdb_clock.hpp"
 #include "network/send/control_sender.hpp"
 #include "planning/behavior/behavior_planner.hpp"
@@ -74,6 +75,32 @@ void testEmergencyBrakingLatchesEntrySteering() {
     runControlProcess(control, world, planning, 0.05);
     if (std::abs(control.latestCommand.steering - beforeEmergency) > 1e-6) {
         std::cerr << "EBS steering latch changed while braking\n";
+        std::abort();
+    }
+}
+
+void testPositiveCrawlTargetDoesNotLatchStop() {
+    ControllerData controller;
+    controller.config.stopHoldSpeedThreshold = 0.8;
+    controller.config.maxAccelerationRate = 100.0;
+    ControlCommand command;
+
+    // Sharp connectors can legitimately request less than the measured-speed
+    // threshold used to decide that the car has stopped.  A positive target
+    // must therefore remain a drive command, not the zero-target hold branch.
+    runLongitudinalControl(controller, command, 0.0, 0.35, 0.05);
+    if (command.targetAccel <= 0.0) {
+        std::cerr << "Positive crawl target was classified as a stop\n";
+        std::abort();
+    }
+
+    // Preserve the intended behavior for a real zero-speed request.
+    controller = {};
+    controller.config.maxAccelerationRate = 100.0;
+    command = {};
+    runLongitudinalControl(controller, command, 0.2, 0.0, 0.05);
+    if (command.targetAccel >= 0.0) {
+        std::cerr << "Zero target no longer holds the stop\n";
         std::abort();
     }
 }
@@ -2236,6 +2263,92 @@ void testStationaryAdjacentVehicleUsesShortRangeCaution() {
     assert(output.longitudinal == LonMode::Cruise);
 }
 
+void testCrossTrafficWaitingVehicleCapsBeforeLaunch() {
+    PlanningBehaviorConfig config;
+    config.crossTrafficCautionSpeed=10.0/3.6;
+    config.crossTrafficForwardDistance=55.0;
+    config.crossTrafficApproachDistance=35.0;
+
+    WorldState world;
+    world.ego.x=0.0F;world.ego.y=0.0F;world.ego.heading=0.0F;
+    world.egoSpeed=45.0/3.6;
+    WorldObjectState crossing;
+    crossing.raw.id=51;crossing.raw.x=20.0F;crossing.raw.y=30.0F;
+    crossing.raw.heading=-1.57079632679F;crossing.raw.speed=0.0F;
+    crossing.raw.length=4.85F;crossing.raw.width=1.89F;
+    world.objects.push_back(crossing);
+
+    BehaviorState state;BehaviorDecision output;
+    ConstraintSet constraints;constraints.speedLimit=45.0/3.6;
+    StopDecision stop;
+    updateBehavior(state,output,constraints,stop,world,
+                   45.0/3.6,config,.05);
+    assert(output.longitudinal==LonMode::Follow);
+    assert(std::abs(output.targetSpeed-10.0/3.6)<1e-9);
+
+    // Cross-traffic sizing must include trucks; the narrower passenger-car
+    // filter intentionally tops out below this M13-sized vehicle.
+    world.objects.front().raw.length=8.744F;
+    world.objects.front().raw.width=2.8F;
+    updateBehavior(state,output,constraints,stop,world,
+                   45.0/3.6,config,.05);
+    assert(output.longitudinal==LonMode::Follow);
+    assert(std::abs(output.targetSpeed-10.0/3.6)<1e-9);
+
+    // Some VTD actors move opposite their body heading while reporting a
+    // positive speed magnitude.  The measured velocity is authoritative.
+    world.objects.front().raw.length=4.85F;
+    world.objects.front().raw.width=1.89F;
+    world.objects.front().raw.heading=0.0F;
+    world.objects.front().velocityValid=true;
+    world.objects.front().velocityX=0.0;
+    world.objects.front().velocityY=-10.0;
+    updateBehavior(state,output,constraints,stop,world,
+                   45.0/3.6,config,.05);
+    assert(output.longitudinal==LonMode::Follow);
+    world.objects.front().velocityValid=false;
+
+    // A parallel parked vehicle is handled by the adjacent-lane rule, not
+    // mistaken for cross traffic merely because it is nearby.
+    world.objects.front().raw.heading=0.0F;
+    updateBehavior(state,output,constraints,stop,world,
+                   45.0/3.6,config,.05);
+    assert(output.longitudinal==LonMode::Cruise);
+
+    // Once the crossing vehicle has passed the geometric intersection and
+    // is moving away, the precaution must release.
+    world.objects.front().raw.heading=-1.57079632679F;
+    world.objects.front().raw.y=-8.0F;
+    updateBehavior(state,output,constraints,stop,world,
+                   45.0/3.6,config,.05);
+    assert(output.longitudinal==LonMode::Cruise);
+}
+
+void testMeasuredReverseObjectMotionDrivesPrediction() {
+    WorldState world;
+    world.ego.x=0.0F;world.ego.y=0.0F;world.ego.heading=0.0F;
+    world.egoSpeed=5.0;world.egoPathValid=true;world.egoPathS=0.0;
+    world.egoObb=makeObb2D(0.0,0.0,0.0,4.855,1.88);
+    WorldObjectState object;
+    object.raw.id=15;object.raw.x=20.0F;object.raw.y=0.0F;
+    object.raw.heading=0.0F;object.raw.speed=10.0F;
+    object.raw.length=4.394F;object.raw.width=1.808F;
+    object.velocityValid=true;object.velocityX=-10.0;object.velocityY=0.0;
+    object.pathValid=true;object.pathS=20.0;object.relativeS=20.0;
+    object.relativeD=0.0;object.isAhead=true;object.isOnEgoPath=true;
+    object.obb=makeObb2D(20.0,0.0,0.0,4.394,1.808);
+    world.objects.push_back(object);
+    LocalPathData path;path.valid=true;
+    for(int i=0;i<=60;++i) {
+        Waypoint point;point.x=i;point.s=i;point.yaw=0.0;
+        path.points.push_back(point);
+    }
+    PathSafetyResult safety;resetPathSafety(safety);
+    checkPredictedCollisions(safety,world,path,3.0,0.1);
+    assert(safety.predictedCollision);
+    assert(safety.riskObjectId==15);
+}
+
 void testCloserVehicleConstraintOverridesFarStopPlan() {
     PlanningBehaviorConfig config;
     config.followTimeGap = 1.8;
@@ -2434,7 +2547,7 @@ void testMixedCheckpointMissionsUseEntryExitCorridors() {
     }
     for (const char* scenario : {
              "M05", "M06", "M07", "M08",
-             "M09", "M10", "M11", "M12", "M13", "M14"}) {
+             "M09", "M10", "M11", "M12", "M13", "M14", "M15"}) {
         MissionCorridorData mission;
         const std::string checkpointPath =
             std::string("scenario/mixed/") + scenario + "/checkpoints.csv";
@@ -2449,17 +2562,35 @@ void testMixedCheckpointMissionsUseEntryExitCorridors() {
                       << " mission corridor has wrong checkpoint/leg count\n";
             std::abort();
         }
+        std::vector<std::size_t> anchors{0};
+        for (std::size_t checkpoint = 2;
+             checkpoint < mission.checkpoints.size(); checkpoint += 2) {
+            anchors.push_back(checkpoint);
+        }
+        if (anchors.back() != mission.checkpoints.size() - 1) {
+            anchors.push_back(mission.checkpoints.size() - 1);
+        }
         for (std::size_t index = 0; index < mission.legs.size(); ++index) {
             mission.activeLegIndex = index;
             const MissionLegData& leg = mission.legs[index];
-            const std::size_t expectedFrom = 2 * index;
-            const std::size_t expectedTo = std::min(
-                expectedFrom + 2, mission.checkpoints.size() - 1);
+            const std::size_t expectedFrom = anchors[index];
+            const std::size_t expectedTo = anchors[index + 1];
+            const std::size_t expectedGateway =
+                expectedFrom + 1 < expectedTo
+                    ? expectedFrom + 1 : expectedTo;
+            const auto& gatewayLanes =
+                mission.checkpoints[expectedGateway].lanes;
+            const bool routePassesGateway = std::any_of(
+                leg.preferredRoute.begin(), leg.preferredRoute.end(),
+                [&](const LaneKey& lane) {
+                    return gatewayLanes.count(lane) != 0;
+                });
             if (leg.fromCheckpoint != expectedFrom ||
-                leg.gatewayCheckpoint != expectedFrom + 1 ||
+                leg.gatewayCheckpoint != expectedGateway ||
                 leg.toCheckpoint != expectedTo ||
                 !leg.valid || leg.allowedLanes.empty() ||
                 leg.targetLanes.empty() || leg.preferredRoute.empty() ||
+                !routePassesGateway ||
                 leg.allowedLanes.count(leg.preferredRoute.front()) == 0 ||
                 leg.targetLanes.count(leg.preferredRoute.back()) == 0) {
                 std::cerr << "invalid " << scenario
@@ -2488,9 +2619,8 @@ void testMixedCheckpointMissionsUseEntryExitCorridors() {
             }
         }
         if (std::string(scenario) == "M09") {
-            // 교차로 진입 좌표 근처의 잘못된 직진 road가 checkpoint
-            // 통과로 오판되면 안 된다. exit road를 실제로 맵매칭한
-            // 후에만 다음 자유 회랑으로 넘어간다.
+            // 좌표만 가까워도 통과로 오판되면 안 된다. 목표 directed
+            // road를 실제로 맵매칭한 후에만 다음 자유 회랑으로 넘어간다.
             mission.activeLegIndex = 0;
             mission.minimumTargetDistance =
                 std::numeric_limits<double>::infinity();
@@ -2504,7 +2634,7 @@ void testMixedCheckpointMissionsUseEntryExitCorridors() {
             world.ego.y = exit.y;
             world.egoLaneValid = true;
             world.egoRoadId =
-                mission.checkpoints[first.gatewayCheckpoint].roadIds.front();
+                mission.checkpoints[first.fromCheckpoint].roadIds.front();
             updateMissionCorridorProgress(mission, world);
             if (mission.activeLegIndex != 0) {
                 std::cerr << "M09 advanced at an unobserved exit road\n";
@@ -2515,6 +2645,20 @@ void testMixedCheckpointMissionsUseEntryExitCorridors() {
             updateMissionCorridorProgress(mission, world);
             if (mission.activeLegIndex != 1) {
                 std::cerr << "M09 did not advance after observing exit road\n";
+                std::abort();
+            }
+        }
+        if(std::string(scenario)=="M12") {
+            mission.activeLegIndex=2; // seq 5 -> 6 -> 7
+            if(!missionLegRequiresGuideContinuity(mission)) {
+                std::cerr<<"M12 kilometre-scale XODR detour was not "
+                            "classified as a guide connector gap\n";
+                std::abort();
+            }
+            mission.activeLegIndex=0; // ordinary seq 1 -> 2 -> 3
+            if(missionLegRequiresGuideContinuity(mission)) {
+                std::cerr<<"M12 ordinary approach was misclassified as an "
+                            "intersection connector gap\n";
                 std::abort();
             }
         }
@@ -2612,11 +2756,46 @@ void testM11DisplacedEgoStillGetsContinuousLocalPath() {
 }  // namespace
 
 int main(int argc, char** argv) {
+    if(argc==2 && std::string(argv[1])=="--dense-static-speed") {
+        PlanningBehaviorConfig config;BehaviorState state;BehaviorDecision output;
+        WorldState world;world.egoSpeed=15.0/3.6;
+        ConstraintSet constraints;constraints.speedLimit=45.0/3.6;
+        StopDecision stop;
+        auto add=[&](int id,double x,double y,double speed=0.) {
+            WorldObjectState o;o.raw.id=id;o.raw.x=x;o.raw.y=y;o.raw.speed=speed;
+            world.objects.push_back(o);
+        };
+        auto step=[&](double dt=.05) {updateBehavior(state,output,constraints,stop,world,15.0/3.6,config,dt);};
+        add(1,20,0);step();assert(output.targetSpeed>10.0/3.6);
+        add(2,27,3);state.staticObstacleAvoidanceActive=true;state.safelyAvoidedObjectId=1;
+        step();assert(std::abs(output.targetSpeed-10.0/3.6)<1e-9);
+        // Ending a manoeuvre or passing the first obstacle must not release
+        // the cap while the last obstacle remains ahead.
+        state.staticObstacleAvoidanceActive=false;state.safelyAvoidedObjectId=-1;
+        world.objects.erase(world.objects.begin());step(4.0);
+        assert(std::abs(output.targetSpeed-10.0/3.6)<1e-9);
+        stop.valid=true;stop.reason=StopReason::RedLight;stop.distanceToStop=0;
+        step();assert(output.targetSpeed==0);
+        stop.valid=false;constraints.speedLimit=5.0/3.6;
+        step();assert(output.targetSpeed<=5.0/3.6);
+        constraints.speedLimit=45.0/3.6;world.objects.clear();step(2.0);
+        assert(std::abs(output.targetSpeed-10.0/3.6)<1e-9);
+        step(1.1);assert(output.targetSpeed>10.0/3.6);
+        // Nearby moving objects and a distant static pair cannot latch it.
+        state={};add(1,20,0,2);add(2,23,3,2);step();assert(state.denseStaticHoldRemaining==0);
+        world.objects.clear();add(1,50,0);add(2,53,3);step();assert(state.denseStaticHoldRemaining==0);
+        // Reconstructed final M09 cluster, not a scenario-specific rule.
+        world.objects.clear();world.ego.x=844.403931;world.ego.y=-861.675598;world.ego.heading=-2.46779799;
+        add(11,820.611267,-880.5578);add(3,815.65717,-884.31207);add(16,821.073,-875.6166);
+        step();assert(std::abs(output.targetSpeed-10.0/3.6)<1e-9);
+        std::cout<<"dense static speed regression: PASS\n";return 0;
+    }
     // Focused regression entry point; the default still runs every test and
     // reports the pre-existing close-moving-lead assertion failure.
     if (argc == 2 && std::string(argv[1]) == "--preserved-safety") {
         testRecoveryDoesNotCommandAStop();
         testEmergencyBrakingLatchesEntrySteering();
+        testPositiveCrawlTargetDoesNotLatchStop();
         testTrafficControllerParsing();
         testRdbSimulationTimeMatchesGtInFrameOrder();
         testStaticZoneRouteAlignment();
@@ -2624,15 +2803,23 @@ int main(int argc, char** argv) {
         testPredictedCollisionIsNotCurrentCollision();
         testConvergingOncomingVehicleIsPredictedOutsideNarrowCorridor();
         testStaticObstacleFollowNeverCommandsZero();
-        std::cout << "preserved-safety subset: PASS (9 tests; not the full suite)\n";
+        testCrossTrafficWaitingVehicleCapsBeforeLaunch();
+        testMeasuredReverseObjectMotionDrivesPrediction();
+        std::cout << "preserved-safety subset: PASS (12 tests; not the full suite)\n";
         return 0;
     }
     if (argc == 2 && std::string(argv[1]) == "--traffic-stop-regression") {
         testLaneChangeExecutionBlockedByTrafficStops();
         return 0;
     }
+    if (argc == 2 && std::string(argv[1]) == "--mission-corridors") {
+        testMixedCheckpointMissionsUseEntryExitCorridors();
+        std::cout << "sequential mission corridor regression: PASS\n";
+        return 0;
+    }
     testRecoveryDoesNotCommandAStop();
     testEmergencyBrakingLatchesEntrySteering();
+    testPositiveCrawlTargetDoesNotLatchStop();
     testTrafficControllerParsing();
     testRdbSimulationTimeMatchesGtInFrameOrder();
     testStaticZoneRouteAlignment();
@@ -2669,6 +2856,8 @@ int main(int argc, char** argv) {
     testLeadBrakingUsesRelativeStoppingDistance();
     testPreparedLaneChangeCancelsWhenBlockerMoves();
     testStationaryAdjacentVehicleUsesShortRangeCaution();
+    testCrossTrafficWaitingVehicleCapsBeforeLaunch();
+    testMeasuredReverseObjectMotionDrivesPrediction();
     testCloserVehicleConstraintOverridesFarStopPlan();
     testSafeAvoidanceIgnoresStaticSiblingObstacles();
     testSharpCurveHasSeparateSpeed();

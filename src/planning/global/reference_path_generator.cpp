@@ -993,7 +993,13 @@ bool laneChangeEverAllowed(const LaneSection& section, int fromLaneId,
         std::abs(fromLaneId) < std::abs(toLaneId) ? fromLaneId : toLaneId;
     const auto owner = section.lanes.find(ownerId);
     if (owner == section.lanes.end()) return false;
+    // No painted boundary is not a solid boundary.  This is common where a
+    // zero-width XODR lane opens inside a junction connector.  Treating an
+    // absent roadMark as laneChange="none" made a legal split impossible to
+    // enter online even though the precomputed footprint transition passed.
+    if (owner->second.roadMarks.empty()) return true;
     for (const auto& mark : owner->second.roadMarks) {
+        if (mark.type == "none") return true;
         if (mark.laneChange == "both") return true;
         if (mark.laneChange == "increase" && toLaneId > fromLaneId) return true;
         if (mark.laneChange == "decrease" && toLaneId < fromLaneId) return true;
@@ -1006,6 +1012,13 @@ bool laneChangeAllowed(const LaneSection& section, int fromLaneId,
     const int ownerId = std::abs(fromLaneId) < std::abs(toLaneId) ? fromLaneId : toLaneId;
     const auto owner = section.lanes.find(ownerId);
     if (owner == section.lanes.end()) return false;
+    if (owner->second.roadMarks.empty()) return true;
+    const RoadMarkEntry* selected = &owner->second.roadMarks.front();
+    for (const auto& candidate : owner->second.roadMarks) {
+        if (candidate.s <= s + kEpsilon) selected = &candidate;
+        else break;
+    }
+    if (selected->type == "none") return true;
     const std::string mark = laneChangeMarkAt(owner->second, s);
     if (mark == "both") return true;
     if (mark == "increase") return toLaneId > fromLaneId;

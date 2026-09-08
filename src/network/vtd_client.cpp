@@ -14,6 +14,7 @@
 #include <netdb.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #endif
 
@@ -43,6 +44,19 @@ void closeNativeSocket(NativeSocket socket) {
 
 NativeSocket getNativeSocket(const VtdClientData& client) {
     return static_cast<NativeSocket>(client.socket);
+}
+
+std::size_t pendingVtdBytes(const VtdClientData& client) {
+#ifdef _WIN32
+    u_long count=0;
+    if (::ioctlsocket(getNativeSocket(client), FIONREAD, &count)!=0)
+        throw std::runtime_error("cannot query pending VTD bytes");
+#else
+    int count=0;
+    if (::ioctl(getNativeSocket(client), FIONREAD, &count)!=0)
+        throw std::runtime_error("cannot query pending VTD bytes");
+#endif
+    return static_cast<std::size_t>(count);
 }
 
 std::runtime_error makeSocketError(

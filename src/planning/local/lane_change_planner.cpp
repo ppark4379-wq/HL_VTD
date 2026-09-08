@@ -200,8 +200,8 @@ bool targetLaneHasSafeGap(const WorldState& world,
         foundObject = true;
         const double gap = object.pathS - world.egoPathS;
         const double objectLongitudinalSpeed =
-            static_cast<double>(object.raw.speed) *
-            std::cos(object.raw.heading - world.ego.heading);
+            objectVelocityX(object) * std::cos(world.ego.heading) +
+            objectVelocityY(object) * std::sin(world.ego.heading);
         const double closingSpeed = gap >= 0.0
                                         ? world.egoSpeed - objectLongitudinalSpeed
                                         : objectLongitudinalSpeed - world.egoSpeed;
@@ -2142,8 +2142,23 @@ bool buildRoadIdTrackingPath(
     double horizon,
     DecisionTraceData* trace,
     const MissionCorridorData* mission) {
-    if(map.corridorRuntime && mission && activeMissionLeg(*mission))
+    if(map.corridorRuntime && mission && activeMissionLeg(*mission)) {
+        const LaneKey current{world.egoRoadId,world.egoSectionIndex,
+                              world.egoLaneId};
+        if(missionLegRequiresGuideContinuity(*mission) ||
+           (world.egoLaneValid &&
+            missionLaneRequiresGuideContinuity(*mission,current))) {
+            traceDecision(trace,"road_corridor","guide_connector_required",
+                          "reason=xodr_gateway_chain_missing_or_detouring corridor_recovery_still_attempted=1");
+        }
+        // `guide continuity required` means the directed graph cannot prove
+        // the complete gateway chain.  It does not mean that the sampled
+        // XODR lanes under Ego disappeared.  Always try the corridor tracker;
+        // it has an all-lane/physical-network recovery tier and must be given
+        // the chance to build a drivable successor before the approximate
+        // checkpoint guide is used as the final fallback.
         return buildCorridorTrackingPath(output,plannerConfig,world,map,*mission,horizon,trace);
+    }
     output = {};
     output.config = plannerConfig;
     const bool missionActive = mission != nullptr &&
@@ -2346,8 +2361,17 @@ bool tryPrepareRoadConnectionLaneChange(
     std::size_t nearestGlobalIndex,
     DecisionTraceData* trace,
     const MissionCorridorData* mission) {
-    if(map.corridorRuntime && mission && activeMissionLeg(*mission))
-        return prepareCorridorLattice(state,config,safetyConfig,world,map,*mission,nullptr,nullptr,true,trace);
+    if(map.corridorRuntime && mission && activeMissionLeg(*mission)) {
+        const LaneKey current{world.egoRoadId,world.egoSectionIndex,
+                              world.egoLaneId};
+        const bool guideRequired=missionLegRequiresGuideContinuity(*mission) ||
+            (world.egoLaneValid &&
+             missionLaneRequiresGuideContinuity(*mission,current));
+        if(guideRequired) return false;
+        return prepareCorridorLattice(state,config,safetyConfig,world,map,
+                                      *mission,nullptr,nullptr,true,trace,
+                                      &globalPath);
+    }
     if (state.phase != LaneChangePhase::None || !world.egoLaneValid ||
         !world.egoPathValid) return false;
     const bool missionActive = mission != nullptr &&
@@ -2723,10 +2747,45 @@ bool tryPrepareObstacleLaneChange(
     double* pendingBlockerDistance,
     const std::vector<int>* confirmedStationaryObjectIds,
     DecisionTraceData* trace,
-    const MissionCorridorData* mission) {
-    if(map.corridorRuntime && mission && activeMissionLeg(*mission))
-        return prepareCorridorLattice(state,config,safetyConfig,world,map,*mission,
-                                      confirmedStationaryObjectIds,pendingBlockerDistance,false,trace);
+    const MissionCorridorData* mission,
+    bool activeReferenceIsMissionGuide) {
+    if(map.corridorRuntime && mission && activeMissionLeg(*mission)) {
+        const LaneKey current{world.egoRoadId,world.egoSectionIndex,
+                              world.egoLaneId};
+        const bool guideRequired=missionLegRequiresGuideContinuity(*mission) ||
+            (world.egoLaneValid &&
+             missionLaneRequiresGuideContinuity(*mission,current));
+        // Guide continuity means only that the directed lane graph cannot
+        // prove a complete chain to the requested exit.  It does not make
+        // the precomputed lanes physically unusable for local avoidance.
+        // Always search every lane in the current corridor first; otherwise
+        // a guide-gap section silently fell back to the old adjacent-lane
+        // generator and ignored the network we precomputed for exactly this
+        // case (M10 road 2264 was the reproduced example).
+        const bool corridorCandidate = prepareCorridorLattice(
+            state,config,safetyConfig,world,map,*mission,
+            confirmedStationaryObjectIds,pendingBlockerDistance,false,
+            trace,&globalPath,activeReferenceIsMissionGuide);
+        if(corridorCandidate) return true;
+        // The lattice scan is deliberately split across control frames.  Do
+        // not start the exhaustive legacy scan while that same all-lane scan
+        // is merely deferred by its time budget; continue it next frame.
+        if(map.corridorRuntime->searchCursor[0] != 0) return false;
+        const MissionLegData* activeLeg=activeMissionLeg(*mission);
+        if(activeLeg != nullptr && activeLeg->guideRouteAuthority) {
+            // The legacy adjacent-lane planner has no physical branch
+            // identity.  On an official-guide leg it can see the same lane
+            // metadata on both sides of a split and unknowingly authorize the
+            // wrong road.  Keep/recover the official trajectory instead.
+            traceDecision(trace,"corridor_lattice",
+                          "guide_authority_fallback_blocked",
+                          "reason=legacy_planner_cannot_prove_gateway_branch");
+            return false;
+        }
+        if(!guideRequired) return false;
+        traceDecision(trace,"corridor_lattice","guide_fallback_selected",
+                      "reason=all_corridor_lanes_exhausted_and_current_lane_has_no_constrained_gateway_chain");
+    }
     if (pendingBlockerDistance != nullptr) *pendingBlockerDistance = -1.0;
     if (state.phase != LaneChangePhase::None || !world.egoLaneValid ||
         !world.egoPathValid) return false;
@@ -2836,6 +2895,24 @@ bool tryPrepareObstacleLaneChange(
         *pendingBlockerDistance = routeMatchedObstacle.relativeS;
     }
     const WorldObjectState* obstacle = &routeMatchedObstacle;
+    const LaneKey currentSearchLane{world.egoRoadId,world.egoSectionIndex,
+                                    world.egoLaneId};
+    if(state.failedObstacleId==static_cast<int>(obstacle->raw.id) &&
+       state.failedSearchLaneValid &&
+       state.failedSearchLane==currentSearchLane &&
+       std::abs(world.egoRoadS-state.failedSearchRoadS)<2.0 &&
+       world.receiveTime<state.retrySearchAfter) {
+        traceDecision(trace,"lane_change","failed_search_retry_throttled",
+                      "reason=same_obstacle_and_pose_candidate_set_unchanged");
+        return false;
+    }
+    const auto rememberFailedSearch=[&]() {
+        state.failedObstacleId=static_cast<int>(obstacle->raw.id);
+        state.failedSearchLane=currentSearchLane;
+        state.failedSearchLaneValid=true;
+        state.failedSearchRoadS=world.egoRoadS;
+        state.retrySearchAfter=world.receiveTime+0.75;
+    };
 
     // 후보 차선은 Ego가 아니라 "장애물이 놓인 차선"의 양옆이다. 장애물 앞
     // 구간이 편도 1차선이어도, 장애물이 있는 도로에 옆 차선이 있으면 회피할 수
@@ -2861,6 +2938,7 @@ bool tryPrepareObstacleLaneChange(
             egoRoadFound->second.sections.size())) {
         traceDecision(trace, "lane_change", "no_safe_candidate",
                       "reason=invalid_ego_or_obstacle_road_section");
+        rememberFailedSearch();
         return false;
     }
     const Road& obstacleRoad = obstacleRoadFound->second;
@@ -3330,6 +3408,7 @@ bool tryPrepareObstacleLaneChange(
     }
     traceDecision(trace, "lane_change", "no_safe_candidate",
                   "no geometrically trackable collision-free lateral progress exists");
+    rememberFailedSearch();
     return false;
 }
 
@@ -3374,9 +3453,16 @@ void advanceLaneChangePhase(LaneChangeData& state,
                           "longitudinal stop remains active while lateral avoidance proceeds");
         }
         if (!candidatePathSafe) {
-            traceDecision(trace, "lane_change", "phase_transition",
-                          "prepare->none reason=candidate_became_unsafe");
-            resetLaneChange(state);
+            // Candidate safety is recomputed from live objects and can flip
+            // for a single frame.  Never delete the only route during that
+            // transient: longitudinal safety control can hold the vehicle,
+            // while the planner may atomically replace a genuinely blocked
+            // static route.  Clearing here used to drop tracking onto an
+            // arbitrary successor exactly at merges/splits.
+            state.phaseElapsed = 0.0;
+            traceDecision(trace, "lane_change",
+                          "unsafe_candidate_retained",
+                          "prepare held; committed route authority preserved");
             return;
         }
         if (state.roadConnectionManeuver &&
@@ -3485,6 +3571,9 @@ void advanceLaneChangePhase(LaneChangeData& state,
             // 해제하지 않는다. section/road 경계에서 새 경로 생성이
             // 한두 프레임 늦어져도 마지막 정상 경로를 계속 추종하며,
             // 경로 공백으로 인한 정지와 급조향을 방지한다.
+            // Successor construction performs all-lane recovery each frame.
+            // Clearing this path after a timer cannot create a successor and
+            // would turn a recoverable planning failure into invalid input.
             if (!successorPathReady) {
                 state.phaseElapsed = config.settleTime;
                 traceDecision(trace, "lane_change",

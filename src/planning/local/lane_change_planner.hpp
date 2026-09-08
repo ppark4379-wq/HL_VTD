@@ -46,7 +46,8 @@ bool tryPrepareObstacleLaneChange(
     double* pendingBlockerDistance = nullptr,
     const std::vector<int>* confirmedStationaryObjectIds = nullptr,
     DecisionTraceData* trace = nullptr,
-    const MissionCorridorData* mission = nullptr);
+    const MissionCorridorData* mission = nullptr,
+    bool activeReferenceIsMissionGuide = false);
 
 void advanceLaneChangePhase(LaneChangeData& state,
                             const LaneChangeConfig& config,

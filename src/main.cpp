@@ -390,7 +390,8 @@ int main(int argc, char* argv[]) {
                 throw std::runtime_error("cannot load precomputed corridor network: "+networkError);
             if (!initializeMissionCorridor(
                     planning.missionCorridor, mapData,
-                    options.checkpoint_path.string())) {
+                    options.checkpoint_path.string(),
+                    &planning.pathPlanner.waypoints)) {
                 throw std::runtime_error(
                     "cannot build checkpoint mission corridor: " +
                     options.checkpoint_path.string());
@@ -499,6 +500,7 @@ int main(int argc, char* argv[]) {
         using LogClock = std::chrono::steady_clock;
         const auto logStartTime = LogClock::now();
         std::size_t frameCount = 0;
+        std::size_t reportedDroppedGtFrames = 0;
 
         while (receiveGtFrame(receiver)) {
             const GtFrame& gt = getLatestGtFrame(receiver);
@@ -541,6 +543,12 @@ int main(int argc, char* argv[]) {
             if (trace != nullptr) {
                 beginDecisionTraceFrame(*trace, frameCount,
                                         elapsedWallTime);
+                if (receiver.droppedFrames != reportedDroppedGtFrames) {
+                    traceDecision(trace, "network", "stale_gt_frames_discarded",
+                        "count=" + std::to_string(receiver.droppedFrames-reportedDroppedGtFrames) +
+                        " total=" + std::to_string(receiver.droppedFrames));
+                    reportedDroppedGtFrames = receiver.droppedFrames;
+                }
             }
             updateFrameClock(clock, simulationTime,
                              getLatestGtReceiveTime(receiver),

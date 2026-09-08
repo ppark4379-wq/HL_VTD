@@ -140,8 +140,8 @@ void updateObjectRelations(WorldState& world,
                 objectLateralHalfExtent + lateralMargin;
             object.isOnEgoPath = std::abs(object.relativeD) <= allowedLateral;
             const double objectLongitudinalSpeed =
-                static_cast<double>(object.raw.speed) *
-                std::cos(object.raw.heading - world.ego.heading);
+                objectVelocityX(object) * std::cos(world.ego.heading) +
+                objectVelocityY(object) * std::sin(world.ego.heading);
             object.ttc = calculateTTC(
                 object.relativeS,
                 world.egoSpeed - objectLongitudinalSpeed);
@@ -149,6 +149,59 @@ void updateObjectRelations(WorldState& world,
         object.isInsideCrosswalk = objectInsideAnyCrosswalk(object, zones);
         object.isCollisionRisk = intersects(world.egoObb, object.obb);
     }
+}
+
+void updateObjectMotion(WorldProcessData& data, double frameDt) {
+    std::map<std::uint32_t, WorldProcessData::ObjectMotionSample> current;
+    for (auto& object : data.state.objects) {
+        WorldProcessData::ObjectMotionSample sample;
+        sample.x = object.raw.x;
+        sample.y = object.raw.y;
+        const auto previous = data.objectMotion.find(object.raw.id);
+        if (previous != data.objectMotion.end()) {
+            if (frameDt <= 1e-6) {
+                sample.velocityX = previous->second.velocityX;
+                sample.velocityY = previous->second.velocityY;
+                sample.velocityValid = previous->second.velocityValid;
+            } else {
+                const double dx = sample.x - previous->second.x;
+                const double dy = sample.y - previous->second.y;
+                const double displacement = std::hypot(dx, dy);
+                // Reject an ID reuse/teleport but retain ordinary high-speed
+                // actors.  The fixed 0.5 m term tolerates quantized RDB poses
+                // without accepting a scenario reset as velocity.
+                const double maximumDisplacement =
+                    data.config.maxValidSpeed * frameDt + 0.5;
+                if (std::isfinite(displacement) &&
+                    displacement <= maximumDisplacement) {
+                    const double measuredX = dx / frameDt;
+                    const double measuredY = dy / frameDt;
+                    constexpr double kVelocityFilter = 0.65;
+                    if (previous->second.velocityValid) {
+                        sample.velocityX =
+                            kVelocityFilter * measuredX +
+                            (1.0 - kVelocityFilter) *
+                                previous->second.velocityX;
+                        sample.velocityY =
+                            kVelocityFilter * measuredY +
+                            (1.0 - kVelocityFilter) *
+                                previous->second.velocityY;
+                    } else {
+                        sample.velocityX = measuredX;
+                        sample.velocityY = measuredY;
+                    }
+                    sample.velocityValid =
+                        std::isfinite(sample.velocityX) &&
+                        std::isfinite(sample.velocityY);
+                }
+            }
+        }
+        object.velocityX = sample.velocityX;
+        object.velocityY = sample.velocityY;
+        object.velocityValid = sample.velocityValid;
+        current.emplace(object.raw.id, sample);
+    }
+    data.objectMotion = std::move(current);
 }
 
 }  // namespace
@@ -206,6 +259,7 @@ void runWorldProcess(WorldProcessData& data,
     }
     updateEgoMotion(data, gt, receiveTime, frameDt);
     data.state.egoSpeed = data.filteredSpeed;
+    updateObjectMotion(data, frameDt);
     // checkpoint mission에서 guide route는 정지선/구역의 순서를 붙이는
     // 보조자료일 뿐이다. 자유 corridor의 다른 차선을 주행해 guide route
     // 투영이 실패해도 센서 입력이나 주행 자체를 invalid로 만들지 않는다.

@@ -83,6 +83,16 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.behavior.nearbyObjectLateralDistance > 0.0 &&
            config.behavior.stationaryAdjacentVehicleCautionSpeed > 0.0 &&
            config.behavior.stationaryAdjacentVehicleMaximumDistance > 0.0 &&
+           config.behavior.crossTrafficCautionSpeed > 0.0 &&
+           config.behavior.crossTrafficForwardDistance > 0.0 &&
+           config.behavior.crossTrafficApproachDistance > 0.0 &&
+           config.behavior.crossTrafficMinimumAngle > 0.0 &&
+           config.behavior.crossTrafficMinimumAngle < 1.5707963267948966 &&
+           config.behavior.denseStaticSpeed > 0.0 &&
+           config.behavior.denseStaticForwardDistance > 0.0 &&
+           config.behavior.denseStaticLateralDistance > 0.0 &&
+           config.behavior.denseStaticPairDistance > 0.0 &&
+           config.behavior.denseStaticReleaseTime > 0.0 &&
            config.behavior.stationaryVehicleMinimumLength > 0.0 &&
            config.behavior.stationaryVehicleMaximumLength >=
                config.behavior.stationaryVehicleMinimumLength &&
@@ -104,16 +114,24 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.laneChange.obstacleTriggerMinimumDistance > 0.0 &&
            config.laneChange.obstacleTriggerMaximumDistance >
                config.laneChange.obstacleTriggerMinimumDistance &&
+           config.laneChange.obstacleMandatoryAvoidanceDistance > 0.0 &&
+           config.laneChange.obstacleMandatoryAvoidanceDistance <=
+               config.laneChange.obstacleTriggerMaximumDistance &&
            config.laneChange.stoppedDynamicConfirmationTime >= 0.0 &&
            config.laneChange.roadConnectionPrepareDistance > 0.0 &&
            config.laneChange.transitionLength > 0.0 &&
            config.laneChange.latticeShortDistance >= 6.0 &&
+           config.laneChange.latticeSearchBudgetMs > 0.0 &&
+           config.laneChange.latticeSearchBudgetMs <= 40.0 &&
            config.laneChange.latticeMediumDistance > config.laneChange.latticeShortDistance &&
            config.laneChange.latticeLongDistance > config.laneChange.latticeMediumDistance &&
            config.laneChange.latticeLaneCost >= 0.0 &&
            config.laneChange.latticeCurvatureCost >= 0.0 &&
            config.laneChange.latticeProgressCost >= 0.0 &&
            config.laneChange.latticeObstacleClearance >= 0.0 &&
+           config.laneChange.latticeTightObstacleClearance >= 0.0 &&
+           config.laneChange.latticeTightObstacleClearance <=
+               config.laneChange.latticeObstacleClearance &&
            config.laneChange.gatewayReserveDistance >= 0.0 &&
            config.laneChange.minimumTargetTTC > 0.0 &&
            config.laneChange.maximumObstacleLaneIntrusion >= 0.0 &&
@@ -186,6 +204,12 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.minimumObjectResponseSpeed) &&
         setSpeedConfigValue(values, "planning.nearby_object_caution_kph",
                        config.behavior.nearbyObjectCautionSpeed) &&
+        (!values.count("planning.dense_static_speed_kph") ||
+         setSpeedConfigValue(values, "planning.dense_static_speed_kph", config.behavior.denseStaticSpeed)) &&
+        setOptionalConfigValue(values, "planning.dense_static_forward_distance", config.behavior.denseStaticForwardDistance) &&
+        setOptionalConfigValue(values, "planning.dense_static_lateral_distance", config.behavior.denseStaticLateralDistance) &&
+        setOptionalConfigValue(values, "planning.dense_static_pair_distance", config.behavior.denseStaticPairDistance) &&
+        setOptionalConfigValue(values, "planning.dense_static_release_time", config.behavior.denseStaticReleaseTime) &&
         setConfigValue(values, "planning.nearby_object_lateral_distance",
                        config.behavior.nearbyObjectLateralDistance) &&
         setSpeedConfigValue(
@@ -194,6 +218,14 @@ bool loadDrivingConfig(DrivingConfig& config,
         setConfigValue(
             values, "planning.stationary_adjacent_vehicle_maximum_distance",
             config.behavior.stationaryAdjacentVehicleMaximumDistance) &&
+        setSpeedConfigValue(values, "planning.cross_traffic_caution_kph",
+                            config.behavior.crossTrafficCautionSpeed) &&
+        setConfigValue(values, "planning.cross_traffic_forward_distance",
+                       config.behavior.crossTrafficForwardDistance) &&
+        setConfigValue(values, "planning.cross_traffic_approach_distance",
+                       config.behavior.crossTrafficApproachDistance) &&
+        setConfigValue(values, "planning.cross_traffic_minimum_angle",
+                       config.behavior.crossTrafficMinimumAngle) &&
         setConfigValue(values, "planning.stationary_vehicle_minimum_length",
                        config.behavior.stationaryVehicleMinimumLength) &&
         setConfigValue(values, "planning.stationary_vehicle_maximum_length",
@@ -236,6 +268,8 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.laneChange.obstacleTriggerMinimumDistance) &&
         setConfigValue(values, "lane_change.obstacle_trigger_maximum_distance",
                        config.laneChange.obstacleTriggerMaximumDistance) &&
+        setConfigValue(values, "lane_change.obstacle_mandatory_avoidance_distance",
+                       config.laneChange.obstacleMandatoryAvoidanceDistance) &&
         setConfigValue(values, "lane_change.stopped_dynamic_confirmation_time",
                        config.laneChange.stoppedDynamicConfirmationTime) &&
         setConfigValue(values, "lane_change.road_connection_prepare_distance",
@@ -265,12 +299,14 @@ bool loadDrivingConfig(DrivingConfig& config,
         setConfigValue(values, "lane_change.maximum_lateral_offset",
                        config.laneChange.maximumLateralOffset) &&
         setOptionalConfigValue(values, "lane_change.lattice_short_distance",config.laneChange.latticeShortDistance) &&
+        setOptionalConfigValue(values, "lane_change.lattice_search_budget_ms",config.laneChange.latticeSearchBudgetMs) &&
         setOptionalConfigValue(values, "lane_change.lattice_medium_distance",config.laneChange.latticeMediumDistance) &&
         setOptionalConfigValue(values, "lane_change.lattice_long_distance",config.laneChange.latticeLongDistance) &&
         setOptionalConfigValue(values, "lane_change.lattice_lane_cost",config.laneChange.latticeLaneCost) &&
         setOptionalConfigValue(values, "lane_change.lattice_curvature_cost",config.laneChange.latticeCurvatureCost) &&
         setOptionalConfigValue(values, "lane_change.lattice_progress_cost",config.laneChange.latticeProgressCost) &&
         setOptionalConfigValue(values, "lane_change.lattice_obstacle_clearance",config.laneChange.latticeObstacleClearance) &&
+        setOptionalConfigValue(values, "lane_change.lattice_tight_obstacle_clearance",config.laneChange.latticeTightObstacleClearance) &&
         setOptionalConfigValue(values, "lane_change.gateway_reserve_distance",config.laneChange.gatewayReserveDistance) &&
         setConfigValue(values, "lane_change.minimum_lane_edge_clearance",
                        config.laneChange.minimumLaneEdgeClearance) &&

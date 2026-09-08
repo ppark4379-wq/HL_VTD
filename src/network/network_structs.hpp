@@ -45,6 +45,7 @@ struct GtReceiverData {
     std::vector<std::uint8_t> streamBuffer;
     GtFrame latestGt;
     double latestReceiveTime{};
+    std::size_t droppedFrames{};
 };
 
 struct RdbClockSample {

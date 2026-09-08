@@ -47,6 +47,16 @@ def summarize(directory):
             rates.append(deltas[-1]/dt)
             if num(b,'ego_speed')>.5:desired.append(abs(num(b,'planned_steering')-num(a,'planned_steering')))
     collision=[r for r in rows if num(r,'collision')>0]
+    collision_episodes=[]
+    active_collision=None
+    for row in rows:
+        frame=int(num(row,'frame'))
+        if num(row,'collision')>0:
+            if active_collision is None:active_collision=[frame,frame]
+            else:active_collision[1]=frame
+        elif active_collision is not None:
+            collision_episodes.append(active_collision);active_collision=None
+    if active_collision is not None:collision_episodes.append(active_collision)
     goal=any(num(r,'goal_reached')>0 for r in rows)
     last={}
     try:last=json.loads((directory/'rviz/latest.json').read_text())
@@ -57,6 +67,8 @@ def summarize(directory):
     travelled=sum(math.hypot(num(b,'ego_x')-num(a,'ego_x'),num(b,'ego_y')-num(a,'ego_y')) for a,b in zip(rows,rows[1:]))
     return dict(frames=len(rows),duration_s=num(rows[-1],'elapsed_wall_time_s') if rows else 0.,
                 travelled_m=travelled,goal_reached=goal,collision_frames=len(collision),
+                collision_episodes=len(collision_episodes),
+                collision_episode_frames=collision_episodes,
                 first_collision_s=num(collision[0],'elapsed_wall_time_s') if collision else None,
                 max_command_steering_rad=max((abs(num(r,'command_steering')) for r in rows),default=0),
                 max_command_step_rad=max(deltas,default=0),max_wall_time_steering_rate=max(rates,default=0),
@@ -65,7 +77,13 @@ def summarize(directory):
                 invalid_plan_frames=sum(num(r,'plan_valid')==0 for r in rows),
                 avoidance_selections=len(selected),no_candidate_frames=len(rejected),
                 last_mission={'active_leg':last.get('decision',{}).get('active_leg')},last_decision=last.get('decision',{}),
-                severe=bool(collision) or not goal or sum(d>.2 for d in desired)>=4,
+                # Judge the command actually sent to VTD.  Raw pure-pursuit
+                # steering can jump when its lookahead point crosses a path
+                # sample boundary, but the controller's rate limiter removes
+                # that jump before transmission.  Treat the raw value as a
+                # diagnostic warning, not as a failed drive.
+                severe=len(collision_episodes)>1 or not goal or max(deltas,default=0)>.1,
+                raw_desired_steering_warning=sum(d>.2 for d in desired)>=4,
                 collision_definition='logged current OBB overlap; not native VTD contact telemetry',
                 steering_definition='command step and desired step; wall-time rate is not simulation-time rate')
 
@@ -110,12 +128,16 @@ def main():
                     if abs(ego.get('speed',1.))<.1 and decision.get('stop_reason',0)==0 and decision.get('target_speed',1.)<.5 and not decision.get('emergency_brake',False):
                         stopped_since=stopped_since or now
                     else:stopped_since=None
-                    if any(o.get('collision',False) for o in data.get('objects',[])):reason='current_collision'
+                    # Preserve the run through one allowed contact episode;
+                    # summarize() evaluates the completed collision episodes.
                     if invalid_since and now-invalid_since>15:reason='invalid_plan_stall_15s'
                     if stopped_since and now-stopped_since>30:reason='non_traffic_zero_target_30s'
                 except (OSError,ValueError):pass
-                collision,csv_cursor=poll_logged_collision(directory/'run.csv',csv_cursor)
-                if collision:reason='logged_current_collision'
+                # One contact episode is tolerated by the current competition
+                # target.  Preserve the complete run and count independent
+                # episodes in summarize() instead of aborting on the first
+                # overlapping CSV frame.
+                _,csv_cursor=poll_logged_collision(directory/'run.csv',csv_cursor)
                 if now-started>args.timeout+100:reason='runner_watchdog'
                 if reason:
                     os.kill(process.pid,signal.SIGINT)

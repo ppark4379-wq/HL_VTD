@@ -62,6 +62,22 @@ bool hasVehicleSizedBoundingBox(const WorldObjectState& object,
            length >= width * 1.4;
 }
 
+bool hasCrossTrafficVehicleBoundingBox(const WorldObjectState& object,
+                                       const PlanningBehaviorConfig& config) {
+    const double length = static_cast<double>(object.raw.length);
+    const double width = static_cast<double>(object.raw.width);
+    // The parked-adjacent filter intentionally stops at passenger-car size,
+    // but cross traffic also includes vans, buses and trucks.  Reusing the
+    // 7.5 m passenger-car ceiling excluded an 8.7 m crossing truck in M13.
+    constexpr double kMaximumRoadVehicleLength = 20.0;
+    constexpr double kMaximumRoadVehicleWidth = 4.0;
+    return length >= config.stationaryVehicleMinimumLength &&
+           width >= config.stationaryVehicleMinimumWidth &&
+           length <= kMaximumRoadVehicleLength &&
+           width <= kMaximumRoadVehicleWidth &&
+           length >= width * 1.2;
+}
+
 // 움직임만으로는 끼어들기 의도를 알 수 없는 정차 차량을 별도로 찾는다.
 // 모든 정적 물체를 감속 대상으로 만들지 않도록 차량형 OBB, 같은 방향의 바로
 // 옆 차선, 짧은 전방 거리 조건을 모두 만족해야 한다.
@@ -102,12 +118,52 @@ const WorldObjectState* findStationaryAdjacentVehicle(
     return nearest;
 }
 
+// 교차도로의 정차 차량은 현재 속도가 0이라는 이유만으로 안전하지 않다.
+// Ego와 객체의 heading 직선 교점을 구해, 둘 다 교점에 접근하는 방향이고
+// 차량형 OBB일 때만 주의속도를 적용한다. 같은 방향 주차차량과 이미 교차점을
+// 지나 멀어지는 차량에는 적용되지 않는다.
+const WorldObjectState* findCrossTrafficThreat(
+    const WorldState& world,
+    const PlanningBehaviorConfig& config,
+    int safelyAvoidedObjectId) {
+    const double egoX=std::cos(world.ego.heading);
+    const double egoY=std::sin(world.ego.heading);
+    const WorldObjectState* nearest=nullptr;
+    double nearestIntersection=std::numeric_limits<double>::infinity();
+    for(const auto& object:world.objects) {
+        if(static_cast<int>(object.raw.id)==safelyAvoidedObjectId ||
+           !hasCrossTrafficVehicleBoundingBox(object,config) ||
+           std::abs(object.raw.z-world.ego.z)>3.0) continue;
+        const double motionHeading=objectMotionHeading(object);
+        const double objectX=std::cos(motionHeading);
+        const double objectY=std::sin(motionHeading);
+        const double determinant=egoX*objectY-egoY*objectX;
+        if(std::abs(determinant)<
+           std::sin(config.crossTrafficMinimumAngle)) continue;
+        const double relativeX=object.raw.x-world.ego.x;
+        const double relativeY=object.raw.y-world.ego.y;
+        const double egoToIntersection=
+            (relativeX*objectY-relativeY*objectX)/determinant;
+        const double objectToIntersection=
+            (relativeX*egoY-relativeY*egoX)/determinant;
+        const double passedAllowance=.5*double(object.raw.length)+1.0;
+        if(egoToIntersection<0.0 ||
+           egoToIntersection>config.crossTrafficForwardDistance ||
+           objectToIntersection< -passedAllowance ||
+           objectToIntersection>config.crossTrafficApproachDistance) continue;
+        if(egoToIntersection<nearestIntersection) {
+            nearestIntersection=egoToIntersection;
+            nearest=&object;
+        }
+    }
+    return nearest;
+}
+
 // 앞차 속도를 Ego 진행방향 성분으로 환산한다.
 double longitudinalSpeedOf(const WorldObjectState& object,
                            const WorldState& world) {
-    return static_cast<double>(object.raw.speed) *
-           std::cos(static_cast<double>(object.raw.heading) -
-                    static_cast<double>(world.ego.heading));
+    return objectVelocityX(object) * std::cos(world.ego.heading) +
+           objectVelocityY(object) * std::sin(world.ego.heading);
 }
 
 }  // namespace
@@ -140,7 +196,6 @@ void updateBehavior(BehaviorState& state,
                     const PlanningBehaviorConfig& config,
                     double dt) {
     output = {};
-    (void)dt;
 
     // Recovery는 정지 상태가 아니라 이전 프레임의 경로를 새로운
     // road/section 기준 경로로 교체하는 내부 상태다. 맵매칭 경계에서
@@ -203,6 +258,13 @@ void updateBehavior(BehaviorState& state,
         selectedMode = LonMode::Follow;
     }
 
+    const WorldObjectState* crossTraffic=findCrossTrafficThreat(
+        world,config,state.safelyAvoidedObjectId);
+    if(crossTraffic!=nullptr && config.crossTrafficCautionSpeed<targetSpeed) {
+        targetSpeed=config.crossTrafficCautionSpeed;
+        selectedMode=LonMode::Follow;
+    }
+
     // Follow 진입과 해제에 서로 다른 임계값을 써서 경계에서의 진동을 막는다.
     const WorldObjectState* lead =
         findLeadObject(world, state.staticObstacleAvoidanceActive,
@@ -245,6 +307,32 @@ void updateBehavior(BehaviorState& state,
             }
         }
     }
+
+    // Do not exempt the currently avoided object: dense-scene speed must
+    // survive a manoeuvre replacement/completion and crosswalk cap release.
+    std::vector<const WorldObjectState*> closeStatic;
+    bool aheadStatic=false, dense=false;
+    const double c=std::cos(world.ego.heading),s=std::sin(world.ego.heading);
+    for(const auto& object:world.objects) {
+        if(!std::isfinite(object.raw.speed) || std::abs(object.raw.speed)>=0.3) continue;
+        const double dx=object.raw.x-world.ego.x,dy=object.raw.y-world.ego.y;
+        const double along=dx*c+dy*s, lateral=-dx*s+dy*c;
+        if(!std::isfinite(along) || !std::isfinite(lateral) || along < -5.0 ||
+           along>config.denseStaticForwardDistance ||
+           std::abs(lateral)>config.denseStaticLateralDistance) continue;
+        aheadStatic|=along>=0.0;
+        for(const auto* other:closeStatic)
+            if(other->raw.id!=object.raw.id &&
+               std::hypot(object.raw.x-other->raw.x,object.raw.y-other->raw.y)<=config.denseStaticPairDistance)
+                dense=true;
+        closeStatic.push_back(&object);
+    }
+    if(aheadStatic && (dense || state.denseStaticHoldRemaining>0.0))
+        state.denseStaticHoldRemaining=config.denseStaticReleaseTime;
+    else
+        state.denseStaticHoldRemaining=std::max(0.0,state.denseStaticHoldRemaining-std::max(0.0,dt));
+    if(state.denseStaticHoldRemaining>0.0)
+        targetSpeed=std::min(targetSpeed,config.denseStaticSpeed);
 
     state.longitudinal = selectedMode;
     output.longitudinal = selectedMode;

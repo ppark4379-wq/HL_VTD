@@ -6,6 +6,9 @@
 #include "data/vehicle/vehicle_structs.hpp"
 #include "planning/global/mission_corridor.hpp"
 
+#include <cstdint>
+#include <map>
+
 struct WorldProcessConfig {
     double speedFilterAlpha{0.25};
     double maxValidSpeed{80.0};
@@ -19,6 +22,13 @@ struct WorldProcessConfig {
 };
 
 struct WorldProcessData {
+    struct ObjectMotionSample {
+        double x{};
+        double y{};
+        double velocityX{};
+        double velocityY{};
+        bool velocityValid{};
+    };
     WorldProcessConfig config;
     WorldState state;
     double previousX{};
@@ -27,6 +37,7 @@ struct WorldProcessData {
     double filteredSpeed{};
     bool hasPreviousFrame{};
     MapMatchState egoMapMatch;
+    std::map<std::uint32_t, ObjectMotionSample> objectMotion;
 };
 
 void runWorldProcess(WorldProcessData& data,

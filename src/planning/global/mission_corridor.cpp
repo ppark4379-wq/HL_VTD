@@ -13,6 +13,7 @@
 #include <queue>
 #include <set>
 #include <sstream>
+#include <tuple>
 
 namespace {
 
@@ -293,12 +294,12 @@ DistanceMap shortestDistances(
     return distances;
 }
 
-MissionLegData makeMissionLeg(const PathGeneratorData& map,
-                              const MissionCheckpointData& from,
-                              const MissionCheckpointData& to,
-                              std::size_t fromIndex,
-                              std::size_t gatewayIndex,
-                              std::size_t toIndex) {
+MissionLegData makeSimpleMissionLeg(const PathGeneratorData& map,
+                                    const MissionCheckpointData& from,
+                                    const MissionCheckpointData& to,
+                                    std::size_t fromIndex,
+                                    std::size_t gatewayIndex,
+                                    std::size_t toIndex) {
     MissionLegData leg;
     leg.fromCheckpoint = fromIndex;
     leg.gatewayCheckpoint = gatewayIndex;
@@ -390,6 +391,110 @@ MissionLegData makeMissionLeg(const PathGeneratorData& map,
     return leg;
 }
 
+// 교영측이 제공한 쌍은 [교차로 진입, 교차로 진출]이다.
+// 진입점에 다 온 뒤 진출 방향을 고르면 이미 분기가 끝날 수
+// 있다. 따라서 from -> gateway -> exit를 하나의 제한된 leg로
+// 묶고, gateway를 실제로 통과하는 lane chain만 미리 cache한다.
+MissionLegData makeMissionLeg(const PathGeneratorData& map,
+                              const MissionCheckpointData& from,
+                              const MissionCheckpointData& gateway,
+                              const MissionCheckpointData& to,
+                              std::size_t fromIndex,
+                              std::size_t gatewayIndex,
+                              std::size_t toIndex) {
+    if (gatewayIndex == toIndex) {
+        MissionLegData leg = makeSimpleMissionLeg(
+            map, from, to, fromIndex, gatewayIndex, toIndex);
+        leg.gatewayBestCost = leg.bestCost;
+        leg.exitBestCost = 0.0;
+        return leg;
+    }
+
+    const MissionLegData approach = makeSimpleMissionLeg(
+        map, from, gateway, fromIndex, gatewayIndex, gatewayIndex);
+    const MissionLegData crossing = makeSimpleMissionLeg(
+        map, gateway, to, gatewayIndex, toIndex, toIndex);
+    MissionLegData leg;
+    leg.fromCheckpoint = fromIndex;
+    leg.gatewayCheckpoint = gatewayIndex;
+    leg.toCheckpoint = toIndex;
+    leg.targetLanes = to.lanes;
+    leg.gatewayBestCost = approach.bestCost;
+    leg.exitBestCost = crossing.bestCost;
+    leg.bestCost = approach.bestCost + crossing.bestCost;
+    if (!approach.valid || !crossing.valid ||
+        !std::isfinite(leg.bestCost)) {
+        return leg;
+    }
+    leg.allowedLanes = approach.allowedLanes;
+    leg.allowedLanes.insert(crossing.allowedLanes.begin(),
+                            crossing.allowedLanes.end());
+
+    // gateway 후보 차선별로 exit suffix를 고정한다. approach의
+    // 끝 차선과 서로 다른 crossing preferredRoute를 이어 붙이면
+    // 교차로 안에서 경로가 순간이동하므로 반드시 동일 gateway
+    // lane에서 시작하는 suffix만 사용한다.
+    const auto appendSuffix = [&](std::vector<LaneKey> prefix,
+                                  const std::vector<LaneKey>& suffix) {
+        if (prefix.empty() || suffix.empty() ||
+            !(prefix.back() == suffix.front())) {
+            return std::vector<LaneKey>{};
+        }
+        prefix.insert(prefix.end(), std::next(suffix.begin()), suffix.end());
+        return prefix;
+    };
+    // gateway를 이미 통과한 차선에서는 crossing suffix를 바로
+    // 쓰고, gateway 이전 차선은 approach cache + 동일 gateway
+    // suffix로 구성한다. 그래프상 gateway를 우회하는 경로는
+    // cache에 들어올 수 없다.
+    for (const auto& [lane, suffix] : crossing.routesToTargetByLane) {
+        leg.routesToTargetByLane[lane] = suffix;
+    }
+    std::set<LaneKey> usableGateways;
+    for (const LaneKey& lane : gateway.lanes) {
+        if (crossing.routesToTargetByLane.count(lane)) {
+            usableGateways.insert(lane);
+        }
+    }
+    if (usableGateways.empty()) return leg;
+    // approach의 단순 최단 gateway가 진출로 연결되지 않을 수
+    // 있다. 반드시 exit suffix가 있는 gateway lane만 목표로 다시
+    // 탐색해 진입과 진출이 동일 chain이 되게 한다.
+    for (const LaneKey& lane : approach.allowedLanes) {
+        std::vector<LaneKey> prefix;
+        if (!findRestrictedRoute(map, approach.allowedLanes,
+                                 usableGateways, lane, prefix) ||
+            prefix.empty()) {
+            continue;
+        }
+        const auto suffix = crossing.routesToTargetByLane.find(prefix.back());
+        if (suffix == crossing.routesToTargetByLane.end()) continue;
+        std::vector<LaneKey> route = appendSuffix(prefix, suffix->second);
+        if (!route.empty()) {
+            leg.routesToTargetByLane[lane] = std::move(route);
+        }
+    }
+    double preferredCost = kInfinity;
+    for (const LaneKey& lane : from.lanes) {
+        const auto route = leg.routesToTargetByLane.find(lane);
+        if (route == leg.routesToTargetByLane.end() || route->second.empty()) {
+            continue;
+        }
+        double cost = 0.0;
+        for (std::size_t index = 1; index < route->second.size(); ++index) {
+            cost += edgeCost(map, route->second[index - 1],
+                             route->second[index]);
+        }
+        if (cost < preferredCost) {
+            preferredCost = cost;
+            leg.preferredRoute = route->second;
+        }
+    }
+    leg.valid = !leg.preferredRoute.empty() &&
+        leg.targetLanes.count(leg.preferredRoute.back()) != 0;
+    return leg;
+}
+
 bool pruneCheckpointLanesToContinuousMission(
     const PathGeneratorData& map,
     std::vector<MissionCheckpointData>& checkpoints) {
@@ -441,8 +546,10 @@ bool pruneCheckpointLanesToContinuousMission(
 }
 
 // 대회 checkpoint는 시작, [교차로 진입, 진출] 반복, 종료로
-// 주어진다. 진입점은 구역의 끝을 알리는 경계로만 쓰고,
-// 진출점이 있는 road로 실제로 연결되는지를 mission 목표로 삼는다.
+// 주어진다. 진입/진출을 각각 별도 leg로 두면 진입점에
+// 다른 후에야 회전 방향을 선택하게 된다. 진출 checkpoint를
+// anchor로 두되, 사이 진입 checkpoint는 makeMissionLeg에서
+// 반드시 거치는 gateway로 제약한다.
 std::vector<std::size_t> missionAnchorIndices(std::size_t checkpointCount) {
     std::vector<std::size_t> result;
     if (checkpointCount == 0) return result;
@@ -450,10 +557,197 @@ std::vector<std::size_t> missionAnchorIndices(std::size_t checkpointCount) {
     for (std::size_t index = 2; index < checkpointCount; index += 2) {
         result.push_back(index);
     }
-    if (checkpointCount > 1 && result.back() != checkpointCount - 1) {
+    if (result.back() != checkpointCount - 1) {
         result.push_back(checkpointCount - 1);
     }
     return result;
+}
+
+bool guideLaneKey(const PathGeneratorData& map, const Waypoint& point,
+                  LaneKey& key) {
+    const auto road = map.roads.find(point.roadId);
+    if (road == map.roads.end() || road->second.sections.empty() ||
+        point.laneId == 0 || point.roadS < -1e-6 ||
+        point.roadS > road->second.length + 1e-6) {
+        return false;
+    }
+    int sectionIndex = 0;
+    for (std::size_t index = 0;
+         index < road->second.sections.size(); ++index) {
+        if (road->second.sections[index].s <= point.roadS + 1e-6) {
+            sectionIndex = static_cast<int>(index);
+        } else {
+            break;
+        }
+    }
+    key = LaneKey{point.roadId, sectionIndex, point.laneId};
+    return map.laneSegments.count(key) != 0 && isDrivingLane(map, key);
+}
+
+std::vector<std::size_t> matchCheckpointsToGuide(
+    const MissionCorridorData& mission,
+    const std::vector<Waypoint>& guide) {
+    std::vector<std::size_t> result;
+    if (guide.empty()) return result;
+    result.reserve(mission.checkpoints.size());
+    std::size_t begin = 0;
+    for (const auto& checkpoint : mission.checkpoints) {
+        std::size_t best = begin;
+        double bestDistance = kInfinity;
+        bool foundMatchingRoad = false;
+        for (std::size_t index = begin; index < guide.size(); ++index) {
+            const bool matchingRoad = std::find(
+                checkpoint.roadIds.begin(), checkpoint.roadIds.end(),
+                guide[index].roadId) != checkpoint.roadIds.end();
+            if (foundMatchingRoad && !matchingRoad) continue;
+            const double distance = std::hypot(
+                guide[index].x - checkpoint.checkpoint.x,
+                guide[index].y - checkpoint.checkpoint.y);
+            if ((matchingRoad && !foundMatchingRoad) ||
+                distance < bestDistance) {
+                foundMatchingRoad = matchingRoad;
+                bestDistance = distance;
+                best = index;
+            }
+        }
+        result.push_back(best);
+        begin = best;
+    }
+    return result;
+}
+
+MissionLegData makeGuideConstrainedMissionLeg(
+    const PathGeneratorData& map,
+    const MissionCheckpointData& from,
+    const MissionCheckpointData& gateway,
+    const MissionCheckpointData& to,
+    std::size_t fromIndex,
+    std::size_t gatewayIndex,
+    std::size_t toIndex,
+    const std::vector<Waypoint>& guide,
+    const std::vector<std::size_t>& checkpointGuideIndices) {
+    MissionLegData leg;
+    (void)from;
+    (void)gateway;
+    leg.fromCheckpoint = fromIndex;
+    leg.gatewayCheckpoint = gatewayIndex;
+    leg.toCheckpoint = toIndex;
+    leg.guideRouteAuthority = true;
+    if (checkpointGuideIndices.size() <= toIndex || guide.empty()) return leg;
+
+    const std::size_t begin = std::min(
+        checkpointGuideIndices[fromIndex], guide.size() - 1);
+    const std::size_t gatewayPoint = std::min(
+        checkpointGuideIndices[gatewayIndex], guide.size() - 1);
+    const std::size_t end = std::min(
+        checkpointGuideIndices[toIndex], guide.size() - 1);
+    if (begin > gatewayPoint || gatewayPoint > end) return leg;
+
+    std::set<std::tuple<int, int, bool>> guideSections;
+    LaneKey previous;
+    bool havePrevious = false;
+    for (std::size_t index = begin; index <= end; ++index) {
+        LaneKey key;
+        if (!guideLaneKey(map, guide[index], key)) continue;
+        guideSections.emplace(key.roadId, key.sectionIndex, key.laneId > 0);
+        if (!havePrevious || !(previous == key)) {
+            leg.preferredRoute.push_back(key);
+            previous = key;
+            havePrevious = true;
+        }
+    }
+    if (leg.preferredRoute.empty()) return leg;
+
+    // A corridor is the set of same-direction driving lanes alongside the
+    // official route, not every graph node that can eventually reach a
+    // checkpoint.  This removes graph-error detours while retaining all
+    // parallel lanes for local obstacle avoidance.
+    for (const auto& [key, segment] : map.laneSegments) {
+        (void)segment;
+        if (guideSections.count(
+                {key.roadId, key.sectionIndex, key.laneId > 0}) &&
+            isDrivingLane(map, key)) {
+            leg.allowedLanes.insert(key);
+        }
+    }
+
+    for (const LaneKey& lane : to.lanes) {
+        if (leg.allowedLanes.count(lane)) leg.targetLanes.insert(lane);
+    }
+    if (leg.targetLanes.empty()) {
+        const LaneKey finalGuideLane = leg.preferredRoute.back();
+        for (const LaneKey& lane : leg.allowedLanes) {
+            if (lane.roadId == finalGuideLane.roadId &&
+                lane.sectionIndex == finalGuideLane.sectionIndex &&
+                (lane.laneId > 0) == (finalGuideLane.laneId > 0)) {
+                leg.targetLanes.insert(lane);
+            }
+        }
+    }
+    if (leg.targetLanes.empty()) {
+        leg.targetLanes.insert(leg.preferredRoute.back());
+        leg.allowedLanes.insert(leg.preferredRoute.back());
+    }
+
+    const auto arcDistance = [&](std::size_t first, std::size_t last) {
+        double distance = 0.0;
+        for (std::size_t index = first; index < last; ++index) {
+            distance += std::hypot(guide[index + 1].x - guide[index].x,
+                                   guide[index + 1].y - guide[index].y);
+        }
+        return distance;
+    };
+    leg.gatewayBestCost = arcDistance(begin, gatewayPoint);
+    leg.exitBestCost = arcDistance(gatewayPoint, end);
+    leg.bestCost = leg.gatewayBestCost + leg.exitBestCost;
+
+    for (const LaneKey& lane : leg.allowedLanes) {
+        std::vector<LaneKey> route;
+        if (findRestrictedRoute(map, leg.allowedLanes,
+                                leg.targetLanes, lane, route)) {
+            leg.routesToTargetByLane.emplace(lane, std::move(route));
+        }
+    }
+    leg.valid = true;
+    return leg;
+}
+
+void overlapMissionLegHandoffs(const PathGeneratorData& map,
+                               std::vector<MissionLegData>& legs) {
+    // Checkpoint coordinates are approximate road gates.  A vehicle may be
+    // accepted on the exit road several metres before the sampled guide
+    // changes its road id.  Make adjacent legs share the complete directed
+    // lane surface at that gate so advancing the mission can never remove the
+    // lane currently under the vehicle.
+    for (std::size_t index = 1; index < legs.size(); ++index) {
+        const MissionLegData& previous = legs[index - 1];
+        MissionLegData& current = legs[index];
+        std::set<std::tuple<int, int, bool>> targetSections;
+        for (const LaneKey& lane : previous.targetLanes) {
+            targetSections.emplace(lane.roadId, lane.sectionIndex,
+                                   lane.laneId > 0);
+            current.allowedLanes.insert(lane);
+        }
+        for (const LaneKey& lane : previous.allowedLanes) {
+            if (targetSections.count(
+                    {lane.roadId, lane.sectionIndex, lane.laneId > 0})) {
+                current.allowedLanes.insert(lane);
+            }
+        }
+
+        // The added handoff lanes are useful only when the restricted XODR
+        // graph can reach this leg's gateway. Cache those routes exactly like
+        // the rest of the precomputed corridor. A genuine topology gap stays
+        // uncached and is handled by the guide-continuity connector.
+        current.routesToTargetByLane.clear();
+        for (const LaneKey& lane : current.allowedLanes) {
+            std::vector<LaneKey> route;
+            if (findRestrictedRoute(map, current.allowedLanes,
+                                    current.targetLanes, lane, route)) {
+                current.routesToTargetByLane.emplace(lane, std::move(route));
+            }
+        }
+    }
 }
 
 bool containsRoad(const MissionCheckpointData& checkpoint, int roadId) {
@@ -469,7 +763,8 @@ bool laneInSet(const std::set<LaneKey>& lanes, const LaneKey& key) {
 
 bool initializeMissionCorridor(MissionCorridorData& output,
                                PathGeneratorData& map,
-                               const std::string& checkpointCsv) {
+                               const std::string& checkpointCsv,
+                               const std::vector<Waypoint>* guidePath) {
     output = {};
     output.initialized = true;
     output.minimumTargetDistance = kInfinity;
@@ -485,9 +780,9 @@ bool initializeMissionCorridor(MissionCorridorData& output,
         }
         output.checkpoints.push_back(std::move(checkpoint));
     }
-    // 교차로 진입 checkpoint는 임의 피팅 좌표이므로 그 위치에 겹친
-    // connector road를 강제하지 않는다. 시작/교차로 진출/종료 anchor만
-    // 앞뒤 reachability로 줄여서 전체 mission이 연속적으로 연결되게 한다.
+    // 좌표는 임의 피팅이므로 정확한 점/차로를 강제하지 않는다. 다만 각
+    // seq가 나타내는 directed road 자체는 생략할 수 없으므로 모든 anchor를
+    // 앞뒤 reachability로 줄여 전체 mission을 연속적으로 연결한다.
     const std::vector<std::size_t> anchors = missionAnchorIndices(
         output.checkpoints.size());
     std::vector<MissionCheckpointData> anchorCheckpoints;
@@ -519,14 +814,27 @@ bool initializeMissionCorridor(MissionCorridorData& output,
     }
 
     output.legs.reserve(anchors.size() - 1);
+    const std::vector<std::size_t> checkpointGuideIndices =
+        guidePath != nullptr && !guidePath->empty()
+            ? matchCheckpointsToGuide(output, *guidePath)
+            : std::vector<std::size_t>{};
     for (std::size_t index = 0; index + 1 < anchors.size(); ++index) {
         const std::size_t fromIndex = anchors[index];
         const std::size_t toIndex = anchors[index + 1];
         const std::size_t gatewayIndex = fromIndex + 1 < toIndex
             ? fromIndex + 1 : toIndex;
-        MissionLegData leg = makeMissionLeg(
-            map, output.checkpoints[fromIndex], output.checkpoints[toIndex],
-            fromIndex, gatewayIndex, toIndex);
+        MissionLegData leg = guidePath != nullptr &&
+                                     !checkpointGuideIndices.empty()
+            ? makeGuideConstrainedMissionLeg(
+                  map, output.checkpoints[fromIndex],
+                  output.checkpoints[gatewayIndex],
+                  output.checkpoints[toIndex], fromIndex, gatewayIndex,
+                  toIndex, *guidePath, checkpointGuideIndices)
+            : makeMissionLeg(
+                  map, output.checkpoints[fromIndex],
+                  output.checkpoints[gatewayIndex],
+                  output.checkpoints[toIndex], fromIndex, gatewayIndex,
+                  toIndex);
         if (!leg.valid) {
             std::cerr << "[mission] checkpoint "
                       << output.checkpoints[fromIndex].checkpoint.sequence
@@ -541,9 +849,11 @@ bool initializeMissionCorridor(MissionCorridorData& output,
                   << output.checkpoints[gatewayIndex].checkpoint.sequence
                   << " -> exit "
                   << output.checkpoints[toIndex].checkpoint.sequence
-                  << " free_lanes=" << leg.allowedLanes.size() << '\n';
+                  << " free_lanes=" << leg.allowedLanes.size()
+                  << " shortest_m=" << leg.bestCost << '\n';
         output.legs.push_back(std::move(leg));
     }
+    overlapMissionLegHandoffs(map, output.legs);
     output.valid = !output.legs.empty();
     return output.valid;
 }
@@ -553,6 +863,36 @@ const MissionLegData* activeMissionLeg(const MissionCorridorData& mission) {
         return nullptr;
     }
     return &mission.legs[mission.activeLegIndex];
+}
+
+bool missionLegRequiresGuideContinuity(const MissionCorridorData& mission) {
+    const MissionLegData* leg=activeMissionLeg(mission);
+    if(!leg || leg->fromCheckpoint>=mission.checkpoints.size() ||
+       leg->toCheckpoint>=mission.checkpoints.size() ||
+       !std::isfinite(leg->bestCost)) return false;
+    const auto& from=mission.checkpoints[leg->fromCheckpoint].checkpoint;
+    const auto& gateway=
+        mission.checkpoints[leg->gatewayCheckpoint].checkpoint;
+    const auto& to=mission.checkpoints[leg->toCheckpoint].checkpoint;
+    const auto excessive=[](double cost,const Checkpoint& begin,
+                            const Checkpoint& end) {
+        const double direct=std::hypot(end.x-begin.x,end.y-begin.y);
+        return cost>std::max(150.0,3.0*direct+30.0);
+    };
+    // 150 m absolute slack avoids classifying an ordinary curved block as a
+    // topology gap.  The 3x bound still catches the 20--40 m intersection
+    // pairs whose lane graph incorrectly proposes a kilometre-scale loop.
+    return excessive(leg->gatewayBestCost,from,gateway) ||
+           excessive(leg->exitBestCost,gateway,to);
+}
+
+bool missionLaneRequiresGuideContinuity(const MissionCorridorData& mission,
+                                        const LaneKey& currentLane) {
+    const MissionLegData* leg=activeMissionLeg(mission);
+    if(!leg) return false;
+    if(missionLegRequiresGuideContinuity(mission)) return true;
+    return leg->routesToTargetByLane.find(currentLane)==
+           leg->routesToTargetByLane.end();
 }
 
 void updateMissionCorridorProgress(MissionCorridorData& mission,

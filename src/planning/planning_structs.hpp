@@ -53,6 +53,18 @@ struct PlanningBehaviorConfig {
     // GT bounding box 치수 범위로 제외한다.
     double stationaryAdjacentVehicleCautionSpeed{5.5555555556};
     double stationaryAdjacentVehicleMaximumDistance{25.0};
+    // 교차도로에서 정차 중인 차량은 아직 speed=0이어도 다음 프레임에
+    // 출발할 수 있다. 두 진행 직선의 교점까지 남은 거리를 이용해 미리
+    // 주의속도로 낮춰, 출발을 확인한 뒤에도 제동/회피할 시간을 남긴다.
+    double crossTrafficCautionSpeed{10.0 / 3.6};
+    double crossTrafficForwardDistance{55.0};
+    double crossTrafficApproachDistance{35.0};
+    double crossTrafficMinimumAngle{0.6108652382}; // 35 deg
+    double denseStaticSpeed{10.0 / 3.6};
+    double denseStaticForwardDistance{35.0};
+    double denseStaticLateralDistance{7.0};
+    double denseStaticPairDistance{15.0};
+    double denseStaticReleaseTime{3.0};
     double stationaryVehicleMinimumLength{2.5};
     double stationaryVehicleMaximumLength{7.5};
     double stationaryVehicleMinimumWidth{1.4};
@@ -181,6 +193,12 @@ struct PlanningProcessData {
     // pathPlanner는 checkpoint의 road corridor/구역 route_s를 보존한다.
     // roadLanePlanner는 현재 자유 차선을 추종하는 조향용 경로다.
     PathPlannerData roadLanePlanner;
+    // A cached lane path belongs to exactly one mission leg.  Without this
+    // ownership marker, the first frame after advancing to the next
+    // intersection could accept the exhausted previous-leg path as a
+    // geometric fallback and steer away from the new gateway.
+    std::size_t roadLanePlannerMissionLeg{};
+    bool roadLanePlannerMissionLegValid{};
     // 교차로 진출 checkpoint 사이에서는 allowedLanes를 자유롭게
     // 사용하고, 진입 checkpoint 근처에서만 targetLanes에 정렬한다.
     MissionCorridorData missionCorridor;
