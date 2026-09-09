@@ -94,4 +94,78 @@ class WholeMissionTests(unittest.TestCase):
         with self.assertRaises(ValueError):net.build(d)
 
 
+    def taper_network(self, opening=False, count=1, positive=False, gap=0.):
+        through=(10,0,-3)
+        geo=dict([lane(1,0,10),lane(10,10,20,lane_id=-3,junction=1),lane(2,20,30)])
+        edges=[((1,0,-1),through),(through,(2,0,-1))]
+        for i in range(count):
+            key,g=lane(10,10,20,lane_id=-2+i,junction=1)
+            p=g['points'];width=np.linspace(0,3,len(p)) if opening else np.linspace(3,0,len(p))
+            inner=1.5+i*width+gap
+            p[:,1]=inner+width*.5;p[:,4]=width
+            p[:,5:7]=np.column_stack([p[:,0],inner])
+            p[:,7:9]=np.column_stack([p[:,0],inner+width])
+            geo[key]=g
+            normal,ng=lane(2,20,30,3*(i+1),lane_id=-2-i) if opening else lane(1,0,10,3*(i+1),lane_id=-2-i)
+            geo[normal]=ng;edges.append((key,normal) if opening else (normal,key))
+        if positive:
+            rename=lambda k:(k[0],k[1],-k[2])
+            geo={rename(k):dict(g,points=g['points'].copy()) for k,g in geo.items()}
+            for g in geo.values():g['points'][:,3]=g['points'][-1,3]-g['points'][:,3]
+            edges=[(rename(a),rename(b)) for a,b in edges]
+        return geo,edges
+
+    def test_merging_taper_is_surface_without_fabricated_route(self):
+        geo,edges=self.taper_network()
+        net=Network(geo,edges);d=net.build(mission([(1,0),(9,0),(21,0),(29,0)]))
+        gate=d['legs'][0];key=(10,0,-2)
+        self.assertIn(key,gate['surface_lanes'])
+        self.assertIn(key,gate['allowed'])
+        self.assertNotIn(key,gate['connection_lanes'])
+        self.assertEqual(gate['surface_extensions'][0]['reason'],'merging_taper')
+        self.assertEqual(len(gate['surface_entry_edges']),2)
+        self.assertTrue(d['validation']['surface_interfaces_connected'])
+        self.assertEqual({(a,b) for a,bs in net.forward.items() for b in bs},set(edges))
+
+    def test_multiple_opening_tapers_follow_adjacent_boundaries(self):
+        geo,edges=self.taper_network(opening=True,count=2)
+        d=Network(geo,edges).build(mission([(1,0),(9,0),(21,0),(29,0)]))
+        gate=d['legs'][0]
+        self.assertEqual(set(gate['surface_lanes']),{(10,0,-3),(10,0,-2),(10,0,-1)})
+        self.assertEqual(len(gate['surface_exit_edges']),3)
+        self.assertTrue(d['validation']['surface_interfaces_connected'])
+
+    def test_positive_lane_decreasing_station_taper(self):
+        geo,edges=self.taper_network(positive=True)
+        d=Network(geo,edges).build(mission([(1,0),(9,0),(21,0),(29,0)]))
+        self.assertIn((10,0,2),d['legs'][0]['surface_lanes'])
+
+    def test_surface_does_not_bridge_physical_gap_or_other_road(self):
+        for gap in (0.,.5):
+            geo,edges=self.taper_network(gap=gap)
+            if not gap:
+                geo[(11,0,-2)]=geo.pop((10,0,-2))
+                edges=[(a,(11,0,-2) if b==(10,0,-2) else b) for a,b in edges]
+            d=Network(geo,edges).build(mission([(1,0),(9,0),(21,0),(29,0)]))
+            self.assertEqual(d['legs'][0]['surface_lanes'],[(10,0,-3)])
+
+    def test_full_width_dead_end_is_not_taper_surface(self):
+        geo,edges=self.parallel()
+        geo.update(dict([lane(12,30,40,junction=2),lane(3,40,50)]))
+        edges.extend([((2,0,-1),(12,0,-1)),((12,0,-1),(3,0,-1))])
+        d=Network(geo,edges).build(mission([(1,0),(9,0),(21,0),(29,0),(41,0),(49,0)]))
+        self.assertNotIn((11,0,-1),d['legs'][0]['surface_lanes'])
+
+    def test_renderer_uses_taper_surface_and_expanded_interface(self):
+        import xml.etree.ElementTree as ET
+        from render_mission_corridors import draw
+        geo,edges=self.taper_network()
+        d=Network(geo,edges).build(mission([(1,0),(9,0),(21,0),(29,0)]))
+        svg=ET.fromstring(draw(d,geo,[],[0]))
+        ns='{http://www.w3.org/2000/svg}'
+        layer=svg.find(ns+"g[@id='gateways']")
+        self.assertTrue(any('10:0:-2' in (v.text or '') for v in layer.iter(ns+'title')))
+        self.assertEqual(len(layer.findall(ns+'polyline')),3)
+
+
 if __name__=='__main__':unittest.main()

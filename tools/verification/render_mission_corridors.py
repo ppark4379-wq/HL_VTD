@@ -131,12 +131,12 @@ def draw(mission, geometry, background, leg_indices, bounds=None, closeup=False)
             if mission.get('mode')=='whole_mission_xodr_precomputed':
                 if leg.get('declared_gateway_index') is None:continue
                 n=leg['declared_gateway_index']
-            for k in leg['connection_lanes']:
+            for k in leg.get('surface_lanes',leg['connection_lanes']):
                 p=geometry[tuple(k)]['points']
                 gateways.append(f'<g><title>G{n}: XODR connecting lane {keytext(k)}</title>'+polygon(
                     band(p),fill='#ffe000',fill_opacity='.6',stroke='#ff8500',stroke_width=max(.18,unit*.7))+'</g>')
             for direction in ('entry','exit'):
-                for a,b in leg[direction+'_edges']:
+                for a,b in leg.get('surface_'+direction+'_edges',leg[direction+'_edges']):
                     # Actual directed lane interface, not the nearest CP station.
                     p=geometry[tuple(a)]['points'][-1] if direction=='entry' else geometry[tuple(b)]['points'][0]
                     gateways.append(line([p[5:7],p[7:9]],'#ff8200' if direction=='entry' else 'white',max(.45,unit*2)))

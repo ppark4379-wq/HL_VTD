@@ -156,6 +156,58 @@ class Network:
             entry_edges=entry,exit_edges=exit_,source_component=source_component,target_component=target_component,
             status='connected' if entry and exit_ else 'UNRESOLVED')
 
+
+    def gateway_surface(self, gate):
+        """Include adjoining XODR lane tapers without inventing routing edges.
+
+        A lane born/ending at zero width has only one longitudinal interface.
+        It belongs to the gateway surface even though it cannot independently
+        provide an entry-to-exit route. Keep that distinction in the artifact.
+        """
+        core=set(gate['connection_lanes']);surface=set(core)
+        source=self.components[gate['source_component']]
+        target=self.components[gate['target_component']]
+        sections={(k[0],k[1],k[2]>0) for k in core}
+        candidates={}
+        for k,g in self.geometry.items():
+            if k in core or (k[0],k[1],k[2]>0) not in sections:continue
+            p=np.asarray(g['points'])
+            if np.max(p[:,4])<=.01:continue
+            entry=sorted((a,k) for a in self.reverse[k]&source)
+            exit_=sorted((k,b) for b in self.forward[k]&target)
+            if p[-1,4]<=.01 and entry:
+                candidates[k]=('merging_taper',entry+exit_)
+            elif p[0,4]<=.01 and exit_:
+                candidates[k]=('opening_taper',entry+exit_)
+        added=[]
+        while candidates:
+            progress=False
+            for k,(reason,edges) in list(sorted(candidates.items())):
+                p=np.asarray(self.geometry[k]['points'])
+                for neighbor in sorted(surface):
+                    if k[:2]!=neighbor[:2] or k[2]*neighbor[2]<=0 or abs(k[2]-neighbor[2])!=1:continue
+                    q=np.asarray(self.geometry[neighbor]['points'])
+                    # Compare the shared boundary over the entire section,
+                    # including curved tapers and positive-lane travel order.
+                    order=np.argsort(q[:,3]);stations=q[order,3]
+                    if p[:,3].min()<stations[0]-1e-6 or p[:,3].max()>stations[-1]+1e-6:continue
+                    distance=min(float(np.max(np.linalg.norm(p[:,a:a+2]-np.column_stack([
+                        np.interp(p[:,3],stations,q[order,b+j]) for j in (0,1)]),axis=1)))
+                        for a in (5,7) for b in (5,7))
+                    if distance>.1:continue
+                    surface.add(k);del candidates[k];progress=True
+                    added.append(dict(key=k,reason=reason,adjacent_lane=neighbor,
+                                      boundary_gap_m=distance,interface_edges=edges))
+                    break
+            if not progress:break
+        gate['surface_lanes']=sorted(surface)
+        gate['surface_extensions']=added
+        gate['surface_entry_edges']=sorted(set(gate['entry_edges'])|
+            {(a,k) for k in surface-core for a in self.reverse[k]&source})
+        gate['surface_exit_edges']=sorted(set(gate['exit_edges'])|
+            {(k,b) for k in surface-core for b in self.forward[k]&target})
+        gate['allowed']=sorted(set(gate['allowed'])|surface)
+
     def build(self,mission):
         cps=sorted(mission['checkpoints'],key=lambda p:p['seq'])
         if len(cps)<2 or [p['seq'] for p in cps]!=list(range(1,len(cps)+1)):
@@ -235,6 +287,8 @@ class Network:
             result['corridor_reachability'].append(dict(corridor=i+1,reachable=sorted(next_good),
                 not_reachable=sorted(corridor-next_good)))
         result['corridor_reachability'].reverse()
+        for gate in result['legs']:
+            if gate.get('connection_lanes'):self.gateway_surface(gate)
         # User-facing mission regions use start->entry / exit->next-entry /
         # last-exit->finish. Small XODR junctions inside those road intervals
         # are internal connector pieces, not extra declared mission gateways.
@@ -248,7 +302,7 @@ class Network:
                 from_seq=i+1,to_seq=i+2,component_keys=sorted(owners),
                 connector_indices=[g['index'] for g in related])
             region=set().union(*(self.components[c] for c in owners)) if owners else set()
-            for g in related:region.update(g['connection_lanes'])
+            for g in related:region.update(g.get('surface_lanes',g['connection_lanes']))
             group['lanes']=sorted(region)
             if is_gateway:
                 result['gateway_groups'].append(group)
@@ -285,6 +339,8 @@ class Network:
             if gap>.1:center_steps.append(dict(from_lane=a,to_lane=b,gap_m=gap))
         # Check every selected gateway alternative as well as the witness route.
         pairs=list(zip(route,route[1:]))+[edge for gate in result['legs'] for edge in gate['connection_edges']]
+        pairs += [edge for gate in result['legs'] for extension in gate.get('surface_extensions',[])
+                  for edge in extension['interface_edges']]
         for a,b in pairs:
             if (a,b) in self.lateral or (a,b) in checked:continue
             checked.add((a,b));sources=[a];targets=[b]
