@@ -41,10 +41,13 @@ struct PlanningBehaviorConfig {
     double simulationProgressRecovery{};
     double progressRecoveryStopTimeout{3.0};
     double progressRecoverySpeed{3.0 / 3.6};
+    // Legacy default only; YAML can explicitly override the allowed ceiling.
+    double progressRecoveryMaxSpeed{5.0 / 3.6};
     double progressRecoveryRetryInterval{0.5};
     double progressRecoverySearchBudgetMs{15.0};
     double comfortableDeceleration{2.5};
     double stopSafetyMargin{1.0};
+    double trafficStopPositionMargin{1.5}; // traffic stop only, not lane alignment
     double stopHoldTime{1.0};
     double stoppedSpeedThreshold{0.15};
     double followTimeGap{1.8};
@@ -114,6 +117,10 @@ struct PlanningBehaviorConfig {
     double crosswalkClearanceHoldTime{1.0};  // [s]
     // 횡단보도 밖이라도 이 시간 뒤 예상 위치가 안이면 점유로 본다.
     double crosswalkPedestrianPrediction{4.0}; // [s]
+    // Simulator-only stationary-yield timeout. This is NOT object classification.
+    // A never-moving pedestrian is indistinguishable from a fixed prop in GT.
+    double simulationCrosswalkStaticRelease{};
+    double crosswalkStaticConfirmationTime{3.0}; // [s]
     // 횡단보도 앞 이 거리 안의 정지선을 정지 목표로 삼는다.
     double crosswalkStopLineSearch{15.0};    // [m]
 };
@@ -215,6 +222,14 @@ struct CrosswalkOccupancyState {
     double clearanceHoldRemaining{};
 };
 
+struct CrosswalkObjectWaitState {
+    int crosswalkId{-1};
+    std::uint32_t objectId{};
+    double stoppedWait{};
+    bool released{};
+    bool hasEverMoved{};
+};
+
 struct PlanningProcessData {
     PathPlannerData pathPlanner;
     // pathPlanner는 checkpoint의 road corridor/구역 route_s를 보존한다.
@@ -233,6 +248,9 @@ struct PlanningProcessData {
     BehaviorState behaviorState;
     StopManagerData stopManager;
     LaneChangeData laneChange;
+    std::uint8_t trajectoryTurnSignal{};
+    double trajectoryTurnSignalHoldRemaining{};
+    int trajectoryTurnSignalRoadId{-1};
     LaneChangeConfig laneChangeConfig;
     // Keep the local worker's speed contract across a cached-tail handoff;
     // finishing the manoeuvre alone is not proof of a safe global rejoin.
@@ -244,11 +262,13 @@ struct PlanningProcessData {
     // 횡단보도 점유·해제 유지 상태. 점유 해제 후에도 잠시 정지하고,
     // Ego가 횡단보도를 완전히 통과할 때까지 clearance 속도를 적용한다.
     std::vector<CrosswalkOccupancyState> crosswalkStates;
+    std::vector<CrosswalkObjectWaitState> crosswalkObjectWaits;
     double emergencyBrakeHoldRemaining{};
     ProgressRecoveryData progressRecovery;
     // 급커브가 최근점 뒤로 넘어가자마자 가속하지 않고,
     // 조향이 풀리고 출구 차선에 안착할 시간을 보장한다.
     double sharpCurveSpeedHoldRemaining{};
+    double settledStraightCruiseTime{};
     double previousRouteS{};
     bool hasPreviousRouteS{};
 };

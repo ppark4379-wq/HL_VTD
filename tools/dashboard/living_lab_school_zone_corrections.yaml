@@ -2,7 +2,7 @@
 # Evidence: user's earlier VTD screenshots + lane_network.svg + current XODR.
 # No new school boundary is inferred merely from a road edge or speed marking.
 map: HL_FMA_VTD_LivingLab
-review_date: '2026-09-08'
+review_date: '2026-09-10'
 map_svg_sha256: fbb6e7b5203e9ebe4efc0ad827bb916d3ec806ec4ba4953702d4c23d2fa29e1d
 corrections:
   - id: school_zone_39
@@ -40,3 +40,46 @@ corrections:
       point_1: {track_id: 2076, lane_id: -4, s: 696.957}
       point_2: null
     point_2: {x: 1174.125, y: -762.519, z: 60.617, track_id: 2076, lane_id: -4, s: 738.520}
+
+# These are read-only review evidence, NOT additional school-zone ranges.
+# World/road/lane/S agreement does not prove that the selected point is a paint
+# boundary or that it belongs to the requested lane. Keep both zones pending.
+review_observations:
+  - observation_id: user_20260910_image_1
+    target_zone_id: school_zone_28
+    assessment_applied: false
+    status: ENDPOINT_PAIR_NOT_CONFIRMED
+    evidence: 'User screenshot 1: VTD status bar road 2386 lane +1 S=2.521 T=2.032; World=(1011.351,-290.543), z=69.2894. The second supplied image is on a different continuous lane.'
+    point: {x: 1011.351, y: -290.543, z: 69.2894, track_id: 2386, lane_id: 1, s: 2.521}
+    needed: 'Confirm both paint-boundary coordinates on the continuous strip containing road 2386 lane +1; identify boundary points explicitly, not only the Ego/cursor position.'
+  - observation_id: user_20260910_image_2
+    target_zone_id: school_zone_28
+    assessment_applied: false
+    status: ADJACENT_LANE_NOT_TARGET
+    evidence: 'User screenshot 2: road 2352 lane -1 S=39.185 T=-1.389; World=(1125.339,-431.648), z=68.9071. Unique XODR lane chain: 2352/-1 -> 2313/+1 -> 2392/-3 -> 2386/+2, not target 2386/+1.'
+    point: {x: 1125.339, y: -431.648, z: 68.9071, track_id: 2352, lane_id: -1, s: 39.185}
+    connected_lane_chain: ['2352/-1', '2313/+1', '2392/-3', '2386/+2']
+    needed: 'The other boundary of the road 2386 lane +1 strip, including its lane start/termination where relevant; do not reuse the adjacent +2 endpoint.'
+  - observation_id: user_20260910_image_3
+    target_zone_id: school_zone_15
+    assessment_applied: false
+    status: OPPOSITE_DIRECTION_NOT_TARGET
+    evidence: 'User screenshot 3: road 1775 lane -2 S=7.930 T=-4.956; World=(542.206,-723.693), z=51.785. Its lane predecessor is road 1769 lane +2 at S=0, opposite to the requested road 1769 negative lanes.'
+    point: {x: 542.206, y: -723.693, z: 51.785, track_id: 1775, lane_id: -2, s: 7.930}
+    connected_lane_chain: ['1775/-2', '1769/+2']
+    needed: 'Paint-boundary start/end coordinates for each included lane at road 1769 lane -1 and/or -2 near S=25..54; the new image is on the opposite-direction connection.'
+  - observation_id: user_20260910_image_4
+    target_zone_id: school_zone_15
+    assessment_applied: false
+    status: OPPOSITE_DIRECTION_NOT_TARGET
+    evidence: 'Follow-up screenshot 1: road 1775 lane -1 S=9.036 T=-2.503; World=(539.612,-724.368), z=51.785. XODR predecessor is road 1769 lane +1 at S=0, not the negative-lane strip of the supplied second point.'
+    point: {x: 539.612, y: -724.368, z: 51.785, track_id: 1775, lane_id: -1, s: 9.036}
+    connected_lane_chain: ['1775/-1', '1769/+1']
+    needed: 'Confirm the actual paint-boundary start point on road 1769 lane -1 (or the explicitly connected negative-lane strip), rather than using an opposite-direction road 1775 lane.'
+  - observation_id: user_20260910_image_5
+    target_zone_id: school_zone_15
+    assessment_applied: false
+    status: TARGET_LANE_POINT_BOUNDARY_NOT_CONFIRMED
+    evidence: 'Follow-up screenshot 2: road 1769 lane -1 S=46.158 T=1.483; World=(572.943,-768.381), z=52.773. The point is on the requested lane, but no continuous lane-link path joins the supplied start point road 1775 lane -1. The visible Ego/cursor coordinate must also be distinguished from the paint boundary itself.'
+    point: {x: 572.943, y: -768.381, z: 52.773, track_id: 1769, lane_id: -1, s: 46.158}
+    needed: 'Identify whether this selected point is the exact paint end boundary and supply the start boundary on the same road 1769 negative-lane strip. A target-lane position alone is not a complete boundary pair.'

@@ -2885,8 +2885,292 @@ void testSafeAvoidanceSuccessorAndPhysicalStopLine() {
 
 }  // namespace
 
+void testCrosswalkUsersAndStopDistanceGuard() {
+    Crosswalk crossing;
+    crossing.polygon={{20,-8},{26,-8},{26,8},{20,8}};
+    WorldState world;
+    WorldObjectState actor;
+    actor.raw.id=1;actor.raw.length=4.4;actor.raw.width=1.8;
+    actor.raw.speed=2.;actor.raw.x=23;actor.raw.y=0;
+    actor.obb=makeObb2D(23,0,0,4.4,1.8);
+    world.objects={actor};
+    assert(!crosswalkHasRiskObject(crossing,world,4.));
+    // A stopped car and its re-start must not toggle pedestrian yield.
+    world.objects[0].raw.speed=0.;
+    assert(!crosswalkHasRiskObject(crossing,world,4.));
+    actor.raw.length=.5;actor.raw.width=.6;actor.raw.speed=0.;
+    actor.raw.y=7.9;actor.obb=makeObb2D(23,7.9,0,.5,.6);
+    actor.isOnEgoPath=false;actor.isAhead=false;world.objects={actor};
+    assert(crosswalkHasRiskObject(crossing,world,4.));
+    // Centre outside the FAR edge, but body still on the entire crosswalk.
+    world.objects[0].obb=makeObb2D(23,8.2,0,.5,.6);
+    assert(crosswalkHasRiskObject(crossing,world,4.));
+    world.objects[0].obb=makeObb2D(23,8.4,0,.5,.6);
+    assert(!crosswalkHasRiskObject(crossing,world,4.));
+    actor.raw.x=23;actor.raw.y=-10;actor.raw.speed=1.;
+    actor.raw.heading=1.5707963267948966;
+    actor.obb=makeObb2D(23,-10,actor.raw.heading,.5,.6);world.objects={actor};
+    assert(crosswalkHasRiskObject(crossing,world,4.));
+    // Stationary small user inside must not time out into progress recovery.
+    actor.raw.speed=0.;actor.obb=makeObb2D(23,5,0,.5,.6);world.objects={actor};
+    for (int i=0;i<200;++i) assert(crosswalkHasRiskObject(crossing,world,4.));
+
+    // Simulator timeout starts only at the selected crossing stop, not when
+    // a stationary actor is first seen on approach. No shape classification.
+    PlanningBehaviorConfig propConfig;
+    propConfig.simulationCrosswalkStaticRelease=1.;
+    actor.raw.x=23;actor.raw.y=0;actor.raw.length=1.2;
+    actor.raw.width=1.2;actor.raw.height=1.28;
+    actor.obb=makeObb2D(23,0,0,1.2,1.2);world.objects={actor};
+    std::vector<StationaryObjectState> history={{1,600,23,0,true,false}};
+    std::vector<CrosswalkObjectWaitState> waits;
+    crossing.id=77;world.inputValid=true;world.egoSpeed=0.;
+    StopDecision previousStop;
+    auto step=[&]{return updateCrosswalkStationaryRelease(crossing,world,previousStop,
+        history,propConfig,.05,waits);};
+    for(int i=0;i<100;++i)assert(step().empty()); // not waiting at this crossing
+    previousStop.valid=true;previousStop.reason=StopReason::RedLight;
+    previousStop.sourceId=77;previousStop.distanceToStop=1.;
+    for(int i=0;i<100;++i)assert(step().empty()); // signal wait does not count
+    previousStop.reason=StopReason::CrosswalkBlocked;
+    previousStop.distanceToStop=15.;
+    for(int i=0;i<100;++i)assert(step().empty()); // still too far away
+    previousStop.distanceToStop=1.;world.egoSpeed=2.;
+    for(int i=0;i<100;++i)assert(step().empty()); // must actually stop
+    world.egoSpeed=0.;
+    for(int i=0;i<59;++i)assert(step().empty());
+    auto props=step();props=step();
+    assert(props.size()==1 && !crosswalkHasRiskObject(crossing,world,4.,props));
+    assert(world.objects.size()==1); // do not remove collision geometry
+    world.egoSpeed=1.;previousStop={};assert(step().size()==1); // allow departure
+    // Position-derived motion revokes an exemption even with stale scalar GT.
+    world.objects[0].raw.speed=0.;world.objects[0].velocityValid=true;
+    world.objects[0].velocityX=.5;
+    assert(step().empty());
+    assert(crosswalkHasRiskObject(crossing,world,4.,step()));
+    world.objects[0].velocityValid=false;
+    previousStop.valid=true;previousStop.reason=StopReason::CrosswalkBlocked;
+    previousStop.sourceId=77;previousStop.distanceToStop=1.;world.egoSpeed=0.;
+    for(int i=0;i<200;++i)assert(step().empty()); // stopping again never clears the moved latch
+    world.objects.clear();assert(step().empty());world.objects={actor};
+    for(int i=0;i<100;++i)assert(step().empty()); // preserve moving latch across packet loss
+    waits.clear();
+    actor.raw.length=.45;actor.raw.width=.55;actor.raw.height=1.1;
+    actor.obb=makeObb2D(23,0,0,.45,.55);world.objects={actor};
+    for(int i=0;i<61;++i)props=step();
+    assert(props.size()==1); // dimensions are irrelevant to the simulation policy
+    propConfig.simulationCrosswalkStaticRelease=0.;
+    assert(step().empty() && waits.empty());
+    world.objects.clear();
+
+    for (double initial:{2.78,5.56,8.33,11.11}) {
+        ControlProcessData control;
+        PlanningResult plan;plan.valid=true;plan.stopDistanceValid=true;
+        plan.stopReason=StopReason::CrosswalkBlocked;
+        double speed=initial,distance=initial*initial/3.+7.;
+        world.egoSpeed=speed;
+        for(int i=0;i<1600 && speed>.005;++i) {
+            plan.stopDistance=distance;
+            plan.targetSpeed=std::min(initial,std::sqrt(3.*std::max(0.,distance-1.5)));
+            runControlProcess(control,world,plan,.05);
+            const double next=std::max(0.,speed+control.safeCommand.targetAccel*.05);
+            distance-=(speed+next)*.025;speed=next;
+            world.egoSpeed=.25*speed+.75*world.egoSpeed;
+        }
+        std::cout<<"traffic-stop initial_kph="<<initial*3.6<<" front_margin="<<distance<<'\n';
+        assert(speed<=.005 && distance>=0.0 && distance<2.0);
+    }
+    ControlProcessData normal,untouched;
+    PlanningResult plan;plan.valid=true;plan.targetSpeed=5.;
+    world.egoSpeed=2.;runControlProcess(normal,world,plan,.05);
+    plan.stopDistanceValid=true;plan.stopDistance=.1;
+    runControlProcess(untouched,world,plan,.05);
+    assert(normal.safeCommand.targetAccel==untouched.safeCommand.targetAccel);
+}
+
+void testTrajectoryIndicatorPreview() {
+    auto map=makeStraightTwoLaneMap();
+    WorldState world;world.egoLaneValid=true;world.egoRoadId=1;
+    world.egoLaneId=-1;world.ego.x=0;world.ego.y=-1.75;world.egoSpeed=4.;
+    std::vector<Waypoint> path;
+    for(int i=0;i<40;++i) {
+        Waypoint p;p.x=i;p.y=-1.75;p.s=i;p.roadS=i;p.roadId=1;p.laneId=-1;
+        path.push_back(p);
+    }
+    assert(previewTrajectoryTurnSignal(world,map,path)==0);
+    for(auto& p:path)p.y-=3.5*std::clamp((p.s-4.)/12.,0.,1.);
+    assert(previewTrajectoryTurnSignal(world,map,path)==2); // BEFORE shift at 4 m
+    for(auto& p:path)p.y=-5.25+3.5*std::clamp((p.s-4.)/12.,0.,1.);
+    world.ego.y=-5.25;world.egoLaneId=-2;
+    assert(previewTrajectoryTurnSignal(world,map,path)==1); // return direction
+    // Ordinary curved lane-centre travel is not a lane change.
+    auto& geo=map.roads.at(1).geometries.front();geo.type=GeometryType::Arc;geo.curvature=.02;
+    world.ego.y=-1.75;world.egoLaneId=-1;
+    for(auto& p:path) {
+        const auto pose=roadToWorld(map.roads.at(1),p.roadS);
+        p.x=pose.x+1.75*std::sin(pose.yaw);p.y=pose.y-1.75*std::cos(pose.yaw);p.yaw=pose.yaw;
+    }
+    assert(previewTrajectoryTurnSignal(world,map,path)==0);
+}
+
+void testIndicatorStaysOnWhileStraddling() {
+    PlanningProcessData planning;
+    WorldState world;world.egoRoadId=1769;world.egoLaneValid=true;
+    world.egoLaneWidth=2.6;world.egoLaneCenterDistance=1.3;
+    world.egoObb=makeObb2D(1.384,0,0,4.848,1.886);
+    maintainTrajectoryTurnSignal(planning,world,1,.05);
+    for(int i=0;i<200;++i) {
+        maintainTrajectoryTurnSignal(planning,world,0,.05);
+        assert(planning.trajectoryTurnSignal==1);
+    }
+    maintainTrajectoryTurnSignal(planning,world,2,.05);
+    assert(planning.trajectoryTurnSignal==2); // new shift overrides old direction
+    world.egoLaneCenterDistance=0.;
+    for(int i=0;i<21;++i)maintainTrajectoryTurnSignal(planning,world,0,.05);
+    assert(planning.trajectoryTurnSignal==0);
+    maintainTrajectoryTurnSignal(planning,world,1,.05);
+    world.egoLaneCenterDistance=1.3;world.egoRoadId=999;
+    for(int i=0;i<21;++i)maintainTrajectoryTurnSignal(planning,world,0,.05);
+    assert(planning.trajectoryTurnSignal==0); // no stale hold across unrelated roads
+}
+
+void testFullCrosswalkClearanceHold() {
+    auto map=makeStraightTwoLaneMap();
+    PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
+    auto world=makeWorldWithObstacle();world.objects.clear();world.egoSpeed=0.;
+    world.frontBumperOffset=3.8;world.frontBumperPathS=13.8;
+    Crosswalk crossing;crossing.id=77;crossing.roadId=2;
+    crossing.entryRouteS=20.;crossing.exitRouteS=26.;
+    crossing.polygon={{20,-8},{26,-8},{26,8},{20,8}};
+    map.staticZones.crosswalks={crossing};
+    StopLine stop;stop.id=88;stop.roadId=1;stop.laneIds={-1};stop.routeS=15.;
+    stop.begin={15,-3.5};stop.end={15,0};map.staticZones.stopLines={stop};
+    auto unrelated=stop;unrelated.id=89;unrelated.roadId=99;unrelated.routeS=18.;
+    map.staticZones.stopLines.push_back(unrelated);
+    auto opposite=stop;opposite.id=90;opposite.laneIds={1};opposite.routeS=19.;
+    map.staticZones.stopLines.push_back(opposite);
+    auto farther=stop;farther.id=91;farther.routeS=12.;
+    map.staticZones.stopLines.push_back(farther);
+    assert(crosswalkStopRouteS(crossing,world,map.staticZones,
+        planning.pathPlanner.waypoints,15.)==15.);
+    WorldObjectState actor;actor.raw.id=9;actor.raw.x=23.;actor.raw.y=7.9;
+    actor.raw.length=.5;actor.raw.width=.6;actor.raw.height=1.7;
+    actor.obb=makeObb2D(23,7.9,0,.5,.6);world.objects={actor};
+    GtFrame gt;gt.ego=world.ego;
+    const auto step=[&](double dt) {runPlanningProcess(planning,gt,world,map,dt);};
+    for(int i=0;i<80;++i) {
+        step(.05);
+        assert(planning.result.stopReason==StopReason::CrosswalkBlocked);
+        assert(planning.result.targetSpeed==0.);
+        assert(std::abs(planning.result.stopDistance-1.2)<1e-6);
+    }
+    world.objects[0].raw.y=8.2;
+    world.objects[0].obb=makeObb2D(23,8.2,0,.5,.6);step(.05);
+    assert(planning.result.targetSpeed==0.); // far-side body still overlapping
+    world.objects.clear();step(.05);
+    for(int i=0;i<18;++i) {step(.05);assert(planning.result.targetSpeed==0.);}
+    // Another person entering anywhere on the crossing restarts the hold.
+    world.objects={actor};step(.05);assert(planning.result.targetSpeed==0.);
+    world.objects.clear();step(.05);
+    for(int i=0;i<21;++i)step(.05);
+    assert(planning.result.stopReason==StopReason::None);
+    assert(planning.result.targetSpeed>0.);
+}
+
+void testSettledStraightManeuverSpeedCap() {
+    LaneChangeConfig lane;PlanningBehaviorConfig config;
+    LaneChangeData maneuver;maneuver.phase=LaneChangePhase::Execute;
+    maneuver.shiftCompletedLaneValid=true;maneuver.shiftCompletedLane={1,0,-1};
+    WorldState world;world.ego.x=10.;world.egoLaneValid=true;
+    world.egoRoadId=1;world.egoLaneId=-1;world.egoLaneCenterDistance=0.;
+    std::vector<Waypoint> path;
+    for(int i=0;i<=100;++i){Waypoint p;p.x=p.s=i;p.roadId=1;p.laneId=-1;path.push_back(p);}
+    const double slow=lane.maximumLaneChangeSpeed,fast=40./3.6;
+    const auto cap=[&]{return settledStraightManeuverSpeedCap(maneuver,world,path,
+        fast,lane.latticeObstacleClearance,lane,config);};
+    assert(std::abs(cap()-fast)<1e-6);
+    WorldObjectState obstacle;obstacle.raw.x=25.;obstacle.raw.length=4.;obstacle.raw.width=2.;
+    world.objects={obstacle};assert(cap()==slow);
+    world.objects[0].raw.x=100.;assert(cap()==fast);
+    world.objects.clear();world.egoLaneCenterDistance=.8;assert(cap()==slow);
+    world.egoLaneCenterDistance=0.;maneuver.phase=LaneChangePhase::Prepare;assert(cap()==slow);
+    maneuver.phase=LaneChangePhase::Execute;maneuver.waitingForReturn=true;assert(cap()==slow);
+    maneuver.waitingForReturn=false;
+    assert(settledStraightManeuverSpeedCap(maneuver,world,path,fast,.05,lane,config)==slow);
+    // Upcoming shift/end shortens acceleration room before Ego reaches it.
+    for(std::size_t i=35;i<path.size();++i)path[i].y=1.;
+    assert(cap()>slow && cap()<fast);
+    for(std::size_t i=15;i<path.size();++i)path[i].y=1.;
+    assert(cap()==slow);
+}
+
+void testGatewayTrackingHandoff() {
+    auto world=makeWorldWithObstacle();world.objects.clear();world.inputValid=true;
+    world.ego.x=10.;world.ego.y=-1.75;world.ego.heading=0.;
+    std::vector<Waypoint> route;
+    for(int x=0;x<=80;++x) {Waypoint p;p.x=p.s=x;p.y=-1.75;p.roadId=1;p.laneId=-1;route.push_back(p);}
+    LaneChangeData local;local.phase=LaneChangePhase::Execute;
+    local.localCorridorAvoidance=true;local.path=route;
+    LaneChangeData result;
+    assert(makeGatewayTrackingHandoff(result,local,route,world,false,.4));
+    assert(result.roadConnectionManeuver && !result.localCorridorAvoidance && !result.soleGatewayApproach);
+    assert(result.path.size()==route.size() && result.missionRouteAuthority);
+    auto detached=route;for(auto& p:detached)p.y+=3.5;
+    assert(!makeGatewayTrackingHandoff(result,local,detached,world,false,.4));
+    assert(makeGatewayTrackingHandoff(result,local,route,world,true,.4));
+    assert(result.soleGatewayApproach && !result.awaitExactReconnect);
+    local.roadConnectionManeuver=true;local.localCorridorAvoidance=false;
+    assert(!makeGatewayTrackingHandoff(result,local,route,world,false,.4));
+}
+
+void testStationaryCrosswalkWaitReleasesOnlyYield() {
+    auto map=makeStraightTwoLaneMap();
+    PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
+    planning.config.simulationCrosswalkStaticRelease=1.;
+    auto world=makeWorldWithObstacle();world.objects.clear();world.egoSpeed=0.;
+    world.frontBumperOffset=3.8;world.frontBumperPathS=13.8;
+    Crosswalk crossing;crossing.id=77;crossing.roadId=2;
+    crossing.entryRouteS=20.;crossing.exitRouteS=26.;
+    crossing.polygon={{20,-8},{26,-8},{26,8},{20,8}};
+    map.staticZones.crosswalks={crossing};
+    StopLine stop;stop.id=88;stop.roadId=1;stop.laneIds={-1};stop.routeS=15.;
+    stop.begin={15,-3.5};stop.end={15,0};map.staticZones.stopLines={stop};
+    WorldObjectState prop;prop.raw.id=38;prop.raw.x=23.;prop.raw.y=7.9;
+    prop.raw.length=1.2;prop.raw.width=1.2;prop.raw.height=1.28;
+    prop.obb=makeObb2D(23,7.9,0,1.2,1.2);world.objects={prop};
+    GtFrame gt;gt.ego=world.ego;
+    const auto step=[&] {runPlanningProcess(planning,gt,world,map,.05);};
+    for(int i=0;i<59;++i) {
+        step();assert(planning.result.stopReason==StopReason::CrosswalkBlocked);
+        assert(planning.result.targetSpeed==0.);
+    }
+    for(int i=0;i<30;++i)step(); // confirmation plus existing clearance hold
+    assert(planning.result.stopReason==StopReason::None);
+    assert(planning.result.targetSpeed>0. && world.objects.size()==1);
+    auto pedestrian=prop;pedestrian.raw.id=9;pedestrian.raw.length=.5;
+    pedestrian.raw.width=.6;pedestrian.raw.height=1.7;
+    pedestrian.raw.speed=.2;
+    pedestrian.obb=makeObb2D(23,7.9,0,.5,.6);world.objects.push_back(pedestrian);
+    for(int i=0;i<120;++i) {
+        step();assert(planning.result.stopReason==StopReason::CrosswalkBlocked);
+        assert(planning.result.targetSpeed==0.);
+        world.objects.back().raw.speed=0.; // once seen moving, wait even if it pauses
+    }
+}
+
 int main(int argc, char** argv) {
+    if(argc==2 && std::string(argv[1])=="--crosswalk-indicator") {
+        testCrosswalkUsersAndStopDistanceGuard();
+        testTrajectoryIndicatorPreview();
+        testIndicatorStaysOnWhileStraddling();
+        testFullCrosswalkClearanceHold();
+        testStationaryCrosswalkWaitReleasesOnlyYield();
+        testSettledStraightManeuverSpeedCap();
+        std::cout<<"crosswalk / stop-distance / trajectory indicators PASS\n";
+        return 0;
+    }
     if(argc==2 && std::string(argv[1])=="--safe-tail-stopline") {
+        testGatewayTrackingHandoff();
         testSafeAvoidanceSuccessorAndPhysicalStopLine();
         std::cout<<"safe avoidance successor / physical stop-line deadline PASS\n";
         return 0;

@@ -6,6 +6,7 @@ import threading
 import time
 import uuid
 import copy
+import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
 import sys
@@ -39,6 +40,7 @@ from opendrive_assessment import OpenDriveMap
 from route_assessment import RouteProgress
 from school_zones import SchoolZones
 from map_features import extract_features, finish_candidates, finish_from_object
+from assessment_ground_truth import ScenarioGroundTruth, valid_geometry
 
 TURN_SIGNAL_LANE_CONFIRM_FRAMES = 3
 
@@ -55,12 +57,19 @@ class LiveAssessment:
         self.active_profile = None
         self.active_profile_error = None
         self.active_scenario_id = self.meta.get('scenario_id', 'VTD_LIVE')
+        self.scenario_gt = None
+        self.signal_resolver = None
+        self.gt_configuration_error = None
         self.output_dir = Path(output_dir)
         self.lock = threading.RLock()
+        # Serialize HTTP summaries, not RDB measurements. Full-history scoring
+        # must never hold the lock that the frame consumer needs every 40 ms.
+        self._snapshot_lock = threading.Lock()
         self.session = self.rules['session']
-        self.respawn_detection_confirmed = bool(
-            self.session.get('respawn_detection_confirmed', False)
-        )
+        # A configuration boolean cannot establish the cause of a teleport.
+        # Keep relocation candidates separate until a verified completion source
+        # exists; SCP offroad notifications alone are not acknowledgements.
+        self.respawn_detection_confirmed = False
         self._initialize_runtime_state()
 
     def _load_rules(self):
@@ -91,6 +100,9 @@ class LiveAssessment:
                 raise ValueError(f'{key}: positive number or null required')
         if not isinstance(session.get('respawn_detection_confirmed', False), bool):
             raise ValueError('respawn_detection_confirmed must be boolean')
+        self.signal_authority = (self.rules.get('traffic_signals') or {}).get('authority', 'strict')
+        if self.signal_authority not in {'strict', 'rdb_logic'}:
+            raise ValueError('traffic_signals.authority must be strict or rdb_logic')
 
     def _configure_completion(self):
         completion = self.rules.get('completion') or {}
@@ -270,6 +282,71 @@ class LiveAssessment:
         self.file = None
         self.cache = None
         self.cache_at = 0
+        self.observation_gaps = []
+
+    def _configure_ground_truth(self):
+        """Use existing scenario/GT files; never create or modify controller data."""
+        self.scenario_gt = None
+        self.signal_resolver = None
+        self.gt_configuration_error = None
+        scenario_file = (self.active_profile or {}).get('scenario_file') or self.meta.get('scenario_file')
+        if scenario_file:
+            try:
+                self.scenario_gt = ScenarioGroundTruth(scenario_file)
+            except (OSError, ValueError, ET.ParseError) as error:
+                self.gt_configuration_error = str(error)
+        if self.map and self.rules.get('map', {}).get('xodr'):
+            from assessment_signals import SignalResolver
+            map_path = Path(self.rules['map']['xodr'])
+            if not map_path.is_absolute():
+                map_path = Path(__file__).resolve().parents[2] / map_path
+            try:
+                self.signal_resolver = SignalResolver(
+                    map_path, self.map, self.map_stop_lines, scenario_file=scenario_file,
+                    authority=self.signal_authority)
+            except (OSError, ValueError, ET.ParseError) as error:
+                self.gt_configuration_error = str(error)
+
+    def _frame_metadata(self, context):
+        meta = dict(self.meta)
+        meta['assessment_forward_corridors'] = self._forward_path_corridors(context.ego, context.row)
+        if self.scenario_gt:
+            evidence = self.scenario_gt.inspect(context.frame)
+            meta['object_feed_complete'] = evidence['complete']
+            meta['object_roles'] = {**self.scenario_gt.roles, **meta.get('object_roles', {})}
+            context.row.update(
+                object_feed_complete=evidence['complete'],
+                object_feed_source=evidence['source'],
+                object_expected_count=evidence['expected'],
+                object_observed_count=evidence['observed'],
+                object_missing_names=json.dumps(evidence['missing'], ensure_ascii=False),
+                object_invalid_geometry=json.dumps(evidence['invalid_geometry'], ensure_ascii=False),
+                object_duplicate_names=json.dumps(evidence['duplicate'], ensure_ascii=False),
+            )
+        else:
+            context.row['object_feed_complete'] = bool(meta.get('object_feed_complete', False))
+            context.row['object_feed_source'] = 'explicit_metadata' if meta.get('object_feed_complete') else 'unverified_inventory'
+        # A crosswalk on the immediately following route road can already be
+        # relevant while Ego's reference point remains on the approach road.
+        # Do not substitute a controller's behavioural crosswalk_active flag.
+        route_s = context.row.get('route_s_m')
+        if self.route and route_s is not None:
+            roads = {p['road'] for p in self.route.points if route_s-6 <= p['s'] <= route_s+35}
+            corridors = meta['assessment_forward_corridors']
+            from assessment_geometry import overlaps
+            ids = set()
+            for crossing in meta.get('crosswalks', []):
+                if crossing.get('road_id') not in roads:
+                    continue
+                polygon = crossing['polygon']
+                cx = sum(p[0] for p in polygon)/len(polygon)
+                cy = sum(p[1] for p in polygon)/len(polygon)
+                if math.hypot(cx-context.ego['x'], cy-context.ego['y']) > 40:
+                    continue
+                if overlaps(context.corners, polygon) or any(overlaps(c, polygon) for c in corridors):
+                    ids.add(crossing['id'])
+            meta['route_crosswalk_ids'] = ids
+        return meta
 
     def on_gap(self):
         with self.lock:
@@ -297,6 +374,17 @@ class LiveAssessment:
                 self.start_evidence=self.pending_control
                 self._begin(self.previous['time'])
 
+    def on_scp_event(self, evidence):
+        """Persist passive cause evidence without guessing its vehicle or time."""
+        with self.lock:
+            event = dict(evidence)
+            event['officially_confirmed_respawn'] = False
+            event['rdb_sim_time_before_receipt_s'] = self.previous['time'] if self.previous else None
+            event['rdb_frame_before_receipt'] = self.previous['frame'] if self.previous else None
+            event['timestamp_basis'] = 'host_receipt_with_previous_RDB_bracket_not_exact_sim_time'
+            self._write('vtd_scp_observation', event)
+            self.cache = None
+
     def _write(self, kind, data):
         if self.file:
             self.file.write(json.dumps({'kind':kind, **data}, ensure_ascii=False, allow_nan=False)+'\n')
@@ -304,6 +392,7 @@ class LiveAssessment:
 
     def _begin(self, now):
         self._activate_current_profile()
+        self._configure_ground_truth()
         self.session_id = time.strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:8]
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.file = (self.output_dir / (self.session_id+'.jsonl')).open('x',encoding='utf-8')
@@ -323,12 +412,16 @@ class LiveAssessment:
         self._write('session', {'session_id':self.session_id,'rules':effective_rules,'start_sim_time':now,
                                'start_source':'controller_packet_arrival','start_evidence':self.start_evidence,
                                'active_profile':self.active_profile,
-                               'active_profile_error':self.active_profile_error})
+                               'active_profile_error':self.active_profile_error,
+                               'ground_truth_inventory':self.scenario_gt.describe() if self.scenario_gt else None,
+                               'ground_truth_configuration_error':self.gt_configuration_error})
 
     def _finish(self, status, reason=None):
         self.status = status
         self.cache = None
-        self.snapshot()
+        # Finalize exactly once against all rows. Do not acquire the HTTP
+        # summary lock here (an in-flight HTTP summary may need self.lock).
+        self._snapshot_locked()
         if reason:
             self.cache['finish_reason'] = reason
         self._write('result', self.cache)
@@ -379,15 +472,22 @@ class LiveAssessment:
         self.events = []
         self.deductions = []
         self.deducted = {}
+        self.observation_gaps = []
         self.cache = None
         self.status = 'WAITING'
 
     def on_frame(self, frame: FrameData):
         with self.lock:
             now = frame['time']
-            ego = next((o for o in frame['objects'].values() if o['name'] == self.meta.get('ego_name','Ego') and o['category'] == 1), None)
-            if ego is None:
+            candidates = [o for o in frame['objects'].values() if o['name'] == self.meta.get('ego_name','Ego') and o['category'] == 1]
+            ego = candidates[0] if len(candidates) == 1 else None
+            if ego is None or not valid_geometry(ego) or not math.isfinite(now):
                 self.gap = True
+                if self.status == 'RUNNING':
+                    evidence = dict(frame=frame['frame'], reason='missing_duplicate_or_invalid_ego_GT')
+                    self.observation_gaps.append(evidence)
+                    self._write('observation_gap', evidence)
+                    self.cache = None
                 return
             if self.previous and (now < self.previous['time'] or frame['frame'] < self.previous['frame']):
                 self._reset()
@@ -418,6 +518,11 @@ class LiveAssessment:
                 ego['speed_source'] = 'position_difference'
             if speed is None or not math.isfinite(speed):
                 self.gap = True
+                if self.status == 'RUNNING':
+                    evidence = dict(frame=frame['frame'], sim_time_s=now, reason='invalid_ego_speed_GT')
+                    self.observation_gaps.append(evidence)
+                    self._write('observation_gap', evidence)
+                    self.cache = None
                 return
             if self.status == 'WAITING':
                 if self.pending_control:
@@ -432,6 +537,11 @@ class LiveAssessment:
                 continuous=False
                 jump=discontinuity=False
                 self.fresh_start=False
+            elif self.rows and (not continuous or jump or discontinuity):
+                self.observation_gaps.append(dict(
+                    previous_sim_time_s=previous['time'] if previous else None,
+                    next_sim_time_s=now, frame=frame['frame'],
+                    reason='position_discontinuity' if jump or discontinuity else 'rdb_observation_gap'))
             if not continuous:
                 self.turn_since = self.turn = None
                 self.indicator_observed_since = None
@@ -441,6 +551,12 @@ class LiveAssessment:
             if continuous and not jump and not discontinuity and self.rows:
                 self.distance += step
             row = self._measure(frame, ego, before if continuous and not jump and not discontinuity else None, dt if continuous and not jump and not discontinuity else 0)
+            scoring = frame.get('scoring', {}).get(ego['id'])
+            if scoring:
+                row.update(vtd_scoring_state_flags=scoring['state_flags'],
+                           vtd_offroad_reported=scoring['offroad_reported'],
+                           vtd_collision_reported=scoring['collision_reported'],
+                           vtd_scoring_source=scoring['source'])
             if jump:
                 source_section = self.rows[-1]['evaluation_section_id'] if self.rows else row['evaluation_section_id']
                 row['evaluation_section_id'] = source_section
@@ -603,6 +719,19 @@ class LiveAssessment:
             and road['road'] == previous_road['road']
             and road['lane'] != previous_road['lane']
         )
+        transition = None
+        if self.map and previous_road and road:
+            transition = self.map.classify_lane_transition(previous_road, road)
+            lane_change = transition['classification'] == 'actual'
+            row.update(lane_transition_classification=transition['classification'],
+                       lane_transition_reason=transition['reason'],
+                       lane_transition_source=transition['source'])
+            if (previous_road['road'], previous_road['lane']) != (road['road'], road['lane']):
+                row['lane_transition_evidence'] = json.dumps(transition, ensure_ascii=False)
+            if lane_change and transition.get('mapped_old_lane') is not None:
+                previous_road = {**previous_road, 'lane': transition['mapped_old_lane']}
+            if transition['classification'] == 'continuity' and previous_road['lane'] != road['lane']:
+                self.pending_lane_change = None
         if road and road['lane'] and (not previous_road or road['road'] != previous_road['road']):
             # RDB ROAD_POS.heading is the lane-tangent-relative angle, not an
             # indication of forward/rearward OpenDRIVE road direction.  M15
@@ -625,6 +754,9 @@ class LiveAssessment:
         for field in ('centerline_intrusion_m', 'sidewalk_intrusion_m'):
             if field not in row and field in map_values:
                 row[field] = map_values[field]
+        for field, value in map_values.items():
+            if field.endswith(('_status', '_reason')) or field in ('boundary_source', 'boundary_patch_road_ids', 'boundary_connected_candidate_count'):
+                row[field] = value
         evaluate_opendrive_solid_lane_change(context, self.map, previous_road, lane_change)
         evaluate_solid_lane_change(context, self.meta, lane_change)
         solid_line_crossing = row.get('solid_line_crossing') if lane_change else None
@@ -632,7 +764,8 @@ class LiveAssessment:
             # A raw ROAD_POS lane-id edge is only a candidate. Publish the
             # solid-line result after the target lane remains stable for the
             # same confirmation window used by the turn-signal assessment.
-            row['solid_line_crossing'] = None
+            row['solid_line_crossing'] = False
+            row['lane_transition_pending'] = True
         self._previous_road = road
         self._evaluate_turn_signal(
             context,
@@ -641,6 +774,16 @@ class LiveAssessment:
             lane_change,
             solid_line_crossing,
         )
+        if transition and transition['classification'] == 'unknown':
+            row['turn_signal_violation'] = None
+            row['solid_line_crossing'] = None
+            self.pending_lane_change = None
+        elif context.before is None:
+            # A first sample cannot establish a transition. Treat as an
+            # explicit initialization observation, not a missing event sample.
+            row['lane_transition_applicable'] = False
+        else:
+            row['lane_transition_applicable'] = True
         self._previous_lane_info = lane
 
     def _evaluate_turn_signal(
@@ -828,8 +971,9 @@ class LiveAssessment:
             rear_offset=rear_offset,
             rear=rear,
         )
-        evaluate_school_zone(context, self.meta, self.school_zones)
-        evaluate_crosswalk(context, self.meta)
+        context.metadata = self._frame_metadata(context)
+        evaluate_school_zone(context, context.metadata, self.school_zones)
+        evaluate_crosswalk(context, context.metadata)
         self._evaluate_completion(context)
         evaluate_centerline(context, self.meta)
         evaluate_sidewalk(context, self.meta)
@@ -890,27 +1034,100 @@ class LiveAssessment:
                 rear=None,
             )
         objects = collect_assessment_objects(context)
+        metadata = context.metadata if context.metadata is not None else self._frame_metadata(context)
         measure_nearest_object(context, objects)
-        evaluate_collisions(context, objects, self.meta)
-        stop_line = find_stop_line(context, self.meta)
-        evaluate_traffic_signal(context, stop_line)
+        evaluate_collisions(context, objects, metadata)
+        stop_line = find_stop_line(context, metadata)
+        if self.signal_resolver:
+            stop_line = None
+            resolution = self.signal_resolver.resolve(
+                context.frame, context.ego, context.road, self.route,
+                context.row.get('route_s_m'))
+            context.row.update(signal_resolution_status=resolution['status'],
+                               signal_resolution_reason=resolution.get('reason'),
+                               signal_phase=resolution.get('signal_phase'),
+                               signal_authority=resolution.get('signal_authority', 'strict'),
+                               signal_authority_warnings=json.dumps(resolution.get('warnings', []), ensure_ascii=False),
+                               signal_gt_logical_state=resolution.get('gt_logical_state'),
+                               signal_gt_lamp_colors=json.dumps(resolution.get('gt_lamp_colors'), ensure_ascii=False),
+                               signal_conflict_reasons=json.dumps(resolution.get('conflict_reasons', []), ensure_ascii=False),
+                               signal_source=resolution.get('signal_source'),
+                               signal_resolution_evidence=json.dumps(resolution.get('evidence', {}), ensure_ascii=False))
+            context.row['signal_applicable'] = False if resolution['status'] == 'NOT_APPLICABLE' else True
+            if resolution['status'] == 'READY':
+                line = resolution['stop_line']
+                stop_line = (resolution['stop_line_distance_m'], line)
+                context.row.update(traffic_light_state=resolution['traffic_light_state'],
+                                   stop_line_id=line['id'], stop_line_distance_m=stop_line[0],
+                                   signal_resolution_source=resolution['signal_source'])
+        elif 'stop_lines' in metadata:
+            evaluate_traffic_signal(context, stop_line)
+            context.row['signal_resolution_source'] = 'explicit_metadata'
         evaluate_green_start(
             context,
             objects,
             stop_line,
-            self.meta.get('object_feed_complete', False),
+            metadata.get('object_feed_complete', False),
             self.green_blocker_forward_m,
             self._forward_path_corridors,
         )
         evaluate_pedestrian_response(
             context,
             objects,
-            self.meta,
+            metadata,
             self.pedestrian_stops,
             self.session['stop_speed_kmh'],
         )
 
     def snapshot(self) -> AssessmentSnapshot:
+        """Score a stable row prefix without blocking incoming measurements.
+
+        Rows are append-only dictionaries. Capture their references and the
+        small mutable session containers under the lock, then run the original
+        batch rules on that isolated view. A reset/finalization during scoring
+        must not publish an old session or write its deductions to the new log.
+        """
+        with self._snapshot_lock:
+            while True:
+                with self.lock:
+                    if self.cache is not None and time.monotonic()-self.cache_at <= 1:
+                        return self._snapshot_locked()
+                    view = copy.copy(self)
+                    view.lock = threading.RLock()
+                    view.file = None
+                    view.rows = list(self.rows)
+                    view.events = list(self.events)
+                    view.observation_gaps = list(self.observation_gaps)
+                    view.deductions = list(self.deductions)
+                    view.deducted = dict(self.deducted)
+                    view.cache = None
+                    initial_deductions = len(view.deductions)
+                    identity = (self.session_id, self.status)
+                payload = view._snapshot_locked()
+                with self.lock:
+                    if identity != (self.session_id, self.status):
+                        # _finish has already made a complete, exact result;
+                        # a reset instead needs a fresh view of the new session.
+                        if self.cache is not None:
+                            return self._snapshot_locked()
+                        continue
+                    for event in view.deductions[initial_deductions:]:
+                        key = (event['section'], event['item'])
+                        delta = event['total']-self.deducted.get(key, 0)
+                        if delta > 0:
+                            event = dict(event, delta=delta)
+                            self.deductions.append(event)
+                            self._write('deduction', event)
+                            self.deducted[key] = event['total']
+                    # Only cache when the captured measurement prefix is still
+                    # current; otherwise the next caller sees newly arrived GT.
+                    if (len(self.rows) == len(view.rows)
+                            and len(self.observation_gaps) == len(view.observation_gaps)):
+                        self.cache = view.cache
+                        self.cache_at = view.cache_at
+                    return payload
+
+    def _snapshot_locked(self) -> AssessmentSnapshot:
         with self.lock:
             if self.cache is None or time.monotonic()-self.cache_at>1:
                 results = evaluate.evaluate_official_for(self.rows,self.rules['normal_speed_kmh'],self.rules['school_speed_kmh']) if self.rows else []
@@ -925,8 +1142,33 @@ class LiveAssessment:
                 for record in self.rows: section_rows[record['evaluation_section_id'] or 'unsegmented'].append(record)
                 for item in grid:
                     field=fields[item['number']]
-                    item['observed_sections']=[key for key,records in section_rows.items() if any(r.get(field,'')!='' for r in records)]
-                    item['partial_sections']=[key for key,records in section_rows.items() if any(r.get(field,'')=='' for r in records)]
+                    number = item['number']
+                    def applicable(record):
+                        if number in (7, 8) and record.get('lane_transition_applicable') == '0':
+                            return False
+                        if number in (9, 10, 11) and record.get('signal_applicable') == '0':
+                            return False
+                        return True
+                    def present(record):
+                        needed = [field]
+                        if number in (9, 10, 11):
+                            needed += ['traffic_light_state', 'stop_line_id', 'stop_line_distance_m', 'ego_speed']
+                        return all(record.get(k, '') != '' for k in needed)
+                    relevant_rows = [r for r in self.rows if applicable(r)]
+                    item['observed_sections']=[key for key,records in section_rows.items() if any(present(r) for r in records if applicable(r))]
+                    item['partial_sections']=[key for key,records in section_rows.items() if any(not present(r) for r in records if applicable(r))]
+                    item['measured_frames'] = sum(present(r) for r in relevant_rows)
+                    item['missing_frames'] = len(relevant_rows)-item['measured_frames']
+                    item['not_applicable_frames'] = len(self.rows)-len(relevant_rows)
+                    item['rule_status'] = item['status']
+                    item['coverage_status'] = ('NOT_APPLICABLE' if not relevant_rows else
+                                               'UNAVAILABLE' if not item['measured_frames'] else
+                                               'PARTIAL' if item['missing_frames'] else 'COMPLETE')
+                    if not relevant_rows and self.rows:
+                        item['status'] = 'NOT_APPLICABLE'
+                    elif item['status'] == 'PASS' and item['missing_frames']:
+                        item['status'] = 'PARTIAL'
+                        item['detail'] += f"; 미측정 {item['missing_frames']}프레임: 전체 정상 아님"
                 school_uncertain = bool(
                     self.school_zones
                     and any(
@@ -982,14 +1224,21 @@ class LiveAssessment:
                 major = sum(points//6 if item.number==6 else int(item.severity_by_section.get(section)==2)
                             for item in results for section,points in item.penalty_by_section.items()
                             if section != 'unsegmented')
-                unavailable = [r.number for r in results if r.status=='UNAVAILABLE']
+                unavailable = [r['number'] for r in grid if r['status']=='UNAVAILABLE']
                 school_partial=school_uncertain
                 missing=[key for key in ('school_zones','crosswalks','stop_lines','centerlines','sidewalk_boundaries') if key not in self.meta and not (key=='school_zones' and self.school_zones) and not (key in ('centerlines','sidewalk_boundaries') and self.map)]
+                if self.signal_resolver and 'stop_lines' in missing:
+                    missing.remove('stop_lines')
                 if not self.route and 'sections' not in self.meta: missing.append('sections')
                 if self.completion_mode == 'finish_line' and 'finish_line' not in self.meta: missing.append('finish_line')
-                if not self.meta.get('object_feed_complete',False): missing.append('object_feed_complete')
+                if not self.meta.get('object_feed_complete',False) and not self.scenario_gt: missing.append('object_feed_complete')
+                if self.gt_configuration_error: missing.append('ground_truth_configuration')
                 if not self.respawn_detection_confirmed: missing.append('confirmed_respawn_event_source')
                 warnings=[]
+                signal_warning_frames = sum(r.get('signal_authority_warnings', '[]') not in ('[]', '', 'null')
+                                            for r in self.rows)
+                if self.signal_authority == 'rdb_logic' and signal_warning_frames:
+                    warnings.append(f'신호는 RDB 논리 GT 기준으로 채점 중: 표시·설정 대조 경고 {signal_warning_frames}프레임 (별도 증거 저장)')
                 if missing: warnings.append('필수 데이터 확인 필요: '+', '.join(missing))
                 if self.active_profile_error:
                     warnings.append('실행 경로 프로필 적용 실패: '+self.active_profile_error)
@@ -1012,6 +1261,10 @@ class LiveAssessment:
                 if school_partial: score_withheld_reasons.append('school_zone_coverage_pending')
                 if missing: score_withheld_reasons.append('missing_metadata')
                 if partial_fields: score_withheld_reasons.append('partial_measurements')
+                if self.observation_gaps: score_withheld_reasons.append('observation_gaps')
+                if self.pending_lane_change: score_withheld_reasons.append('unconfirmed_lane_transition')
+                if any(r.get('object_feed_complete') == '0' for r in self.rows):
+                    score_withheld_reasons.append('object_inventory_gaps')
                 complete = bool(self.rows) and not score_withheld_reasons
                 score = self.rules['base_score']+total_penalty if complete else None
                 evaluation = (
@@ -1030,6 +1283,11 @@ class LiveAssessment:
                             end_s_m=self.route_start_s+span*(index+1),
                         ))
                 self.cache = dict(session_id=self.session_id,status=self.status,
+                                  signal_authority=self.signal_authority,
+                                  signal_authority_warning_frames=signal_warning_frames,
+                                  observation_gaps=list(self.observation_gaps),
+                                  ground_truth_inventory=self.scenario_gt.describe() if self.scenario_gt else None,
+                                  ground_truth_configuration_error=self.gt_configuration_error,
                                   unsegmented_frames=unsegmented,
                                   sections=self.section_ids or [str(s['id']) for s in self.meta.get('sections',[])],reached_sections=reached,
                                   official_grid=grid,summary=dict(official_score=score,official_penalty=total_penalty,

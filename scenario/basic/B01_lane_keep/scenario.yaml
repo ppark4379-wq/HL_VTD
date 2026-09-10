@@ -10,6 +10,7 @@ scenario:
 runtime:
   simulator: VTD
   simulator_version: '2025.2'
+  mission_start_leg: 0
 route:
   default: route.csv
   mode: packaged
@@ -28,10 +29,10 @@ entities:
   type: vehicle
   role: ego
   initial_position:
-    x: 344.2292785644531
-    y: -110.28851318359375
-    z: 41.5
-    heading_rad: 5.2900052038517895
+    x: 367.6290588378906
+    y: -267.0168914794922
+    z: 47.93115599199833
+    heading_rad: 3.874217798304396
 events: []
 expected_outcomes:
 - follow_route

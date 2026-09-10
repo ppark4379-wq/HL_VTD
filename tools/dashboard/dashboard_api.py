@@ -15,6 +15,8 @@ class DashboardRuntime:
     video_relay: Any = None
     video_relays: Any = None
     video_recording: Any = None
+    scp_observer: Any = None
+    respawn_log_observer: Any = None
 
 
 def scenarios_payload() -> List[dict]:
@@ -30,11 +32,37 @@ def live_payload(runtime: DashboardRuntime) -> dict:
     payload = runtime.live_assessment.snapshot()
     payload['enabled'] = True
     payload['receiver'] = dict(runtime.rdb_observer.status)
+    receiver = payload['receiver']
+    transport = receiver.get('transport') or {}
+    incomplete = bool(receiver.get('shutdown_incomplete') or receiver.get('processing_error') or transport.get('error'))
+    delayed = receiver.get('processing_lag_s', 0) > 2
+    if incomplete or delayed:
+        # Do not mutate the assessor's cached prefix. This guard is about live
+        # transport completeness, not a new driving violation or deduction.
+        summary = dict(payload['summary'])
+        reasons = list(summary.get('score_withheld_reasons', []))
+        reason = 'incomplete_transport_evidence' if incomplete else 'assessment_processing_backlog'
+        if reason not in reasons:
+            reasons.append(reason)
+        summary.update(official_score=None, score_withheld_reasons=reasons)
+        if summary.get('official_evaluation') == 'COMPLETE':
+            summary['official_evaluation'] = 'PARTIAL'
+        payload['summary'] = summary
+        payload['warnings'] = list(payload.get('warnings', [])) + [
+            ('GT 수신·처리 오류: 원본 보존 상태 확인 전 점수 보류' if incomplete else
+             f"GT는 보존 중이나 채점이 {receiver['processing_lag_s']:.2f}초 지연됨: 처리 완료 전 점수 보류")
+        ]
     payload['control_receiver'] = (
         dict(runtime.control_events.status)
         if runtime.control_events
         else {'connected': False, 'error': 'control monitor not started'}
     )
+    payload['scp_receiver'] = dict(runtime.scp_observer.status) if runtime.scp_observer else {
+        'connected': False, 'receive_only': True, 'error': 'SCP observation disabled',
+        'respawn_completion_verified': False}
+    payload['respawn_log_receiver'] = dict(runtime.respawn_log_observer.status) if runtime.respawn_log_observer else {
+        'connected': False, 'receive_only': True, 'error': 'plugin log observation disabled',
+        'respawn_completion_verified': False}
     return payload
 
 

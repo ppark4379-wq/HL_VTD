@@ -46,7 +46,7 @@
             <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_White" Name="Ego"/>
             <Init>
                 <Speed Value="0.0000000000000000e+00"/>
-                <PosAbsolute X="1.3811951494140626e+03" Y="-1.9266788825988769e+02" Z="7.1483551575000007e+01" Direction="3.2706903962555880e+00" AlignToRoad="true"/>
+                <PosAbsolute X="1.1124522294921876e+03" Y="-2.5615583038330072e+01" Z="6.4880297325000001e+01" Direction="2.5226671520056261e+00" AlignToRoad="true"/>
             </Init>
         </Player>
         <Player>
@@ -192,7 +192,7 @@
         <PlayerActions Player="New Player01">
             <Action Name="">
                 <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.1000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="1.1000000000000000e+01" X="1.3811951494140626e+03" Y="-1.9266788825988769e+02"/>
+                <EditorPos Radius="1.1000000000000000e+01" X="1.1124522294921876e+03" Y="-2.5615583038330072e+01"/>
                 <LaneChange Direction="-1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="5.0000000000000000e+00" Time="2.0000000000000000e+00"/>
                 <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="7.5000000000000000e+00"/>
             </Action>
@@ -352,7 +352,7 @@
         <CharacterActions Character="New Character">
             <Action Name="">
                 <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.3000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="1.3000000000000000e+01" X="1.3811951494140626e+03" Y="-1.9266788825988769e+02"/>
+                <EditorPos Radius="1.3000000000000000e+01" X="1.1124522294921876e+03" Y="-2.5615583038330072e+01"/>
                 <Motion Move="jog" Rate="0.0000000000000000e+00" Speed="2.4749999046325684e+00" Force="false" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
                 <CharacterPath Loop="false" PathShape="2" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Beam="true" ClampToGround="false"/>
             </Action>
@@ -1099,13 +1099,13 @@
             <Phase Duration="1.5000000000000000e+02" Type="blink"/>
             <Phase Duration="1.5000000000000000e+02" Type="stop"/>
             <Phase Duration="1.5000000000000000e+01" Type="go"/>
-            <Phase Duration="3.0000000000000000e+00" Type="attention"/>
+            <Phase Duration="1.5000000000000000e+01" Type="attention"/>
         </SignalController>
         <SignalController Id="131" DelayRef="-1" Delay="0.0000000000000000e+00">
             <Phase Duration="1.5000000000000000e+02" Type="blink"/>
             <Phase Duration="1.5000000000000000e+02" Type="stop"/>
             <Phase Duration="1.5000000000000000e+01" Type="go"/>
-            <Phase Duration="3.0000000000000000e+00" Type="attention"/>
+            <Phase Duration="1.5000000000000000e+01" Type="attention"/>
         </SignalController>
         <SignalController Id="132" DelayRef="-1" Delay="0.0000000000000000e+00">
             <Phase Duration="1.5000000000000000e+01" Type="go"/>

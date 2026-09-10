@@ -5,6 +5,7 @@
 #include "control/safety/safety_limiter.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 void runControlProcess(ControlProcessData& data,
                        const WorldState& world,
@@ -20,6 +21,28 @@ void runControlProcess(ControlProcessData& data,
     runLongitudinalControl(data.controller, data.nominalCommand,
                            world.egoSpeed, planning.targetSpeed,
                            std::max(dt, 1e-3));
+    // Speed-only PD and its jerk limiter can brake too weakly for a late
+    // traffic stop. Bound the command by remaining FRONT-BUMPER distance.
+    // This does not affect ordinary driving/avoidance or weaken EBS.
+    const bool trafficStop = planning.stopReason == StopReason::RedLight ||
+        planning.stopReason == StopReason::FlashingRed ||
+        planning.stopReason == StopReason::CrosswalkBlocked;
+    if (trafficStop && planning.stopDistanceValid &&
+        std::isfinite(planning.stopDistance) &&
+        (world.egoSpeed > planning.targetSpeed + 0.05 ||
+         planning.targetSpeed <= 0.05)) {
+        const double speed = std::max(0.0, world.egoSpeed);
+        // Reserve 1 m at the line and 0.35 s for measurement/actuation lag.
+        const double available = std::max(0.1,
+            planning.stopDistance - 1.0 - speed * 0.35);
+        const double required = planning.targetSpeed <= 0.05
+            ? data.controller.config.minAcceleration
+            : std::max(data.controller.config.minAcceleration,
+                       -speed * speed / (2.0 * available));
+        data.nominalCommand.targetAccel = static_cast<float>(std::min(
+            static_cast<double>(data.nominalCommand.targetAccel), required));
+        data.controller.previousAcceleration = data.nominalCommand.targetAccel;
+    }
     // 조향 변화율 제한. 경로 추종 자체는 그대로 두고 명령만 매끄럽게 만든다.
     {
         // A planner overrun must not turn into one large steering jump.  The

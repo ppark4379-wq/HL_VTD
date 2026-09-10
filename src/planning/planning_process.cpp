@@ -268,33 +268,128 @@ std::vector<int> updateConfirmedStationaryObjects(
     return confirmed;
 }
 
+}  // namespace
+
+double settledStraightManeuverSpeedCap(const LaneChangeData& maneuver,
+    const WorldState& world, const std::vector<Waypoint>& path,
+    double cruiseSpeed, double clearance, const LaneChangeConfig& laneConfig,
+    const PlanningBehaviorConfig& config) {
+    const double slow=laneConfig.maximumLaneChangeSpeed;
+    if ((maneuver.phase!=LaneChangePhase::Execute && maneuver.phase!=LaneChangePhase::Settle) ||
+        maneuver.waitingForReturn || maneuver.bestProgressFallback ||
+        !maneuver.shiftCompletedLaneValid || !world.egoLaneValid ||
+        !(LaneKey{world.egoRoadId,world.egoSectionIndex,world.egoLaneId}==maneuver.shiftCompletedLane) ||
+        !std::isfinite(world.egoLaneCenterDistance) || std::abs(world.egoLaneCenterDistance)>.35 ||
+        !std::isfinite(clearance) || clearance+1e-6<laneConfig.latticeObstacleClearance ||
+        path.size()<2 || !std::isfinite(cruiseSpeed) || cruiseSpeed<=slow) return slow;
+    const double c=std::cos(world.ego.heading),s=std::sin(world.ego.heading);
+    const double reserve=8.+std::max(cruiseSpeed,world.egoSpeed)*.5;
+    const double preview=std::max(20.,reserve+
+        (cruiseSpeed*cruiseSpeed-slow*slow)/(2.*config.comfortableDeceleration));
+    std::size_t nearest=0;double best=std::numeric_limits<double>::infinity();
+    for(std::size_t i=0;i<path.size();++i) {
+        const double d=std::hypot(path[i].x-world.ego.x,path[i].y-world.ego.y);
+        if(d<best){best=d;nearest=i;}
+    }
+    if(best>1.) return slow;
+    double available=0.;
+    for(std::size_t i=nearest;i<path.size();++i) {
+        const auto& p=path[i];
+        const double dx=p.x-world.ego.x,dy=p.y-world.ego.y;
+        const double ahead=dx*c+dy*s, lateral=-dx*s+dy*c;
+        const double yawError=std::atan2(std::sin(p.yaw-world.ego.heading),
+                                         std::cos(p.yaw-world.ego.heading));
+        if (p.roadId!=world.egoRoadId || p.sectionIndex!=world.egoSectionIndex ||
+            p.laneId!=world.egoLaneId || !std::isfinite(ahead) ||
+            std::abs(lateral)>.35 || std::abs(yawError)>.05 || ahead<available-1.) break;
+        available=std::max(available,ahead);
+        if(available>=preview)break;
+    }
+    // Any nearby body restricts this optional speed relaxation. Existing ACC,
+    // cross-traffic, dense-obstacle, crossing and emergency caps remain below.
+    for(const auto& object:world.objects) {
+        const double dx=object.raw.x-world.ego.x,dy=object.raw.y-world.ego.y;
+        const double ahead=dx*c+dy*s,lateral=-dx*s+dy*c;
+        const double radius=.5*std::hypot(object.raw.length,object.raw.width);
+        if(ahead+radius>=-5. && std::abs(lateral)<=config.nearbyObjectLateralDistance+radius)
+            available=std::min(available,std::max(0.,ahead-radius));
+    }
+    return std::min(cruiseSpeed,std::sqrt(slow*slow+2.*config.comfortableDeceleration*
+                                        std::max(0.,available-reserve)));
+}
+
+std::vector<int> updateCrosswalkStationaryRelease(const Crosswalk& crossing,
+    const WorldState& world, const StopDecision& previousStop,
+    const std::vector<StationaryObjectState>& history,
+    const PlanningBehaviorConfig& config, double dt,
+    std::vector<CrosswalkObjectWaitState>& waits) {
+    std::vector<int> result;
+    if (config.simulationCrosswalkStaticRelease != 1.) { waits.clear(); return result; }
+    const bool waitingHere = world.inputValid && world.egoSpeed <= config.stoppedSpeedThreshold &&
+        previousStop.valid && previousStop.reason == StopReason::CrosswalkBlocked &&
+        previousStop.sourceId == crossing.id &&
+        std::isfinite(previousStop.distanceToStop) &&
+        previousStop.distanceToStop <= config.trafficStopPositionMargin + .5;
+    // A dropped frame/large dt must not instantly complete a three-second wait.
+    const double elapsed = std::isfinite(dt) ? std::clamp(dt,0.,.1) : 0.;
+    for (auto& wait : waits) {
+        if (wait.crosswalkId != crossing.id) continue;
+        const auto object=std::find_if(world.objects.begin(),world.objects.end(),
+            [&](const WorldObjectState& o){return o.raw.id==wait.objectId;});
+        if (object==world.objects.end() || !intersects(crossing.polygon,object->obb)) {
+            wait.stoppedWait=0.;wait.released=false;
+        }
+    }
+    for (const auto& object : world.objects) {
+        const bool inside=intersects(crossing.polygon,object.obb);
+        auto wait=std::find_if(waits.begin(),waits.end(),[&](const CrosswalkObjectWaitState& s){
+            return s.crosswalkId==crossing.id && s.objectId==object.raw.id;});
+        if (wait==waits.end()) {
+            waits.push_back({crossing.id,object.raw.id});wait=waits.end()-1;
+        }
+        const auto tracked = std::find_if(history.begin(), history.end(),
+            [&](const StationaryObjectState& state) { return state.id == object.raw.id; });
+        const bool stationary=std::abs(object.raw.speed)<.1 && objectMotionSpeed(object)<.1;
+        wait->hasEverMoved = wait->hasEverMoved || !stationary ||
+            (tracked!=history.end() && tracked->hasEverMoved);
+        if (!inside) continue; // remember approach motion, but never time out an approaching actor
+        if (wait->hasEverMoved || tracked==history.end() || !tracked->hasPosition) {
+            wait->released=false;wait->stoppedWait=0.;continue;
+        }
+        if (!wait->released) {
+            wait->stoppedWait=waitingHere ? wait->stoppedWait+elapsed : 0.;
+            wait->released=wait->stoppedWait>=config.crosswalkStaticConfirmationTime;
+        }
+        if (wait->released) result.push_back(static_cast<int>(object.raw.id));
+    }
+    return result;
+}
+
 bool crosswalkHasRiskObject(const Crosswalk& crosswalk,
                             const WorldState& world,
-                            double predictionHorizon) {
+                            double predictionHorizon,
+                            const std::vector<int>& staticPropIds) {
     return std::any_of(
         world.objects.begin(), world.objects.end(),
         [&](const WorldObjectState& object) {
-            // GT packet에 semantic type은 없지만 크기로 승용차급
-            // 객체는 구분할 수 있다. 횡단보도 안에 멈춘 차량을
-            // CrosswalkBlocked로 다시 정지 요청하면, 바로 그 차량을
-            // 피하려고 만든 안전한 차선변경 경로가 prepare에서
-            // 취소된다. 멈춘 대형 객체는 정적장애물 회피가
-            // 담당한다. 보행자·자전거 크기 객체와 움직이는
-            // 차량은 기존 횡단보도 정지/예측 제동을 그대로 유지한다.
+            if (std::find(staticPropIds.begin(), staticPropIds.end(),
+                          static_cast<int>(object.raw.id)) != staticPropIds.end()) return false;
+            // Do not turn a normally moving lead vehicle into a pedestrian
+            // yield request after Ego has already entered the crossing.
+            // Vehicle following/prediction/EBS remain independent and active.
+            // GT lacks semantic class: retain the existing conservative size
+            // boundary for pedestrians, cyclists and other small road users.
             constexpr double kVulnerableRoadUserMaximumSize = 2.5;
             const double maximumSize = std::max(
                 static_cast<double>(object.raw.length),
                 static_cast<double>(object.raw.width));
-            const bool stationaryVehicleSizedObject =
-                std::abs(object.raw.speed) < 0.3 &&
-                maximumSize > kVulnerableRoadUserMaximumSize;
-            if (stationaryVehicleSizedObject) return false;
+            if (maximumSize > kVulnerableRoadUserMaximumSize) return false;
             // 중심점이 횡단보도 밖으로 나가도 보행자 체적의 뒤쪽이
             // 남아 있을 수 있다. polygon과 전체 OBB가 한 부분이라도
             // 겹치는 동안은 점유로 판정한다.
             if (intersects(crosswalk.polygon, object.obb)) return true;
             if (predictionHorizon <= 0.0 ||
-                std::abs(object.raw.speed) < 0.3) return false;
+                objectMotionSpeed(object) < 0.1) return false;
             // horizon 끝점 하나만 보면 그 전에 횡단보도를 통과한 빠른 객체를
             // 놓친다. 0.25초 간격으로 궤적 전체를 검사한다.
             constexpr double kPredictionStep = 0.25;
@@ -316,6 +411,34 @@ bool crosswalkHasRiskObject(const Crosswalk& crosswalk,
         });
 }
 
+double crosswalkStopRouteS(const Crosswalk& crossing, const WorldState& world,
+    const StaticZoneData& zones, const std::vector<Waypoint>& route, double searchDistance) {
+    double best=-std::numeric_limits<double>::infinity();
+    for (const auto& line:zones.stopLines) {
+        if (!line.routeRelevant || line.routeS>crossing.entryRouteS+1e-3 ||
+            crossing.entryRouteS-line.routeS>searchDistance) continue;
+        auto point=std::lower_bound(route.begin(),route.end(),line.routeS,
+            [](const Waypoint& p,double s){return p.s<s;});
+        if (point==route.end() && !route.empty()) --point;
+        if (point!=route.begin() && point!=route.end() &&
+            std::abs((point-1)->s-line.routeS)<std::abs(point->s-line.routeS)) --point;
+        const bool onCurrentRoad=line.roadId<0 || line.roadId==world.egoRoadId;
+        const bool onApproachRoute=point!=route.end() && point->roadId==line.roadId;
+        // A crosswalk is often owned by the connecting road, while its stop
+        // line belongs to the PRECEDING approach road (M09/M14, among others).
+        // Match the approach, not equality with the crosswalk's road ID.
+        if (!onCurrentRoad && !onApproachRoute) continue;
+        const int lane=onCurrentRoad && world.egoLaneValid ? world.egoLaneId
+            : onApproachRoute ? point->laneId : 0;
+        if (!line.laneIds.empty() && lane!=0 &&
+            std::find(line.laneIds.begin(),line.laneIds.end(),lane)==line.laneIds.end()) continue;
+        best=std::max(best,line.routeS); // nearest valid line BEFORE this crossing
+    }
+    return std::isfinite(best)?best:crossing.entryRouteS;
+}
+
+namespace {
+
 CrosswalkOccupancyState* findCrosswalkState(
     PlanningProcessData& data, int crosswalkId) {
     const auto found = std::find_if(
@@ -330,7 +453,15 @@ void updateCrosswalkStates(PlanningProcessData& data,
                            const WorldState& world,
                            const StaticZoneData& zones,
                            double dt,
+                           const StopDecision& previousStop,
                            DecisionTraceData* trace) {
+    data.crosswalkObjectWaits.erase(std::remove_if(data.crosswalkObjectWaits.begin(),
+        data.crosswalkObjectWaits.end(),[&](const CrosswalkObjectWaitState& wait){
+            const auto crossing=std::find_if(zones.crosswalks.begin(),zones.crosswalks.end(),
+                [&](const Crosswalk& c){return c.id==wait.crosswalkId;});
+            return world.respawnDetected || crossing==zones.crosswalks.end() ||
+                !crossing->routeRelevant || (world.egoPathValid && crossing->exitRouteS<world.egoPathS);
+        }),data.crosswalkObjectWaits.end());
     data.crosswalkStates.erase(
         std::remove_if(
             data.crosswalkStates.begin(), data.crosswalkStates.end(),
@@ -353,8 +484,10 @@ void updateCrosswalkStates(PlanningProcessData& data,
              crosswalk.exitRouteS < world.egoPathS)) {
             continue;
         }
+        const auto staticProps=updateCrosswalkStationaryRelease(crosswalk,world,previousStop,
+            data.stationaryObjects,data.config,dt,data.crosswalkObjectWaits);
         const bool occupied = crosswalkHasRiskObject(
-            crosswalk, world, data.config.crosswalkPedestrianPrediction);
+            crosswalk, world, data.config.crosswalkPedestrianPrediction, staticProps);
         CrosswalkOccupancyState* state =
             findCrosswalkState(data, crosswalk.id);
         if (occupied) {
@@ -378,6 +511,7 @@ void updateCrosswalkStates(PlanningProcessData& data,
                 data.config.crosswalkClearanceHoldTime;
             std::ostringstream detail;
             detail << "crosswalk=" << crosswalk.id
+                   << " stationary_yield_released=" << staticProps.size()
                    << " hold_seconds="
                    << data.config.crosswalkClearanceHoldTime;
             traceDecision(trace, "crosswalk", "clearance_hold_started",
@@ -635,20 +769,8 @@ void updateStopRequests(PlanningProcessData& data,
             // 횡단보도 입구를 목표로 삼으면 제동 오차만큼 밀려 횡단보도
             // 위에 서게 되므로, 그 앞 정지선이 있으면 정지선을 목표로 한다.
             // 여유는 정지 프로파일의 stop_safety_margin이 이미 적용한다.
-            double target = crosswalk.entryRouteS;
-            for (const auto& candidate : zones.stopLines) {
-                if (!candidate.routeRelevant) continue;
-                if (crosswalk.roadId >= 0 && candidate.roadId >= 0 &&
-                    candidate.roadId != crosswalk.roadId) continue;
-                if (!candidate.laneIds.empty() && world.egoLaneValid &&
-                    std::find(candidate.laneIds.begin(),
-                              candidate.laneIds.end(), world.egoLaneId) ==
-                        candidate.laneIds.end()) continue;
-                if (candidate.routeS > crosswalk.entryRouteS + 1e-3) continue;
-                if (crosswalk.entryRouteS - candidate.routeS >
-                    data.config.crosswalkStopLineSearch) continue;
-                target = std::min(target, candidate.routeS);
-            }
+            const double target=crosswalkStopRouteS(crosswalk,world,zones,
+                data.pathPlanner.waypoints,data.config.crosswalkStopLineSearch);
             addStopRequest(data.stopManager, StopReason::CrosswalkBlocked,
                            std::max(target, world.frontBumperPathS),
                            crosswalk.id);
@@ -1144,6 +1266,79 @@ bool applySimulationProgressRecovery(
 
 }  // namespace
 
+std::uint8_t previewTrajectoryTurnSignal(const WorldState& world,
+    const PathGeneratorData& map, const std::vector<Waypoint>& path) {
+    if (!world.egoLaneValid || path.size() < 2) return 0;
+    const auto roadIt = map.roads.find(world.egoRoadId);
+    if (roadIt == map.roads.end()) return 0;
+    const auto& road = roadIt->second;
+    std::size_t nearest = 0;
+    double best = std::numeric_limits<double>::infinity();
+    for (std::size_t i = 0; i < path.size(); ++i) {
+        const double d = std::hypot(path[i].x-world.ego.x, path[i].y-world.ego.y);
+        if (d < best) { best=d; nearest=i; }
+    }
+    if (best > 3.0) return 0;
+    // Preview ~3 s, including at crawl speed. Road-relative displacement
+    // removes ordinary road curvature from the indicator decision.
+    const double horizon = std::clamp(std::abs(world.egoSpeed)*3.0, 8.0, 35.0);
+    double firstOffset=0.0, firstCenter=0.0, direction=1.0;
+    bool initialized=false;
+    for (std::size_t i=nearest; i<path.size(); ++i) {
+        const auto& p=path[i];
+        if (p.s-path[nearest].s > horizon) break;
+        if (p.roadId != world.egoRoadId || p.sectionIndex<0 ||
+            static_cast<std::size_t>(p.sectionIndex)>=road.sections.size()) break;
+        const auto& section=road.sections[p.sectionIndex];
+        if (!section.lanes.count(world.egoLaneId)) break;
+        const auto pose=roadToWorld(road,p.roadS);
+        const double center=laneOffset(road,section,world.egoLaneId,p.roadS);
+        const double offset=-(p.x-pose.x)*std::sin(pose.yaw)+
+                             (p.y-pose.y)*std::cos(pose.yaw)-center;
+        if (!initialized) {
+            firstOffset=offset; firstCenter=center;
+            direction=std::cos(world.ego.heading-pose.yaw)>=0.0?1.0:-1.0;
+            initialized=true;
+        }
+        // A lane renumbering/offset discontinuity is not a lateral manoeuvre.
+        if (std::abs(center-firstCenter)>0.5) break;
+        const double change=(offset-firstOffset)*direction;
+        if (std::abs(change)>=0.5) return change>0.0?1U:2U;
+    }
+    return 0;
+}
+
+void maintainTrajectoryTurnSignal(PlanningProcessData& data,
+    const WorldState& world, std::uint8_t previewSignal, double dt) {
+    if (world.respawnDetected) {
+        data.trajectoryTurnSignal=0;
+        data.trajectoryTurnSignalHoldRemaining=0.0;
+        data.trajectoryTurnSignalRoadId=-1;
+    }
+    if (previewSignal!=0) {
+        data.trajectoryTurnSignal=previewSignal;
+        data.trajectoryTurnSignalHoldRemaining=1.0;
+        data.trajectoryTurnSignalRoadId=world.egoRoadId;
+    } else {
+        const auto body=vehicleFootprintFromObb(world.egoObb,
+            {world.ego.x,world.ego.y,world.ego.heading});
+        // A multistep path may travel parallel while straddling the boundary.
+        // No future lateral slope does NOT mean that this shift has finished.
+        const bool stillStraddling=world.egoLaneValid && body.width>0.0 &&
+            world.egoLaneWidth>0.0 &&
+            data.trajectoryTurnSignalRoadId==world.egoRoadId &&
+            std::abs(world.egoLaneCenterDistance)+body.width*.5>
+                world.egoLaneWidth*.5-.05;
+        if (stillStraddling && data.trajectoryTurnSignal!=0) {
+            data.trajectoryTurnSignalHoldRemaining=1.0;
+        } else {
+            data.trajectoryTurnSignalHoldRemaining=std::max(0.0,
+                data.trajectoryTurnSignalHoldRemaining-std::max(0.0,dt));
+            if (data.trajectoryTurnSignalHoldRemaining<=0.0) data.trajectoryTurnSignal=0;
+        }
+    }
+}
+
 bool canCancelClearedPreparedAvoidance(
     const LaneChangeData& maneuver, const WorldState& world,
     const std::vector<Waypoint>& successor, bool successorPathSafe) {
@@ -1172,6 +1367,43 @@ bool canCancelClearedPreparedAvoidance(
         (blocker->pathValid && (!blocker->isAhead || !blocker->isOnEgoPath));
 }
 
+bool makeGatewayTrackingHandoff(LaneChangeData& output,const LaneChangeData& current,
+    const std::vector<Waypoint>& route,const WorldState& world,bool approachOnly,double clearance) {
+    if(!world.inputValid || world.respawnDetected || route.size()<3 ||
+       (current.phase!=LaneChangePhase::None &&
+        !current.localCorridorAvoidance && !current.soleGatewayApproach)) return false;
+    WorldState projected=world;
+    if(!projectWorldToActivePath(projected,route,world.frontBumperOffset) ||
+       std::abs(projected.egoPathD)>.35 || route.back().s-projected.egoPathS<2.) return false;
+    auto next=std::lower_bound(route.begin(),route.end(),projected.egoPathS,
+        [](const Waypoint& p,double s){return p.s<s;});
+    if(next==route.end() || std::abs(normalizeAngle(next->yaw-world.ego.heading))>.12) return false;
+    // A route flag alone cannot authorize a discontinuous steering handoff.
+    // Check the first three metres against the incumbent actually being driven.
+    if(current.phase!=LaneChangePhase::None && current.path.size()>2) {
+        for(auto it=next;it!=route.end() && it->s<=projected.egoPathS+3.;++it) {
+            WorldState sample=world;sample.ego.x=it->x;sample.ego.y=it->y;sample.ego.heading=it->yaw;
+            if(!projectWorldToActivePath(sample,current.path,world.frontBumperOffset) ||
+               std::abs(sample.egoPathD)>.35) return false;
+        }
+    }
+    LaneChangeData result;
+    result.phase=current.phase==LaneChangePhase::None?LaneChangePhase::Prepare:current.phase;
+    result.routeMode=LaneChangeRouteMode::KeepTargetLane;
+    result.roadConnectionManeuver=true;result.missionRouteAuthority=true;
+    result.soleGatewayApproach=approachOnly;
+    result.validatedObstacleClearance=clearance;
+    result.sourceRoadId=world.egoRoadId;result.sourceSectionIndex=world.egoSectionIndex;
+    result.sourceLaneId=world.egoLaneId;result.path=route;
+    result.startRouteS=projected.egoPathS;result.rejoinRouteS=route.back().s;
+    const auto& end=route.back();
+    result.targetLaneId=end.laneId;result.reconnectLane={end.roadId,end.sectionIndex,end.laneId};
+    result.reconnectLaneValid=true;result.awaitExactReconnect=!approachOnly;
+    result.shiftCompletedLane=result.reconnectLane;result.shiftCompletedLaneValid=true;
+    result.turnSignal=current.turnSignal;result.outwardTurnSignal=current.outwardTurnSignal;
+    output=std::move(result);return true;
+}
+
 bool initializePlanning(PlanningProcessData& data,
                         const PathPlannerConfig& plannerConfig,
                         const PlanningBehaviorConfig& behaviorConfig,
@@ -1192,6 +1424,7 @@ void runPlanningProcess(PlanningProcessData& data,
                         double dt,
                         DecisionTraceData* trace) {
     if (map.corridorRuntime) beginCorridorSearchFrame(*map.corridorRuntime);
+    const StopDecision previousStop=data.frame.stop;
     resetPlanningFrame(data);
     updateMissionCorridorProgress(data.missionCorridor, sensedWorld);
 
@@ -1717,12 +1950,39 @@ void runPlanningProcess(PlanningProcessData& data,
 
     // 횡단보도 점유는 여러 속도/정지 판단에서 공유한다. 한 프레임에
     // 한 번만 갱신해 점유 해제 타이머가 중복으로 감소하지 않게 한다.
-    updateCrosswalkStates(data, sensedWorld, map.staticZones, dt, trace);
+    updateCrosswalkStates(data, sensedWorld, map.staticZones, dt, previousStop, trace);
 
     // 신호/횡단보도 정지 여부를 먼저 판정한다. 빨간불 전에 만든
     // 회피 경로를 정지한 동안 보관했다가 녹색불에서 중간부터
     // 추종하면 정지선에서 바로 크게 조향한다.
     updateStopRequests(data, sensedWorld, map.staticZones, dt, trace);
+
+    bool gatewayTrackingAdopted=false;
+    if(missionActive && map.corridorRuntime && corridorTrackingPathValid &&
+       map.corridorRuntime->trackingPathApproved &&
+       (map.corridorRuntime->gatewayRouteSelected || map.corridorRuntime->soleGatewayApproachSelected) &&
+       (data.laneChange.localCorridorAvoidance || data.laneChange.soleGatewayApproach ||
+        (data.laneChange.phase==LaneChangePhase::None && map.corridorRuntime->soleGatewayApproachSelected))) {
+        const bool approach=map.corridorRuntime->soleGatewayApproachSelected;
+        // Don't replace an approach with the identical stored prefix every tick.
+        const bool sameApproach=approach && data.laneChange.soleGatewayApproach &&
+            !data.laneChange.path.empty() &&
+            std::hypot(data.laneChange.path.back().x-data.roadLanePlanner.waypoints.back().x,
+                       data.laneChange.path.back().y-data.roadLanePlanner.waypoints.back().y)<.1;
+        LaneChangeData replacement;
+        if(!sameApproach && corridorTrackingPathIsSafe(data.roadLanePlanner.waypoints,sensedWorld,
+               data.laneChangeConfig.latticeObstacleClearance,nullptr,&data.config,&map) &&
+           makeGatewayTrackingHandoff(replacement,data.laneChange,data.roadLanePlanner.waypoints,
+               sensedWorld,approach,data.laneChangeConfig.latticeObstacleClearance)) {
+            WorldState projected=sensedWorld;
+            if(projectWorldToActivePath(projected,replacement.path,sensedWorld.frontBumperOffset)) {
+                data.laneChange=std::move(replacement);world=std::move(projected);
+                gatewayTrackingAdopted=true;
+                traceDecision(trace,"gateway_tracking","authority_transferred",
+                    approach?"safe_sole_gateway_approach=1":"complete_collision_free_gateway_route=1");
+            }
+        }
+    }
 
     // A blocked whole-corridor route is not a reason to wait until the final
     // stationary speed guard fires. Poll the bounded local worker before
@@ -1767,7 +2027,11 @@ void runPlanningProcess(PlanningProcessData& data,
                                                localClearance, &map));
             if (retainSafeLocal) map.corridorRuntime->localFallbackEngaged = false;
         }
-        if (!retainSafeLocal && prepareLocalCorridorFallback(
+        const bool retainSafeGatewayApproach=data.laneChange.soleGatewayApproach &&
+            corridorTrackingPathIsSafe(data.laneChange.path,world,
+                data.laneChangeConfig.latticeObstacleClearance,nullptr,&data.config,&map);
+        if (!gatewayTrackingAdopted && !retainSafeGatewayApproach &&
+            !retainSafeLocal && prepareLocalCorridorFallback(
                 localReplacement, data.laneChangeConfig, data.config, world,
                 map, data.missionCorridor, maneuverReference.waypoints, trace)) {
             WorldState replacementWorld = world;
@@ -2207,6 +2471,7 @@ void runPlanningProcess(PlanningProcessData& data,
     selectStopDecision(data.frame.stop, data.stopManager,
                        sensedWorld.frontBumperPathS);
 
+
     // LaneChangeData::path가 선택된 순간부터 기동과 settle이
     // 끝날 때까지 유일한 committed trajectory다. Prepare에서
     // 일반 차선 경로로 되돌아갔다 Execute에서 다시 곡선으로
@@ -2388,15 +2653,27 @@ void runPlanningProcess(PlanningProcessData& data,
             std::min(data.frame.behavior.targetSpeed, approachCap);
     }
 
-    // transitionLength는 곡선 길이일 뿐, 실제 안착 route_s가 아니다.
-    // 지연 합류·연결 road에서는 안착점이 더 멀 수 있으므로 기동 상태가
-    // 실제로 끝날 때까지 속도 상한을 유지한다.
+    // Keep the committed route/phase intact. Only relax its speed contract on
+    // a measured, settled straight portion, with braking room before its end.
+    double maneuverCap=data.laneChangeConfig.maximumLaneChangeSpeed;
+    const double straightCap=settledStraightManeuverSpeedCap(data.laneChange,world,
+        data.frame.localPath.points,data.frame.behavior.targetSpeed,selectedPathClearance,
+        data.laneChangeConfig,data.config);
+    if(straightCap>maneuverCap+.05 && data.frame.localPath.valid && !data.frame.stop.valid &&
+       !sensedWorld.respawnDetected && !data.progressRecovery.active) {
+        data.settledStraightCruiseTime+=std::clamp(dt,0.,.1);
+        if(data.settledStraightCruiseTime>=data.laneChangeConfig.settleTime) {
+            PathSafetyResult cruiseSafety;
+            if(evaluateLaneChangeCandidate(cruiseSafety,data.laneChange,world,data.config,
+                std::max(world.egoSpeed,straightCap),map)) maneuverCap=straightCap;
+        }
+    } else data.settledStraightCruiseTime=0.;
     const bool lateralShiftActive =
         data.laneChange.phase != LaneChangePhase::None;
     if (lateralShiftActive) {
         data.frame.behavior.targetSpeed = std::min(
             data.frame.behavior.targetSpeed,
-            data.laneChangeConfig.maximumLaneChangeSpeed);
+            maneuverCap);
     }
     if (data.laneChange.phase == LaneChangePhase::Execute) {
         if (data.laneChange.waitingForReturn) {
@@ -2408,7 +2685,7 @@ void runPlanningProcess(PlanningProcessData& data,
 
     // Only certified, gentle local detours get the open-passage cap. Tight
     // tails retain the old low speed, including after manoeuvre handoff.
-    if ((data.laneChange.localCorridorAvoidance &&
+    if ((data.laneChange.localCorridorAvoidance && maneuverCap<=data.laneChangeConfig.maximumLaneChangeSpeed &&
          data.laneChange.phase != LaneChangePhase::None) ||
         (selectedPathClearance >= 0.0 && selectedPathClearance + 1e-6 <
              data.laneChangeConfig.latticeObstacleClearance)) {
@@ -2426,6 +2703,16 @@ void runPlanningProcess(PlanningProcessData& data,
     // driving through that body. Check the actual selected path and its
     // certified clearance after all speed floors; retain its geometry.
     int stationaryBlocker=-1;
+    if(data.laneChange.soleGatewayApproach && data.frame.localPath.valid) {
+        WorldState approachWorld=sensedWorld;
+        if(projectWorldToActivePath(approachWorld,data.frame.localPath.points,sensedWorld.frontBumperOffset)) {
+            const double remaining=std::max(0.,data.frame.localPath.points.back().s-
+                approachWorld.egoPathS-data.config.stopSafetyMargin-
+                std::max(0.,world.egoSpeed)*data.config.emergencyReactionTime);
+            data.frame.behavior.targetSpeed=std::min(data.frame.behavior.targetSpeed,
+                std::sqrt(2.*data.config.comfortableDeceleration*remaining));
+        }
+    }
     const double freeDistance=data.frame.localPath.valid
         ?corridorStationaryFreeDistance(data.frame.localPath.points,world,
             selectedPathClearance,&map,&stationaryBlocker)
@@ -2556,6 +2843,15 @@ void runPlanningProcess(PlanningProcessData& data,
         data, gt, sensedWorld, world, map, tracking, emergency,
         stationaryPathStop, stationaryBlocker, finalGoalReached,
         confirmedStationaryObjectIds, dt, trace);
+    // Cover global-path lane changes and EVERY shift in a multistep local
+    // path, not just the first candidate's outward direction. Only lamps
+    // change here: no path, steering, speed or safety decision is modified.
+    const auto previewSignal=previewTrajectoryTurnSignal(
+        sensedWorld,map,data.frame.localPath.points);
+    maintainTrajectoryTurnSignal(data,sensedWorld,previewSignal,dt);
+    if (data.trajectoryTurnSignal!=0 || data.laneChange.localCorridorAvoidance) {
+        data.frame.behavior.turnSignal=data.trajectoryTurnSignal;
+    }
     if (trace != nullptr && trace->enabled) {
         std::ostringstream detail;
         detail << "ego_road=" << world.egoRoadId

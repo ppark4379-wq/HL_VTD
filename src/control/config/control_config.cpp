@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <map>
 
 
@@ -72,6 +73,18 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
     const auto positiveFinite = [](double value) {
         return std::isfinite(value) && value > 0.0;
     };
+    if (!positiveFinite(config.behavior.crosswalkStaticConfirmationTime) ||
+        (config.behavior.simulationCrosswalkStaticRelease != 0.0 &&
+         config.behavior.simulationCrosswalkStaticRelease != 1.0)) return false;
+    if (positiveFinite(config.behavior.progressRecoverySpeed) &&
+        positiveFinite(config.behavior.progressRecoveryMaxSpeed) &&
+        config.behavior.progressRecoverySpeed > config.behavior.progressRecoveryMaxSpeed) {
+        std::cerr << "[config-error] planning.progress_recovery_speed_kph="
+                  << config.behavior.progressRecoverySpeed * 3.6
+                  << " exceeds planning.progress_recovery_max_speed_kph="
+                  << config.behavior.progressRecoveryMaxSpeed * 3.6 << '\n';
+        return false;
+    }
     return config.planner.sharpCurveThreshold >
                config.planner.curveThreshold &&
            config.planner.sharpCurveSpeed > 0.0 &&
@@ -104,6 +117,7 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.behavior.stationaryVehicleMaximumWidth >=
                config.behavior.stationaryVehicleMinimumWidth &&
            config.behavior.crosswalkApproachSpeed > 0.0 &&
+           config.behavior.trafficStopPositionMargin > 0.0 &&
            config.behavior.crosswalkNearbyObjectDistance > 0.0 &&
            config.behavior.crosswalkClearanceSpeed > 0.0 &&
            config.behavior.crosswalkClearanceHoldTime >= 0.0 &&
@@ -116,7 +130,8 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
             config.behavior.simulationProgressRecovery == 1.0) &&
            positiveFinite(config.behavior.progressRecoveryStopTimeout) &&
            positiveFinite(config.behavior.progressRecoverySpeed) &&
-           config.behavior.progressRecoverySpeed <= 5.0 / 3.6 &&
+           positiveFinite(config.behavior.progressRecoveryMaxSpeed) &&
+           config.behavior.progressRecoverySpeed <= config.behavior.progressRecoveryMaxSpeed &&
            positiveFinite(config.behavior.progressRecoveryRetryInterval) &&
            positiveFinite(config.behavior.progressRecoverySearchBudgetMs) &&
            config.behavior.progressRecoverySearchBudgetMs <= 40.0 &&
@@ -182,6 +197,8 @@ bool loadDrivingConfig(DrivingConfig& config,
     std::map<std::string, double> values;
     if (!readYamlNumbers(yamlPath, values)) return false;
 
+    config.behavior.simulationCrosswalkStaticRelease = 0.0;
+
     return
         setConfigValue(values, "pure_pursuit.wheelbase",
                        config.planner.wheelbase) &&
@@ -215,6 +232,8 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.comfortableDeceleration) &&
         setConfigValue(values, "planning.stop_safety_margin",
                        config.behavior.stopSafetyMargin) &&
+        setOptionalConfigValue(values, "planning.traffic_stop_position_margin",
+                       config.behavior.trafficStopPositionMargin) &&
         setConfigValue(values, "planning.stop_hold_time",
                        config.behavior.stopHoldTime) &&
         setSpeedConfigValue(values, "planning.stopped_speed_threshold_kph",
@@ -288,6 +307,10 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.crosswalkStopLineSearch) &&
         setConfigValue(values, "planning.crosswalk_pedestrian_prediction",
                        config.behavior.crosswalkPedestrianPrediction) &&
+        setOptionalConfigValue(values, "planning.crosswalk_static_confirmation_time",
+                       config.behavior.crosswalkStaticConfirmationTime) &&
+        setOptionalConfigValue(values, "planning.simulation_crosswalk_static_release",
+                       config.behavior.simulationCrosswalkStaticRelease) &&
         setConfigValue(values, "planning.signal_stop_search_distance",
                        config.behavior.signalStopSearchDistance) &&
         setOptionalConfigValue(values, "planning.local_fallback_activation_distance",
@@ -299,6 +322,9 @@ bool loadDrivingConfig(DrivingConfig& config,
         (values.count("planning.progress_recovery_speed_kph") == 0 ||
          setSpeedConfigValue(values, "planning.progress_recovery_speed_kph",
                        config.behavior.progressRecoverySpeed)) &&
+        (values.count("planning.progress_recovery_max_speed_kph") == 0 ||
+         setSpeedConfigValue(values, "planning.progress_recovery_max_speed_kph",
+                       config.behavior.progressRecoveryMaxSpeed)) &&
         setOptionalConfigValue(values, "planning.progress_recovery_retry_interval",
                        config.behavior.progressRecoveryRetryInterval) &&
         setOptionalConfigValue(values, "planning.progress_recovery_search_budget_ms",

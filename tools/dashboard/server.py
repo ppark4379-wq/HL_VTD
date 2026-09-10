@@ -13,6 +13,7 @@ import ipaddress
 import json
 import shlex
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -41,6 +42,7 @@ from dashboard_api import (
 )
 from live_assessment import LiveAssessment
 from rdb_stream import RdbObserver
+from rdb_recording import RdbRecordingSession
 from run_repository import (
     CATALOG_PATH,
     OFFICIAL_ITEM_LABELS,
@@ -65,13 +67,27 @@ from video_source import (
     video_capture_command as build_video_capture_command,
 )
 from control_monitor import ControlEvents
+from geometry_service import GeometryReports
+from scp_observation import PassiveScpObserver, PluginRespawnLogObserver
 
 LIVE_ASSESSMENT = None
 RDB_OBSERVER = None
+SCP_OBSERVER = None
+RESPAWN_LOG_OBSERVER = None
 VIDEO_RELAY = None
 VIDEO_RELAYS = {}
 VIDEO_RECORDING = None
 CONTROL_EVENTS = None
+GEOMETRY_REPORTS = None
+GEOMETRY_INIT_LOCK = threading.Lock()
+
+
+def geometry_reports():
+    global GEOMETRY_REPORTS
+    with GEOMETRY_INIT_LOCK:
+        if GEOMETRY_REPORTS is None:
+            GEOMETRY_REPORTS = GeometryReports()
+        return GEOMETRY_REPORTS
 
 def find_mainrs_window() -> dict | None:
     return discover_vtd_windows()["mainrs"]
@@ -111,6 +127,8 @@ def dashboard_runtime() -> DashboardRuntime:
         video_relay=VIDEO_RELAY,
         video_relays=VIDEO_RELAYS,
         video_recording=VIDEO_RECORDING,
+        scp_observer=SCP_OBSERVER,
+        respawn_log_observer=RESPAWN_LOG_OBSERVER,
     )
 
 
@@ -184,6 +202,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(scenarios_payload())
             elif parsed.path == "/api/live":
                 self._send_json(live_payload(dashboard_runtime()))
+            elif parsed.path == "/api/geometry":
+                self._send_json(geometry_reports().status(query, LIVE_ASSESSMENT))
+            elif parsed.path.startswith('/geometry/'):
+                path, content_type = geometry_reports().asset(parsed.path)
+                self._send_file(path, content_type)
             elif parsed.path == "/api/criteria.md":
                 self._send_file(REPO_ROOT / 'docs' / 'HL_VTD_자동채점_최종평가기준.md', 'text/markdown; charset=utf-8')
             elif parsed.path == "/api/runs":
@@ -265,6 +288,9 @@ def main() -> int:
     global VIDEO_SOURCE_MODE, VIDEO_RTSP_URL, VIDEO_RTSP_URLS
     global LIVE_ASSESSMENT, RDB_OBSERVER, CONTROL_EVENTS
     global VIDEO_RELAY, VIDEO_RELAYS, VIDEO_RECORDING
+    global GEOMETRY_REPORTS
+    global SCP_OBSERVER
+    global RESPAWN_LOG_OBSERVER
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
@@ -272,6 +298,14 @@ def main() -> int:
     parser.add_argument("--no-live", action="store_true", help="CSV history mode only")
     parser.add_argument("--rdb-host", default="127.0.0.1", help="VTD state stream host (dashboard runs on VTD PC)")
     parser.add_argument("--rdb-port", type=int, default=48190)
+    parser.add_argument('--scp-host', help='Receive-only VTD SCP host (default: --rdb-host)')
+    parser.add_argument('--scp-port', type=int, default=48179)
+    parser.add_argument('--no-scp-observation', action='store_true', help='Disable receive-only SCP cause/event logging')
+    parser.add_argument('--respawn-log', type=Path, default=Path('/tmp/taskRec_ModuleManager.txt'),
+                        help='Read new HLVTD [RESPAWN] lines without changing the simulator')
+    parser.add_argument('--no-respawn-log-observation', action='store_true')
+    parser.add_argument('--record-rdb-dir', type=Path,
+        help='Record unmodified RDB bytes and all decoded frames in a new/empty evidence directory')
     parser.add_argument("--assessment-config", type=Path, default=Path(__file__).with_name("assessment_rules.yaml"))
     parser.add_argument(
         "--active-assessment-profile",
@@ -318,8 +352,18 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
+    if args.scp_port == 9910:
+        parser.error('SCP observation must not use the controller port 9910')
+    GEOMETRY_REPORTS = GeometryReports(profile_path=args.active_assessment_profile)
     if args.rdb_port == 9910:
         parser.error("Use the read-only RDB output port, not the controller port 9910")
+    record_rdb_dir = None
+    if args.record_rdb_dir is not None:
+        if args.no_live:
+            parser.error('--record-rdb-dir requires live RDB observation')
+        record_rdb_dir = args.record_rdb_dir.expanduser().resolve()
+        if record_rdb_dir == VERIFICATION_DIR.resolve() or record_rdb_dir.is_relative_to(VERIFICATION_DIR.resolve()):
+            parser.error('--record-rdb-dir must be outside output/verification, e.g. output/rdb_evidence/<run-id>')
 
     VIDEO_SOURCE_MODE = args.video_source
     VIDEO_RTSP_URL = args.mainrs_rtsp_url or args.rtsp_url or configured_rtsp_url()
@@ -345,6 +389,8 @@ def main() -> int:
 
     LIVE_ASSESSMENT = None
     RDB_OBSERVER = None
+    SCP_OBSERVER = None
+    RESPAWN_LOG_OBSERVER = None
     CONTROL_EVENTS = None
     VIDEO_RELAY = None
     VIDEO_RELAYS = {}
@@ -364,19 +410,25 @@ def main() -> int:
             )
             return 2
     try:
+        rdb_recording = None
         if not args.no_live:
             LIVE_ASSESSMENT = LiveAssessment(
                 args.assessment_config,
                 REPO_ROOT / "output" / "assessment",
                 args.active_assessment_profile,
             )
+            if record_rdb_dir is not None:
+                rdb_recording = RdbRecordingSession(record_rdb_dir, args.rdb_host, args.rdb_port)
             RDB_OBSERVER = RdbObserver(
                 args.rdb_host,
                 args.rdb_port,
                 LIVE_ASSESSMENT.on_frame,
                 LIVE_ASSESSMENT.on_gap,
+                recorder=rdb_recording,
             )
     except BaseException:
+        if rdb_recording is not None:
+            rdb_recording.close()
         if VIDEO_RECORDING is not None:
             VIDEO_RECORDING.close()
         server.server_close()
@@ -397,10 +449,19 @@ def main() -> int:
             relay.start()
         if RDB_OBSERVER is not None:
             RDB_OBSERVER.start()
+            if not args.no_scp_observation:
+                SCP_OBSERVER = PassiveScpObserver(args.scp_host or args.rdb_host, args.scp_port,
+                                                  LIVE_ASSESSMENT.on_scp_event)
+                SCP_OBSERVER.start()
+            if not args.no_respawn_log_observation:
+                RESPAWN_LOG_OBSERVER = PluginRespawnLogObserver(args.respawn_log, LIVE_ASSESSMENT.on_scp_event)
+                RESPAWN_LOG_OBSERVER.start()
             CONTROL_EVENTS=ControlEvents(LIVE_ASSESSMENT.on_control_received)
             CONTROL_EVENTS.start()
     except BaseException:
         close_runtime_component("control receiver", CONTROL_EVENTS)
+        close_runtime_component("SCP observer", SCP_OBSERVER)
+        close_runtime_component("respawn log observer", RESPAWN_LOG_OBSERVER)
         for relay in started_relays:
             close_runtime_component("video relay", relay)
         close_runtime_component("video recording", VIDEO_RECORDING)
@@ -409,6 +470,8 @@ def main() -> int:
         server.server_close()
         raise
     print(f"[dashboard] http://{args.host}:{args.port} 에서 서비스 중 (Ctrl+C 로 종료)",flush=True)
+    if rdb_recording is not None:
+        print(f'[dashboard] complete RDB evidence: {rdb_recording.directory}', flush=True)
     if VIDEO_RECORDING is not None:
         recording_status = VIDEO_RECORDING.status()
         print(
@@ -447,6 +510,9 @@ def main() -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        close_runtime_component("geometry reports", GEOMETRY_REPORTS)
+        close_runtime_component("SCP observer", SCP_OBSERVER)
+        close_runtime_component("respawn log observer", RESPAWN_LOG_OBSERVER)
         close_runtime_component("control receiver", CONTROL_EVENTS)
         for view, relay in zip(VIDEO_RELAYS, started_relays):
             close_runtime_component(f"{view} video relay", relay)

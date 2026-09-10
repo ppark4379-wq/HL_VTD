@@ -32,6 +32,15 @@ def load_school_zone_data(path,corrections_path=None):
                 zone[key]=copy.deepcopy(fix[key])
         zone['direct_s_range']=None
         applied.append(dict(id=fix['id'],evidence=fix['evidence'],reason=fix['reason']))
+    # A new screenshot is an observation, not automatically a scored boundary.
+    # Keep unresolved evidence beside the pending zone without extending it.
+    for observation in corrections.get('review_observations', []):
+        identifier = observation.get('target_zone_id')
+        if identifier not in by_id or not observation.get('evidence'):
+            raise ValueError('school review observation requires a known zone and evidence')
+        by_id[identifier].setdefault('review_observations', []).append(
+            copy.deepcopy(observation)
+        )
     return data,applied
 
 
@@ -160,6 +169,8 @@ class SchoolZones:
             self.accepted.append(dict(id=identifier,method=method,segments=len(ranges)))
         except (ValueError,KeyError,TypeError) as error:
             pending=dict(id=identifier,reason=str(error),uncertainty_scope='global')
+            if zone.get('review_observations'):
+                pending['review_observations'] = copy.deepcopy(zone['review_observations'])
             first,last=zone.get('point_1'),zone.get('point_2')
             try:
                 if first is None or last is None:

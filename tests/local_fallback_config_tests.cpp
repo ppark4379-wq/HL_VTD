@@ -68,6 +68,14 @@ std::string withoutFallbackKeys(const std::string& source) {
     return text;
 }
 
+std::string withoutKey(std::string text, const std::string& key) {
+    const auto start = text.find("  " + key + ":");
+    require(start != std::string::npos, "fixture key to remove not found");
+    const auto end = text.find('\n', start);
+    text.erase(start, end == std::string::npos ? end : end + 1 - start);
+    return text;
+}
+
 void requireDefaults(const DrivingConfig& config) {
     const auto& lane = config.laneChange;
     require(lane.localFallbackActivationDistance == 35.0 &&
@@ -86,8 +94,56 @@ int main() {
     try {
         std::ifstream input("config/control.yaml");
         require(input.good(), "run from the repository root");
-        const std::string source((std::istreambuf_iterator<char>(input)), {});
+        const std::string repositorySource((std::istreambuf_iterator<char>(input)), {});
         TemporaryConfig file;
+
+        DrivingConfig repositoryConfig;
+        require(file.load(repositorySource, repositoryConfig), "repository config rejected");
+        // Speed policy is tunable. Test the historical classification against
+        // an explicit fixture rather than forbidding user YAML tuning.
+        auto source = change(repositorySource, "sharp_curve_target_kph", "6");
+        source = change(source, "curve_target_kph", "30");
+        source = change(source, "school_zone_target_kph", "20");
+        source = change(source, "local_fallback_speed_kph", "5");
+        source = change(source, "lattice_obstacle_clearance", "0.30");
+        source = change(source, "dense_static_speed_kph", "10");
+        source = change(source, "min_acceleration", "-4");
+        source = change(source, "progress_recovery_speed_kph", "3");
+        source = change(source, "progress_recovery_max_speed_kph", "5");
+
+
+        auto recovery = change(source, "progress_recovery_max_speed_kph", "10");
+        recovery = change(recovery, "progress_recovery_speed_kph", "10");
+        DrivingConfig recoveryConfig;
+        require(file.load(recovery, recoveryConfig) &&
+                std::abs(recoveryConfig.behavior.progressRecoverySpeed - 10. / 3.6) < 1e-12 &&
+                std::abs(recoveryConfig.behavior.progressRecoveryMaxSpeed - 10. / 3.6) < 1e-12,
+                "YAML recovery ceiling/target overrides or unit conversion failed");
+        require(file.load(change(recovery, "progress_recovery_speed_kph", "3"), recoveryConfig) &&
+                std::abs(recoveryConfig.behavior.progressRecoverySpeed - 3. / 3.6) < 1e-12,
+                "recovery ceiling was incorrectly used as a speed floor");
+        require(!file.load(change(recovery, "progress_recovery_speed_kph", "10.01"), recoveryConfig),
+                "recovery target above YAML ceiling accepted");
+        require(!file.load(change(recovery, "progress_recovery_max_speed_kph", "5"), recoveryConfig),
+                "lowering the YAML ceiling did not constrain the target");
+        auto raised = change(recovery, "progress_recovery_max_speed_kph", "12");
+        require(file.load(change(raised, "progress_recovery_speed_kph", "12"), recoveryConfig),
+                "another hidden numeric recovery speed ceiling remains");
+        for (const std::string key : {"progress_recovery_speed_kph", "progress_recovery_max_speed_kph"}) {
+            for (const std::string invalid : {"0", "-1", "nan", "inf", "-inf"}) {
+                require(!file.load(change(recovery, key, invalid), recoveryConfig),
+                        "non-positive or non-finite recovery speed accepted");
+            }
+        }
+        auto legacyRecovery = withoutKey(source, "progress_recovery_max_speed_kph");
+        recoveryConfig = DrivingConfig{};
+        require(file.load(legacyRecovery, recoveryConfig) &&
+                std::abs(recoveryConfig.behavior.progressRecoveryMaxSpeed - 5. / 3.6) < 1e-12,
+                "legacy recovery ceiling default changed");
+        require(file.load(change(legacyRecovery, "progress_recovery_speed_kph", "5"), recoveryConfig),
+                "legacy equal-boundary speed rejected");
+        require(!file.load(change(legacyRecovery, "progress_recovery_speed_kph", "6"), recoveryConfig),
+                "legacy ceiling no longer preserved");
 
         DrivingConfig current;
         require(file.load(source, current), "repository config rejected");
@@ -172,6 +228,25 @@ int main() {
         auto valid = change(source, "local_fallback_activation_distance", "60");
         valid = change(valid, "local_fallback_retry_interval", "0.08");
         require(file.load(valid, boundary), "valid equal-boundary config rejected");
+
+        DrivingConfig propsConfig;
+        require(file.load(source,propsConfig) &&
+                propsConfig.behavior.simulationCrosswalkStaticRelease==1.,
+                "simulation crosswalk release switch was not loaded");
+        for (const auto& key : {"crosswalk_static_confirmation_time"}) {
+            for (const auto& invalid : {"0", "-1", "nan", "inf"}) {
+                require(!file.load(change(source,key,invalid),propsConfig),
+                        "invalid static prop configuration accepted");
+            }
+        }
+        auto noProps=withoutKey(source,"simulation_crosswalk_static_release");
+        propsConfig=DrivingConfig{};
+        require(file.load(source,propsConfig) && file.load(noProps,propsConfig) &&
+                propsConfig.behavior.simulationCrosswalkStaticRelease==0.,
+                "legacy/reloaded config retained simulation timeout");
+        for(const auto& invalid:{"-1","2","nan","inf"})
+            require(!file.load(change(source,"simulation_crosswalk_static_release",invalid),propsConfig),
+                    "invalid simulation release switch accepted");
 
         std::cout << "local fallback configuration tests passed\n";
         return 0;

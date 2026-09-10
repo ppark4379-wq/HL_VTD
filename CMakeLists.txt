@@ -63,6 +63,8 @@ add_test(NAME corridor_lattice_tests COMMAND corridor_lattice_tests)
 add_test(NAME progress_recovery_selection COMMAND corridor_lattice_tests --progress-recovery-selection)
 add_test(NAME bounded_corridor_reentry COMMAND corridor_lattice_tests --bounded-reentry)
 add_test(NAME lost_corridor_recovery COMMAND corridor_lattice_tests --lost-corridor-recovery)
+add_test(NAME sole_gateway_approach COMMAND corridor_lattice_tests --sole-gateway-approach)
+set_tests_properties(sole_gateway_approach PROPERTIES TIMEOUT 25)
 add_test(NAME no_cosmetic_replan COMMAND corridor_lattice_tests --no-cosmetic-replan)
 set_tests_properties(lost_corridor_recovery PROPERTIES TIMEOUT 10)
 set_tests_properties(bounded_corridor_reentry PROPERTIES TIMEOUT 15)
@@ -250,6 +252,9 @@ endif()
 target_include_directories(controller_logic_tests
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_test(NAME controller_logic_tests COMMAND controller_logic_tests)
+add_test(NAME crosswalk_indicator_regression COMMAND controller_logic_tests --crosswalk-indicator)
+set_tests_properties(crosswalk_indicator_regression PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME dense_static_speed_regression COMMAND controller_logic_tests --dense-static-speed)
 add_test(NAME avoidance_safe_handoff_regression COMMAND controller_logic_tests --safe-tail-stopline)
 set_tests_properties(controller_logic_tests PROPERTIES

@@ -94,6 +94,32 @@ int main(int argc,char** argv) {
             require(replacement.phase==LaneChangePhase::None && replacement.path.empty(),
                     "rollback generated an unnecessary manoeuvre");
             require(current.front().y==-3.5 && current.back().y==-3.5,"incumbent path was mutated");
+            // M16: an obstacle on the straight lane is already bypassed by
+            // the selected route. It must not reactivate local planning.
+            auto detourMap=fixture();auto dw=world();obstacle(dw);
+            std::vector<Waypoint> detour;
+            for(int i=0;i<=160;++i) {
+                Waypoint p;p.x=10.+.5*i;p.roadS=p.x;p.roadId=1;
+                const double u=std::clamp((p.x-10.)/20.,0.,1.);
+                p.y=-1.75-3.5*(3.*u*u-2.*u*u*u);
+                p.yaw=std::atan(-3.5*6.*u*(1.-u)/20.);
+                p.laneId=u<.5?-1:-2;
+                p.s=detour.empty()?0.:detour.back().s+std::hypot(p.x-detour.back().x,p.y-detour.back().y);
+                detour.push_back(p);
+            }
+            require(corridorTrackingPathIsSafe(detour,dw,.3,nullptr,nullptr,&detourMap),"fixture detour not safe");
+            for(int i=0;i<20;++i)
+                require(!prepareLocalCorridorFallback(replacement,LaneChangeConfig{},PlanningBehaviorConfig{},
+                    dw,detourMap,m,detour,nullptr),"clear detour was replaced because straight lane is blocked");
+            require(!detourMap.corridorRuntime->localFallbackEngaged &&
+                    !detourMap.corridorRuntime->localFallbackPending,"clear detour launched redundant search");
+            // A new obstacle ON that selected route must still activate it.
+            auto next=dw.objects.front();next.raw.id=8;next.raw.x=45.;next.raw.y=-5.25;
+            next.obb=makeObb2D(45.,-5.25,0.,4.,2.);dw.objects.push_back(next);
+            prepareLocalCorridorFallback(replacement,LaneChangeConfig{},PlanningBehaviorConfig{},
+                dw,detourMap,m,detour,nullptr);
+            require(detourMap.corridorRuntime->localFallbackEngaged,
+                    "new obstacle on selected route did not activate local planning");
             std::cout<<"no cosmetic replanning PASS\n";return 0;
         }
         if(argc==2 && std::string(argv[1])=="--lost-corridor-recovery") {
@@ -332,6 +358,61 @@ int main(int argc,char** argv) {
                     "post-avoidance global route starts on the old lane");
             std::cout<<"observed whole-corridor / post-avoidance replan PASS\n";
             return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--sole-gateway-approach") {
+            auto map=fixture();auto m=mission(true);auto w=world(45.);
+            m.topologyAuthority=true;m.checkpoints.resize(2);
+            m.checkpoints[0].checkpoint.x=45.;m.checkpoints[1].checkpoint.x=140.;
+            m.checkpoints[1].checkpoint.y=-8.75;
+            auto& leg=m.legs.front();leg.topologyAuthority=true;leg.finalLeg=true;
+            leg.gatewayCheckpoint=leg.toCheckpoint=1;leg.gatewayLanes={{2,0,-3}};
+            leg.targetRoadS[{2,0,-3}]=80.;
+            obstacle(w);auto& o=w.objects.front();o.raw.x=135.;o.raw.y=-8.75;
+            o.obb=makeObb2D(o.raw.x,o.raw.y,0.,4.,2.);
+            PathPlannerData path;DecisionTraceData trace;trace.enabled=true;
+            auto& runtime=*map.corridorRuntime;
+            const auto poll=[&](bool approach) {
+                const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+                do {
+                    w.receiveTime+=.05;beginCorridorSearchFrame(runtime);
+                    buildCorridorTrackingPath(path,PathPlannerConfig{},w,map,m,160.,&trace);
+                    if(approach?runtime.soleGatewayApproachSelected:
+                        (runtime.committedGlobalPathReachesGateway && !runtime.globalRouteReplanRequested)) return true;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                } while(std::chrono::steady_clock::now()<deadline);
+                for(const auto& event:trace.frameEvents)std::cerr<<event<<'\n';
+                return false;
+            };
+            require(poll(true),"blocked sole gateway produced no safe approach");
+            require(!runtime.committedGlobalPathReachesGateway,"approach falsely completed the gateway");
+            require(runtime.trackingPathApproved,"approach not approved for actual tracking");
+            require(path.waypoints.back().x<132.,"approach penetrates the blocked gateway");
+            require(corridorTrackingPathIsSafe(path.waypoints,w,.3,nullptr,nullptr,&map),"approach intersects actor");
+            w.objects.clear();requestCorridorGlobalReplan(runtime);
+            require(poll(false),"opening the gate did not restore the complete route");
+            require(runtime.soleGatewayApproachPath.empty(),"stale approach masked the full route");
+            // A detour around the same gateway actor exists in the adjacent
+            // lane. The complete collision-free route MUST win over approach.
+            auto alternateMap=fixture();auto alternate=mission();auto aw=world(45.);
+            alternate.topologyAuthority=true;alternate.checkpoints=m.checkpoints;
+            auto& al=alternate.legs.front();al.topologyAuthority=true;al.finalLeg=true;
+            al.gatewayCheckpoint=al.toCheckpoint=1;al.gatewayLanes={{2,0,-3}};
+            al.targetLanes={{2,0,-3}};al.targetRoadS[{2,0,-3}]=80.;
+            obstacle(aw);aw.objects.front().raw.x=135.;aw.objects.front().raw.y=-8.75;
+            aw.objects.front().obb=makeObb2D(135.,-8.75,0.,4.,2.);
+            auto& ar=*alternateMap.corridorRuntime;
+            const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+            do {
+                aw.receiveTime+=.05;beginCorridorSearchFrame(ar);
+                buildCorridorTrackingPath(path,PathPlannerConfig{},aw,alternateMap,alternate,160.,&trace);
+                require(!ar.soleGatewayApproachSelected,"partial approach beat a valid complete detour");
+                if(ar.committedGlobalPathReachesGateway && !ar.globalRouteReplanRequested)break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            } while(std::chrono::steady_clock::now()<until);
+            require(ar.committedGlobalPathReachesGateway,"available alternate-lane detour was not found");
+            require(corridorTrackingPathIsSafe(ar.committedGlobalPath,aw,.3,nullptr,nullptr,&alternateMap),
+                    "preferred full detour collides with gateway blocker");
+            std::cout<<"sole gateway: safe approach / no false completion / opening replan PASS\n";return 0;
         }
         if(argc==3 && std::string(argv[1])=="--precomputed-mission-audit") {
             PathGeneratorData map;

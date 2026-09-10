@@ -21,6 +21,8 @@ const OFFICIAL_ITEM_LABELS = [
 
 const DISPLAY_ITEM_NUMBERS = [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const VIDEO_VIEWS = ["mainrs", "birdrs"];
+const initialQuery = new URLSearchParams(window.location.search);
+let initialRunSelection = initialQuery.get("run_id");
 
 const state = {
   scenarioId: null,
@@ -41,9 +43,14 @@ const state = {
   videoRetryTimers: { mainrs: null, birdrs: null },
   videoConnected: { mainrs: false, birdrs: false },
   videoStatus: { mainrs: null, birdrs: null },
-  source: "live",
+  source: initialQuery.get("source") === "history" ? "history" : "live",
   liveStatus: "WAITING",
   livePayload: null,
+  geometryKey: null,
+  geometryUrl: null,
+  geometryPolledAt: 0,
+  geometryBusy: false,
+  geometryGeneration: 0,
 };
 
 const el = (id) => document.getElementById(id);
@@ -89,7 +96,8 @@ async function loadScenarios() {
     return;
   }
 
-  select.value = scenarios.find((scenario) => scenario.run_count > 0)?.scenario_id || scenarios[0].scenario_id;
+  select.value = scenarios.find((scenario) => scenario.scenario_id === initialQuery.get("scenario_id"))?.scenario_id
+    || scenarios.find((scenario) => scenario.run_count > 0)?.scenario_id || scenarios[0].scenario_id;
   await onScenarioChange();
 }
 
@@ -143,6 +151,7 @@ async function getRunsCache(force = false) {
 
 async function onScenarioChange() {
   if (state.source === "live") return;
+  invalidateGeometry();
   state.scenarioId = el("scenarioSelect").value;
   const [runs, mapData] = await Promise.all([
     loadRuns(state.scenarioId),
@@ -155,7 +164,8 @@ async function onScenarioChange() {
   el("scenarioMeta").textContent = `${title}${map}`;
 
   if (runs.length) {
-    el("runSelect").value = runs[0].run_id;
+    el("runSelect").value = runs.find(run => run.run_id === initialRunSelection)?.run_id || runs[0].run_id;
+    initialRunSelection = null;
     await onRunChange();
   } else {
     resetRunView();
@@ -166,6 +176,7 @@ async function onRunChange() {
   state.source = "history";
   updateDataSourceIndicator();
   state.runId = el("runSelect").value;
+  invalidateGeometry();
   state.track = [];
   state.cursor = 0;
   state.liveFollow = true;
@@ -173,6 +184,7 @@ async function onRunChange() {
 }
 
 function resetRunView() {
+  invalidateGeometry();
   state.runId = null;
   state.track = [];
   state.officialGrid = [];
@@ -378,7 +390,11 @@ function deductionFor(item, section) {
 function sectionScore(section) {
   let score = 100;
   for (const item of state.officialGrid) {
-    score -= deductionFor(item, section) || 0;
+    if (item.status === "NOT_APPLICABLE") continue;
+    if (item.partial_sections?.includes(section)) return null;
+    const deduction = deductionFor(item, section);
+    if (deduction === null) return null;
+    score -= deduction;
   }
   return score;
 }
@@ -420,7 +436,7 @@ function renderChecklist() {
         if (deduction === 3) cell.classList.add("minor");
         if (deduction >= 6) cell.classList.add("major");
       }
-      cell.title = item?.detail || "판정 데이터 또는 기준 대기";
+      cell.title = item ? `${item.detail}\n측정 ${item.measured_frames ?? "?"} / 미측정 ${item.missing_frames ?? "?"} 프레임 · ${item.coverage_status || item.status}` : "판정 데이터 또는 기준 대기";
       row.appendChild(cell);
     });
     body.appendChild(row);
@@ -437,7 +453,8 @@ function renderChecklist() {
 
   sections.forEach((section) => {
     const cell = document.createElement("td");
-    cell.textContent = pending || (state.source === "live" && !state.livePayload?.reached_sections?.includes(section)) ? "–" : String(sectionScore(section));
+    const score = sectionScore(section);
+    cell.textContent = pending || (state.source === "live" && !state.livePayload?.reached_sections?.includes(section)) ? "–" : score === null ? "보류" : String(score);
     row.appendChild(cell);
   });
   foot.appendChild(row);
@@ -730,15 +747,18 @@ function updateVideoStatus(view, status) {
 }
 
 function setViewTab(tab) {
-  if (!["mainrs", "birdrs", "split", "map"].includes(tab)) return;
+  if (!["mainrs", "birdrs", "split", "map", "geometry"].includes(tab)) return;
   state.viewTab = tab;
   el("tabMainrs").classList.toggle("active", tab === "mainrs");
   el("tabBirdrs").classList.toggle("active", tab === "birdrs");
   el("tabSplit").classList.toggle("active", tab === "split");
   el("tabMap").classList.toggle("active", tab === "map");
+  el("tabGeometry").classList.toggle("active", tab === "geometry");
+  el("geometryPane").classList.toggle("hidden", tab !== "geometry");
+  el("geometryPane").parentElement.classList.toggle("geometry-active", tab === "geometry");
   const grid = el("videoGrid");
   grid.className = `video-grid mode-${tab}`;
-  grid.classList.toggle("hidden", tab === "map");
+  grid.classList.toggle("hidden", tab === "map" || tab === "geometry");
   el("mapCanvas").classList.toggle("hidden", tab !== "map");
   el("playbackControls").classList.toggle("hidden", tab !== "map");
 
@@ -748,6 +768,7 @@ function setViewTab(tab) {
   }
   setStreamState();
   if (tab === "map") drawCanvas();
+  if (tab === "geometry") refreshGeometry(true);
 }
 
 for (const view of VIDEO_VIEWS) {
@@ -771,6 +792,62 @@ el("tabMainrs").addEventListener("click", () => setViewTab("mainrs"));
 el("tabBirdrs").addEventListener("click", () => setViewTab("birdrs"));
 el("tabSplit").addEventListener("click", () => setViewTab("split"));
 el("tabMap").addEventListener("click", () => setViewTab("map"));
+el("tabGeometry").addEventListener("click", () => setViewTab("geometry"));
+
+/* Geometry reports follow the source, not the history menu during live mode. */
+function invalidateGeometry() {
+  state.geometryGeneration += 1;
+  state.geometryKey = state.geometryUrl = null;
+  state.geometryPolledAt = 0;
+  el("geometryFrame").removeAttribute("src");
+  el("geometryOpen").classList.add("hidden");
+  el("geometryStatus").textContent = "새 실행 기록 확인 중";
+  el("geometryNotes").textContent = "이전 실행의 그림을 현재 실행에 재사용하지 않습니다.";
+}
+
+async function refreshGeometry(force = false) {
+  if (state.geometryBusy || (!force && Date.now()-state.geometryPolledAt < 2000)) return;
+  if (state.source === "history" && (!state.scenarioId || !state.runId)) return;
+  const generation = state.geometryGeneration;
+  const source = state.source;
+  const selection = `${state.scenarioId}|${state.runId}`;
+  const params = new URLSearchParams({source});
+  if (source === "history") { params.set("scenario_id", state.scenarioId); params.set("run_id", state.runId); }
+  state.geometryBusy = true;
+  state.geometryPolledAt = Date.now();
+  try {
+    const payload = await getJSON(`/api/geometry?${params}`);
+    if (generation !== state.geometryGeneration || source !== state.source ||
+        (source === "history" && selection !== `${state.scenarioId}|${state.runId}`)) return;
+    if (payload.key !== state.geometryKey) {
+      state.geometryKey = payload.key;
+      state.geometryUrl = null;
+      el("geometryFrame").removeAttribute("src");
+      el("geometryOpen").classList.add("hidden");
+    }
+    const labels = {READY: "기록 시각화", BUILDING: "시각화 갱신 중", WAITING_SOURCE: "실행 프로필 대기", WAITING_DATA: "기하 기록 대기", ERROR: "기록 확인 필요"};
+    el("geometryStatus").textContent = `${payload.scenario_id || ""} ${payload.run_id || ""} · ${labels[payload.status] || payload.status}${payload.frames == null ? "" : ` · ${payload.frames} 기록 프레임`}`;
+    el("geometryNotes").textContent = [payload.message, payload.error, ...(payload.warnings || []),
+      ...(payload.missing || []), "기록 기반 검토 · 10초 간격 갱신(생성시간 별도) · 미기록 경계는 표시하지 않음"].filter(Boolean).join(" · ");
+    if (payload.url && payload.url !== state.geometryUrl) {
+      state.geometryUrl = payload.url;
+      el("geometryFrame").src = payload.url + (payload.updating ? "#latest" : "");
+      el("geometryOpen").href = payload.url;
+      el("geometryOpen").classList.remove("hidden");
+    } else if (!payload.url) {
+      el("geometryFrame").removeAttribute("src");
+      el("geometryOpen").classList.add("hidden");
+      state.geometryUrl = null;
+    }
+  } catch (error) {
+    if (generation === state.geometryGeneration && source === state.source) {
+      el("geometryStatus").textContent = `시각화 연결 확인 필요: ${error.message}`;
+      el("geometryFrame").removeAttribute("src");
+      el("geometryOpen").classList.add("hidden");
+      state.geometryUrl = null;
+    }
+  } finally { state.geometryBusy = false; }
+}
 
 /* ---------- map playback ---------- */
 
@@ -831,6 +908,7 @@ el("scenarioSelect").addEventListener("change", () => {
 });
 el("liveSourceBtn").addEventListener("click", () => {
   state.source = "live";
+  invalidateGeometry();
   updateDataSourceIndicator();
   refreshLive();
 });
@@ -880,6 +958,7 @@ async function pollLoop() {
     if (state.livePolling && state.source === "live") await refreshLive();
     else if (state.livePolling && state.runId) await refreshRun(false);
     else if (state.livePolling && state.scenarioId) await onScenarioChange();
+    if (state.livePolling) await refreshGeometry();
   } finally {
     setTimeout(pollLoop, 500);
   }
@@ -901,6 +980,7 @@ async function refreshLive() {
   if (state.source !== "live") return;
   updateDataSourceIndicator();
   if (state.runId !== payload.session_id) {
+    invalidateGeometry();
     state.track = [];
     state.cursor = 0;
   }
@@ -931,6 +1011,8 @@ async function refreshLive() {
   const names = {WAITING:"제어값 수신 대기", RUNNING:"채점 중", COMPLETED:"완주", TIMEOUT:"시간 종료", NO_DATA:"수신 대기", RESET:"초기화", ABORTED:"중단"};
   const badge = el("liveBadge");
   badge.textContent = payload.receiver.connected ? names[payload.status] || payload.status : "RDB 연결 대기";
+  if (payload.receiver.shutdown_incomplete || payload.receiver.processing_error) badge.textContent = "GT 처리 오류 · 점수 보류";
+  else if (Number(payload.receiver.processing_lag_s || 0) > 2) badge.textContent = "채점 처리 지연";
   badge.className = `run-state ${state.runIsLive ? "badge-live" : "badge-idle"}`;
   el("scenarioMeta").textContent = `${r?.scenario_id || "VTD"} · ${payload.missing_metadata.length ? "평가 경계 설정 필요" : "실시간 상태 수신"}`;
   el("scenarioMeta").title = payload.receiver.error || payload.missing_metadata.join(", ");
@@ -947,6 +1029,15 @@ async function refreshLive() {
         : "제어 수신 감지기 실행됨 · 제어기 연결 대기";
   const checks = [
     payload.receiver.connected ? "VTD 상태 연결됨" : `VTD 상태 연결 대기: ${payload.receiver.error || "RDB 출력 확인"}`,
+    `GT 수신/채점 분리 · 처리 지연 ${Number(payload.receiver.processing_lag_s || 0).toFixed(2)}초 · 처리 대기 ${(Number(payload.receiver.transport?.backlog_bytes || 0)/1048576).toFixed(2)} MiB`,
+    ...(payload.receiver.transport?.spool_path ? [`원본 수신 보존: ${payload.receiver.transport.spool_path} · ${(Number(payload.receiver.transport.written_bytes || 0)/1048576).toFixed(1)} MiB`] : []),
+    ...(payload.receiver.processing_error ? [`GT 처리 오류: ${payload.receiver.processing_error}`] : []),
+    payload.scp_receiver?.connected
+      ? `SCP 읽기 전용 관측 연결됨 · ${payload.scp_receiver.events || 0}개 이벤트 · 복귀 원인 알림과 완료 판정은 별개`
+      : `SCP 이벤트 관측 대기: ${payload.scp_receiver?.error || "연결 확인 중"}`,
+    payload.respawn_log_receiver?.connected
+      ? `자동복귀 플러그인 로그 관측 중 · ${payload.respawn_log_receiver.events || 0}개 기록 · 완료 의미 검증 전 확정 계수 안 함`
+      : `자동복귀 플러그인 로그 대기: ${payload.respawn_log_receiver?.error || "연결 확인 중"}`,
     controlCheck,
     payload.assessment_profile?.route_csv
       ? `평가 경로: ${payload.assessment_profile.scenario_id || "VTD"} · ${payload.assessment_profile.source === "run_scenario" ? "현재 실행 시나리오 자동 연결" : "기본 평가 설정"} · 투영 ${payload.assessment_profile.route_projection_count || 0}/${(payload.assessment_profile.route_projection_count || 0) + (payload.assessment_profile.route_projection_miss_count || 0)} 프레임`
@@ -968,6 +1059,7 @@ renderScoreBar();
 updateDataSourceIndicator();
 setViewTab("mainrs");
 loadScenarios()
+  .then(() => { if (initialQuery.get("view") === "geometry") setViewTab("geometry"); })
   .catch((error) => {
     console.error(error);
     el("scenarioMeta").textContent = "대시보드 데이터를 불러오지 못했습니다";

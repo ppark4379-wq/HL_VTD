@@ -18,7 +18,7 @@
             <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_ActiveBlue" Name="Ego"/>
             <Init>
                 <Speed Value="0.0000000000000000e+00"/>
-                <PosAbsolute X="3.4422927856445312e+02" Y="-1.1028851318359375e+02" Z="4.1500000000000000e+01" Direction="5.2900052038517895e+00" AlignToRoad="true"/>
+                <PosAbsolute X="3.6762905883789062e+02" Y="-2.6701689147949219e+02" Z="4.7931155991998331e+01" Direction="3.8742177983043962e+00" AlignToRoad="true"/>
             </Init>
         </Player>
         <PlayerActions Player="Ego"/>

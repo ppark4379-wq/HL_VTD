@@ -28,6 +28,12 @@ completion:
 # vehicle-width planned path within 30 m ahead is a valid reason not to start.
 green_start_exception:
   forward_path_m: 30.0
+# User decision 2026-09-10: current RDB logical phase is the signal authority.
+# Rendering/scenario discrepancies remain diagnostic warnings, not a veto of
+# verified STOP/GO. BLINK color and arrow/approach ambiguity still stay unknown.
+# Use strict to require logical phase + scenario + rendered lamp agreement.
+traffic_signals:
+  authority: rdb_logic
 session:
   start_trigger: controller_packet_arrival
   max_sample_gap_s: 0.5

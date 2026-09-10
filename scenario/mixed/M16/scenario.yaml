@@ -11,7 +11,7 @@ runtime:
   simulator: VTD
   simulator_version: '2025.2'
   sync_source_before_run: /home/autonav/VIRES/VTD.2025.2/Data/Projects/Current/Scenarios/M16.xml
-  mission_start_leg: 0
+  mission_start_leg: 1
 route:
   default: route.csv
   mode: packaged
@@ -37,10 +37,10 @@ entities:
   type: vehicle
   role: ego
   initial_position:
-    x: 1381.1951494140626
-    y: -192.6678882598877
-    z: 71.483551575
-    heading_rad: 3.270690396255588
+    x: 1112.4522294921876
+    y: -25.615583038330072
+    z: 64.880297325
+    heading_rad: 2.522667152005626
 - name: New Player
   type: vehicle
   role: relevant_object

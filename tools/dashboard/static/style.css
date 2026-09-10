@@ -866,6 +866,14 @@ select:focus {
   transition: border-color 0.2s ease;
 }
 
+.geometry-pane { position: absolute; inset: 0; display: flex; flex-direction: column; background: #101921; }
+.geometry-toolbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 10px 12px; font-size: 12px; }
+.geometry-notes { margin: 0; padding: 0 12px 8px; font-size: 11px; color: #adbfca; }
+#geometryFrame { flex: 1; width: 100%; min-height: 0; border: 0; background: #101921; }
+.viewer-canvas-wrap.geometry-active { min-height: 600px; }
+.viewer-canvas-wrap.geometry-active .viewer-overlay-top,
+.viewer-canvas-wrap.geometry-active .viewer-overlay-bottom { display: none; }
+
 .viewer-canvas-wrap.stream-connected {
   border-color: rgba(76, 148, 255, 0.78);
   box-shadow: inset 0 0 0 1px rgba(76, 148, 255, 0.12);

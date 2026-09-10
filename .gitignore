@@ -110,3 +110,27 @@ __pycache__/
 
 # Local video recordings (keep on disk, do not publish large binary files)
 /output/video_evidence/**/*.mjpeg
+
+# Local restore snapshots; keep them on disk, never upload archives to Git.
+/output/known-good-low-speed-*/
+/output/control-parameters-*/
+
+# Oversized local RDB recordings (retained on disk).
+/output/assessment_audits/
+/output/assessment_validation/
+/output/audit/
+/output/control_evidence/
+/output/dashboard_geometry/
+/output/rdb_evidence/
+/output/rdb_transport/
+/output/video_evidence/
+/docs/assessment_gt_validation_20260910.md
+/docs/assessment_m17_transport_stopline_fix_20260910.md
+/docs/assessment_signal_respawn_sources_20260910.md
+/docs/assessment_web_update_20260910.md
+/docs/crosswalk_indicator_audit_20260910.md
+/docs/school_zone_screenshot_review_20260910.md
+/output/rdb_evidence/m16_assessment_live_20260910_1655/frames.jsonl.gz
+/output/rdb_evidence/m16_assessment_live_20260910_1655/stream.rdb.gz
+/output/rdb_evidence/m17_check_20260910_201540/frames.jsonl.gz
+/output/rdb_evidence/m17_check_20260910_201540/stream.rdb.gz

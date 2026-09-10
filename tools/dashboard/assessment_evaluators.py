@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from assessment_geometry import contains, crosses, intrusion, local_point, obb, overlaps, relevant, signed_distance
 from assessment_types import EgoState, FrameData, Point2D, RoadPosition, ViolationResult
+from assessment_ground_truth import obb_overlap_3d, valid_geometry, vertical_overlap
 
 
 ROAD_USERS = {1, 2, 3, 4, 5, 6, 13, 14, 18, 30, 31, 32, 33}
@@ -26,6 +27,7 @@ class AssessmentContext:
     corners: List[Point2D]
     rear_offset: Optional[float]
     rear: Optional[Point2D]
+    metadata: Optional[Dict[str, Any]] = None
 
 
 def evaluate_respawn(
@@ -111,7 +113,9 @@ def evaluate_crosswalk(context: AssessmentContext, metadata: Dict[str, Any]) -> 
         ]
         matches = [
             crosswalk for crosswalk in occupied
-            if relevant(crosswalk, context.road)
+            if relevant(crosswalk, context.road) or (
+                context.road and crosswalk['id'] in metadata.get('route_crosswalk_ids', set())
+            )
         ]
         if not matches and unresolved:
             return
@@ -227,8 +231,7 @@ def collect_assessment_objects(context: AssessmentContext) -> List[EgoState]:
     return [
         item for item in context.frame['objects'].values()
         if item['id'] != context.ego['id']
-        and item['length'] > 0
-        and item['width'] > 0
+        and valid_geometry(item)
         and item['category'] in {1, 5, 6}
     ]
 
@@ -271,16 +274,16 @@ def evaluate_collisions(
     static_contacts = []
     unknown_contacts = []
     for item in objects:
-        if abs((item['z'] + item['off_z']) - (context.ego['z'] + context.ego['off_z'])) > (
-            item['height'] + context.ego['height']
-        ) / 2:
+        if not obb_overlap_3d(context.ego, item):
             continue
-        if not overlaps(context.corners, obb(item)):
-            continue
-        if item['type'] in ROAD_USERS and item['category'] == 1:
+        role = metadata.get('object_roles', {}).get(item['name'])
+        if role == 'static_obstacle':
+            context.row['static_collision'] = True
+            static_contacts.append(item)
+        elif role in {'road_user', 'pedestrian', 'cyclist'} or (item['type'] in ROAD_USERS and item['category'] == 1):
             context.row['road_user_collision'] = True
             road_user_contacts.append(item)
-        elif item['type'] in STATIC_TYPES or metadata.get('object_roles', {}).get(item['name']) == 'static_obstacle':
+        elif item['type'] in STATIC_TYPES:
             context.row['static_collision'] = True
             static_contacts.append(item)
         else:
@@ -300,7 +303,7 @@ def evaluate_collisions(
         for field in ('road_user_collision', 'static_collision'):
             if not context.row[field]:
                 context.row[field] = None
-    context.row['collision_source'] = 'OBB_overlap_provisional'
+    context.row['collision_source'] = 'RDB_3D_OBB_SAT'
     if not metadata.get('object_feed_complete', False):
         for field in ('road_user_collision', 'static_collision'):
             if not context.row[field]:
@@ -342,6 +345,13 @@ def evaluate_traffic_signal(
         return
     state_masks = line.get('state_masks', {})
     state = state_masks.get(signal['mask']) or state_masks.get(str(signal['mask']))
+    if signal.get('evidence', {}).get('flags', 0) & 1:
+        from assessment_signals import PHASE_STATES
+        logical = PHASE_STATES.get(signal.get('logic_phase'))
+        if not signal.get('phase_valid') or logical != state:
+            context.row.update(signal_resolution_status='CONFLICT',
+                               signal_resolution_reason='explicit_mask_conflicts_with_or_lacks_valid_GT_phase')
+            return
     if state:
         context.row.update(
             stop_line_id=line['id'],
@@ -362,11 +372,16 @@ def evaluate_green_start(
     if stop_line is None or not object_feed_complete:
         return
     corridors = corridor_factory(context.ego, context.row)
-    blockers = [
+    candidates = [
         item for item in objects
         if any(overlaps(corridor, obb(item)) for corridor in corridors)
     ]
-    context.row['justified_stop'] = bool(blockers)
+    blockers = [item for item in candidates if vertical_overlap(context.ego, item)]
+    uncertain = [item for item in candidates if not vertical_overlap(context.ego, item)]
+    # Different Z can mean a bridge OR a sloped approach. Without a proven
+    # shared road surface, neither a blocker nor an empty corridor is certain.
+    context.row['justified_stop'] = True if blockers else None if uncertain else False
+    context.row['green_vertical_uncertain_ids'] = ','.join(str(item['id']) for item in uncertain)
     context.row['green_blocker_forward_m'] = forward_distance_m
     context.row['green_blocker_ids'] = ','.join(str(item['id']) for item in blockers)
     context.row['green_blocker_source'] = 'planned_path_vehicle_width_overlap_object_obb'
@@ -384,11 +399,22 @@ def evaluate_pedestrian_response(
         return
     context.row['pedestrian_violation'] = False
     for crosswalk in metadata['crosswalks']:
-        if not relevant(crosswalk, context.road):
+        if not relevant(crosswalk, context.road) and crosswalk['id'] not in metadata.get('route_crosswalk_ids', set()):
             continue
-        pedestrians = [
+        corridors = metadata.get('assessment_forward_corridors')
+        if corridors is None:
+            half = context.ego['width']/2
+            end = crosswalk.get('approach_distance_m', 30)
+            corridors = [[local_point(context.ego, x, y) for x, y in
+                          ((-context.ego['length'], -half), (end, -half),
+                           (end, half), (-context.ego['length'], half))]]
+        if not overlaps(context.corners, crosswalk['polygon']) and not any(
+                overlaps(c, crosswalk['polygon']) for c in corridors):
+            continue
+        candidates = [
             item for item in objects
-            if item['type'] in {5, 6}
+            if (metadata.get('object_roles', {}).get(item['name']) == 'pedestrian'
+                or (item['name'] not in metadata.get('object_roles', {}) and item['type'] in {5, 6}))
             and (
                 overlaps(crosswalk['polygon'], obb(item))
                 or (
@@ -409,6 +435,14 @@ def evaluate_pedestrian_response(
             + (center_y - context.ego['y']) * math.sin(context.ego['h'])
         )
         near = -context.ego['length'] <= ahead <= crosswalk.get('approach_distance_m', 30)
+        pedestrians = [item for item in candidates if vertical_overlap(context.ego, item)]
+        uncertain = [item for item in candidates if not vertical_overlap(context.ego, item)]
+        if uncertain and near:
+            if context.row['pedestrian_violation'] is not True:
+                context.row['pedestrian_violation'] = None
+            context.row['pedestrian_vertical_uncertain_ids'] = ','.join(str(item['id']) for item in uncertain)
+            if context.row.get('justified_stop') is not True:
+                context.row['justified_stop'] = None
         if pedestrians and stopped and near:
             pedestrian_stops[identifier] = True
         if pedestrians and near and not stopped and (
@@ -420,3 +454,7 @@ def evaluate_pedestrian_response(
             pedestrian_stops.pop(identifier, None)
         if pedestrians and near:
             context.row['justified_stop'] = True
+            context.row['pedestrian_crosswalk_id'] = str(identifier)
+            context.row['pedestrian_ids'] = ','.join(str(p['id']) for p in pedestrians)
+            context.row['pedestrian_names'] = ','.join(p['name'] for p in pedestrians)
+            context.row['pedestrian_source'] = 'scenario_roles+RDB_OBB+XODR_crosswalk'

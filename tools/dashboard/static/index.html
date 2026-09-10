@@ -148,6 +148,7 @@
               <button id="tabBirdrs" class="view-tab" type="button">birdRS</button>
               <button id="tabSplit" class="view-tab" type="button">동시</button>
               <button id="tabMap" class="view-tab" type="button">주행 궤적</button>
+              <button id="tabGeometry" class="view-tab" type="button">궤적·콜리더·게이트웨이</button>
             </div>
             <span id="frameReadout" class="frame-readout">0 frames</span>
           </div>
@@ -174,6 +175,14 @@
             </div>
           </div>
           <canvas id="mapCanvas" class="hidden" aria-label="주행 궤적 지도"></canvas>
+          <div id="geometryPane" class="geometry-pane hidden">
+            <div class="geometry-toolbar">
+              <span id="geometryStatus" role="status">현재 실행 기록 확인 중</span>
+              <a id="geometryOpen" class="ghost-button hidden" target="_blank" rel="noopener">전체 화면</a>
+            </div>
+            <p id="geometryNotes" class="geometry-notes">기존 생성 결과만 읽습니다. 기록되지 않은 경계는 만들지 않습니다.</p>
+            <iframe id="geometryFrame" title="현재 시나리오의 궤적·콜리더·게이트웨이 검토" sandbox="allow-scripts"></iframe>
+          </div>
           <div class="viewer-overlay-top">
             <span id="streamBadge" class="stream-badge waiting"><i></i> STANDBY</span>
             <span class="stream-meta"><b id="overlayFrame">RDB #0</b><span id="overlayVideoSource">mainRS 탐색 중</span></span>

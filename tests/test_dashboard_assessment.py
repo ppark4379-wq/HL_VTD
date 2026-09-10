@@ -609,7 +609,7 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(p['summary']['official_evaluation'],'PARTIAL')
         self.assertIn('sections',p['missing_metadata'])
 
-    def test_respawn_first_per_section_free_then_six_each(self):
+    def test_respawn_configuration_boolean_cannot_confirm_position_jumps(self):
         e=self.engine
         e.on_frame(frame(0,x=0,speed=1))
         e.on_frame(frame(.1,x=30,speed=1))
@@ -619,15 +619,17 @@ class SessionTests(unittest.TestCase):
         e.on_frame(frame(.2,x=0,speed=1))
         second=e.snapshot()
         by={item['number']:item for item in second['official_grid']}
-        self.assertEqual(by[6]['penalty'],-6)
+        self.assertEqual(by[6]['penalty'],0)
+        self.assertEqual(by[6]['status'],'UNAVAILABLE')
         self.assertIsNone(second['summary']['official_score'])
-        self.assertEqual(second['summary']['major_count'],1)
+        self.assertEqual(second['summary']['major_count'],0)
         e.meta['sections']=[dict(id='2',polygon=[[-100,-10],[100,-10],[100,10],[-100,10]])]
         e.on_frame(frame(.3,x=1,speed=1))
         e.on_frame(frame(.4,x=30,speed=1))
-        self.assertEqual(e.respawns['2'],1)
+        self.assertEqual(e.respawns['2'],0)
         self.assertIsNone(e.snapshot()['summary']['official_score'])
-        self.assertEqual(len([event for event in e.events if event['event']=='respawn']),3)
+        self.assertEqual(len([event for event in e.events if event['event']=='respawn']),0)
+        self.assertEqual(len([event for event in e.events if event['event']=='respawn_candidate']),3)
 
     def test_solid_contact_requires_actual_lane_change(self):
         e=self.engine
@@ -640,7 +642,8 @@ class SessionTests(unittest.TestCase):
         sample(.1,-1,-1)
         self.assertEqual(e.rows[-1]['solid_line_crossing'],'0')
         sample(.2,1,-2)
-        self.assertEqual(e.rows[-1]['solid_line_crossing'],'')
+        self.assertEqual(e.rows[-1]['solid_line_crossing'],'0')
+        self.assertEqual(e.rows[-1]['lane_transition_pending'],'1')
         sample(.3,2,-2)
         sample(.4,3,-2)
         self.assertEqual(e.rows[-1]['solid_line_crossing'],'1')

@@ -220,8 +220,13 @@ void updateBehavior(BehaviorState& state,
     // 모든 속도 제약을 계산한 뒤 가장 보수적인(가장 낮은) 값을 적용한다.
     // 예: 먼 적색신호 정지계획이 있어도 가까운 끼어들기 차량은 즉시 감속한다.
     if (stop.valid) {
+        const bool trafficStop = stop.reason == StopReason::RedLight ||
+            stop.reason == StopReason::FlashingRed ||
+            stop.reason == StopReason::CrosswalkBlocked;
+        const double margin = trafficStop ? config.trafficStopPositionMargin
+                                          : config.stopSafetyMargin;
         const double distance =
-            std::max(0.0, stop.distanceToStop - config.stopSafetyMargin);
+            std::max(0.0, stop.distanceToStop - margin);
         targetSpeed = std::min(
             limitedCruise,
             std::sqrt(2.0 * config.comfortableDeceleration * distance));
