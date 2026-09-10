@@ -92,5 +92,17 @@ class RuntimeMissionTests(unittest.TestCase):
         self.assertTrue(all(abs(t['road_s']-5.)<1e-9 for t in targets))
 
 
+    def test_missing_nonrepresentative_spawn_alias_is_rejected(self):
+        a=fixtures.lane(100,0,10,junction=1)
+        b=fixtures.lane(101,0,10,junction=1)
+        outgoing=fixtures.lane(2,10,30)
+        network=Network(dict([a,b,outgoing]),[(a[0],outgoing[0]),(b[0],outgoing[0])])
+        result=network.build(fixtures.mission([(5,0),(29,0)]))
+        self.assertEqual(result['checkpoint_matches'][0]['nearest_lane'],a[0])
+        result['corridor_groups'][0]['lanes'].remove(b[0])
+        with self.assertRaisesRegex(ValueError, 'connector alias.*101'):
+            runtime_legs(network,result)
+
+
 if __name__ == '__main__':
     unittest.main()

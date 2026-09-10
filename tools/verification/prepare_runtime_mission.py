@@ -104,8 +104,12 @@ def runtime_legs(network, result):
         raise ValueError(f'Invalid mission network: {result.get("failure", validation)}')
     matches = result['checkpoint_matches']
     groups = result['corridor_groups']
-    if not groups or tuple(matches[0]['nearest_lane']) not in set(map(tuple, groups[0]['lanes'])):
-        raise ValueError('Matched start lane is missing from runtime first corridor')
+    required_start = {tuple(matches[0]['nearest_lane'])}
+    required_start.update(map(tuple, result.get('endpoint_connections', {}).get('start', {}).get('aliases', [])))
+    missing_start = required_start - set(map(tuple, groups[0]['lanes'])) if groups else required_start
+    if missing_start:
+        raise ValueError('Matched start lane or connector alias is missing from runtime first corridor: '
+                         +str(sorted(missing_start)))
     legs = []
     for corridor in result['corridor_groups']:
         start = corridor['from_seq'] - 1
@@ -162,7 +166,7 @@ def runtime_legs(network, result):
                          to_checkpoint=exit_, final=final, allowed=sorted(allowed),
                          gateway_lanes=sorted(gate_lanes), targets=goal_records,
                          witness_route=witness))
-    if not legs or tuple(matches[0]['nearest_lane']) not in set(map(tuple, legs[0]['allowed'])):
+    if not legs or not required_start.issubset(set(map(tuple, legs[0]['allowed']))):
         raise ValueError('Matched start lane is missing from runtime first corridor')
     return legs
 
