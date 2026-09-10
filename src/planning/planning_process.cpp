@@ -1367,43 +1367,6 @@ bool canCancelClearedPreparedAvoidance(
         (blocker->pathValid && (!blocker->isAhead || !blocker->isOnEgoPath));
 }
 
-bool makeGatewayTrackingHandoff(LaneChangeData& output,const LaneChangeData& current,
-    const std::vector<Waypoint>& route,const WorldState& world,bool approachOnly,double clearance) {
-    if(!world.inputValid || world.respawnDetected || route.size()<3 ||
-       (current.phase!=LaneChangePhase::None &&
-        !current.localCorridorAvoidance && !current.soleGatewayApproach)) return false;
-    WorldState projected=world;
-    if(!projectWorldToActivePath(projected,route,world.frontBumperOffset) ||
-       std::abs(projected.egoPathD)>.35 || route.back().s-projected.egoPathS<2.) return false;
-    auto next=std::lower_bound(route.begin(),route.end(),projected.egoPathS,
-        [](const Waypoint& p,double s){return p.s<s;});
-    if(next==route.end() || std::abs(normalizeAngle(next->yaw-world.ego.heading))>.12) return false;
-    // A route flag alone cannot authorize a discontinuous steering handoff.
-    // Check the first three metres against the incumbent actually being driven.
-    if(current.phase!=LaneChangePhase::None && current.path.size()>2) {
-        for(auto it=next;it!=route.end() && it->s<=projected.egoPathS+3.;++it) {
-            WorldState sample=world;sample.ego.x=it->x;sample.ego.y=it->y;sample.ego.heading=it->yaw;
-            if(!projectWorldToActivePath(sample,current.path,world.frontBumperOffset) ||
-               std::abs(sample.egoPathD)>.35) return false;
-        }
-    }
-    LaneChangeData result;
-    result.phase=current.phase==LaneChangePhase::None?LaneChangePhase::Prepare:current.phase;
-    result.routeMode=LaneChangeRouteMode::KeepTargetLane;
-    result.roadConnectionManeuver=true;result.missionRouteAuthority=true;
-    result.soleGatewayApproach=approachOnly;
-    result.validatedObstacleClearance=clearance;
-    result.sourceRoadId=world.egoRoadId;result.sourceSectionIndex=world.egoSectionIndex;
-    result.sourceLaneId=world.egoLaneId;result.path=route;
-    result.startRouteS=projected.egoPathS;result.rejoinRouteS=route.back().s;
-    const auto& end=route.back();
-    result.targetLaneId=end.laneId;result.reconnectLane={end.roadId,end.sectionIndex,end.laneId};
-    result.reconnectLaneValid=true;result.awaitExactReconnect=!approachOnly;
-    result.shiftCompletedLane=result.reconnectLane;result.shiftCompletedLaneValid=true;
-    result.turnSignal=current.turnSignal;result.outwardTurnSignal=current.outwardTurnSignal;
-    output=std::move(result);return true;
-}
-
 bool initializePlanning(PlanningProcessData& data,
                         const PathPlannerConfig& plannerConfig,
                         const PlanningBehaviorConfig& behaviorConfig,
@@ -1957,33 +1920,6 @@ void runPlanningProcess(PlanningProcessData& data,
     // 추종하면 정지선에서 바로 크게 조향한다.
     updateStopRequests(data, sensedWorld, map.staticZones, dt, trace);
 
-    bool gatewayTrackingAdopted=false;
-    if(missionActive && map.corridorRuntime && corridorTrackingPathValid &&
-       map.corridorRuntime->trackingPathApproved &&
-       (map.corridorRuntime->gatewayRouteSelected || map.corridorRuntime->soleGatewayApproachSelected) &&
-       (data.laneChange.localCorridorAvoidance || data.laneChange.soleGatewayApproach ||
-        (data.laneChange.phase==LaneChangePhase::None && map.corridorRuntime->soleGatewayApproachSelected))) {
-        const bool approach=map.corridorRuntime->soleGatewayApproachSelected;
-        // Don't replace an approach with the identical stored prefix every tick.
-        const bool sameApproach=approach && data.laneChange.soleGatewayApproach &&
-            !data.laneChange.path.empty() &&
-            std::hypot(data.laneChange.path.back().x-data.roadLanePlanner.waypoints.back().x,
-                       data.laneChange.path.back().y-data.roadLanePlanner.waypoints.back().y)<.1;
-        LaneChangeData replacement;
-        if(!sameApproach && corridorTrackingPathIsSafe(data.roadLanePlanner.waypoints,sensedWorld,
-               data.laneChangeConfig.latticeObstacleClearance,nullptr,&data.config,&map) &&
-           makeGatewayTrackingHandoff(replacement,data.laneChange,data.roadLanePlanner.waypoints,
-               sensedWorld,approach,data.laneChangeConfig.latticeObstacleClearance)) {
-            WorldState projected=sensedWorld;
-            if(projectWorldToActivePath(projected,replacement.path,sensedWorld.frontBumperOffset)) {
-                data.laneChange=std::move(replacement);world=std::move(projected);
-                gatewayTrackingAdopted=true;
-                traceDecision(trace,"gateway_tracking","authority_transferred",
-                    approach?"safe_sole_gateway_approach=1":"complete_collision_free_gateway_route=1");
-            }
-        }
-    }
-
     // A blocked whole-corridor route is not a reason to wait until the final
     // stationary speed guard fires. Poll the bounded local worker before
     // legacy one-shift planning; adoption is transactional and revalidates
@@ -2027,11 +1963,7 @@ void runPlanningProcess(PlanningProcessData& data,
                                                localClearance, &map));
             if (retainSafeLocal) map.corridorRuntime->localFallbackEngaged = false;
         }
-        const bool retainSafeGatewayApproach=data.laneChange.soleGatewayApproach &&
-            corridorTrackingPathIsSafe(data.laneChange.path,world,
-                data.laneChangeConfig.latticeObstacleClearance,nullptr,&data.config,&map);
-        if (!gatewayTrackingAdopted && !retainSafeGatewayApproach &&
-            !retainSafeLocal && prepareLocalCorridorFallback(
+        if (!retainSafeLocal && prepareLocalCorridorFallback(
                 localReplacement, data.laneChangeConfig, data.config, world,
                 map, data.missionCorridor, maneuverReference.waypoints, trace)) {
             WorldState replacementWorld = world;
@@ -2703,16 +2635,6 @@ void runPlanningProcess(PlanningProcessData& data,
     // driving through that body. Check the actual selected path and its
     // certified clearance after all speed floors; retain its geometry.
     int stationaryBlocker=-1;
-    if(data.laneChange.soleGatewayApproach && data.frame.localPath.valid) {
-        WorldState approachWorld=sensedWorld;
-        if(projectWorldToActivePath(approachWorld,data.frame.localPath.points,sensedWorld.frontBumperOffset)) {
-            const double remaining=std::max(0.,data.frame.localPath.points.back().s-
-                approachWorld.egoPathS-data.config.stopSafetyMargin-
-                std::max(0.,world.egoSpeed)*data.config.emergencyReactionTime);
-            data.frame.behavior.targetSpeed=std::min(data.frame.behavior.targetSpeed,
-                std::sqrt(2.*data.config.comfortableDeceleration*remaining));
-        }
-    }
     const double freeDistance=data.frame.localPath.valid
         ?corridorStationaryFreeDistance(data.frame.localPath.points,world,
             selectedPathClearance,&map,&stationaryBlocker)

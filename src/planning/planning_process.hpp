@@ -42,11 +42,6 @@ bool initializePlanning(PlanningProcessData& data,
                         const LaneChangeConfig& laneChangeConfig,
                         const std::string& referencePathCsv);
 
-bool makeGatewayTrackingHandoff(LaneChangeData& output, const LaneChangeData& current,
-    const std::vector<Waypoint>& route, const WorldState& world, bool approachOnly,
-    double clearance);
-
-
 void runPlanningProcess(PlanningProcessData& data,
                         const GtFrame& gt,
                         const WorldState& world,

@@ -90,7 +90,6 @@ struct LaneChangeData {
     // to distinguish outgoing branches that overlap before a split.
     bool missionRouteAuthority{};
     bool localCorridorAvoidance{};
-    bool soleGatewayApproach{};
     std::uint8_t turnSignal{};
     std::uint8_t outwardTurnSignal{};
     std::uint8_t returnTurnSignal{};

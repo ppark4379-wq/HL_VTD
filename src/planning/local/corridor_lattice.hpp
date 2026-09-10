@@ -57,12 +57,6 @@ struct CorridorRuntime {
     // remains available as a local-planning reference, but must not replace
     // a safe avoidance trajectory in the controller.
     bool trackingPathApproved{};
-    // A safe prefix towards the sole gateway, never a completed gateway route.
-    bool soleGatewayApproachSelected{};
-    bool gatewayRouteSelected{};
-    std::vector<Waypoint> soleGatewayApproachPath;
-    int soleGatewayApproachBlocker{-1};
-    std::uint64_t soleGatewayApproachSignature{};
     int trackingPathBlockingObject{-1};
     double trackingPathValidatedClearance{-1.};
     // Short physical C2 bridge from the measured post-manoeuvre pose back to

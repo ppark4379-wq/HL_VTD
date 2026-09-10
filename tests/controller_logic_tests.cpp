@@ -3104,25 +3104,6 @@ void testSettledStraightManeuverSpeedCap() {
     assert(cap()==slow);
 }
 
-void testGatewayTrackingHandoff() {
-    auto world=makeWorldWithObstacle();world.objects.clear();world.inputValid=true;
-    world.ego.x=10.;world.ego.y=-1.75;world.ego.heading=0.;
-    std::vector<Waypoint> route;
-    for(int x=0;x<=80;++x) {Waypoint p;p.x=p.s=x;p.y=-1.75;p.roadId=1;p.laneId=-1;route.push_back(p);}
-    LaneChangeData local;local.phase=LaneChangePhase::Execute;
-    local.localCorridorAvoidance=true;local.path=route;
-    LaneChangeData result;
-    assert(makeGatewayTrackingHandoff(result,local,route,world,false,.4));
-    assert(result.roadConnectionManeuver && !result.localCorridorAvoidance && !result.soleGatewayApproach);
-    assert(result.path.size()==route.size() && result.missionRouteAuthority);
-    auto detached=route;for(auto& p:detached)p.y+=3.5;
-    assert(!makeGatewayTrackingHandoff(result,local,detached,world,false,.4));
-    assert(makeGatewayTrackingHandoff(result,local,route,world,true,.4));
-    assert(result.soleGatewayApproach && !result.awaitExactReconnect);
-    local.roadConnectionManeuver=true;local.localCorridorAvoidance=false;
-    assert(!makeGatewayTrackingHandoff(result,local,route,world,false,.4));
-}
-
 void testStationaryCrosswalkWaitReleasesOnlyYield() {
     auto map=makeStraightTwoLaneMap();
     PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
@@ -3170,7 +3151,6 @@ int main(int argc, char** argv) {
         return 0;
     }
     if(argc==2 && std::string(argv[1])=="--safe-tail-stopline") {
-        testGatewayTrackingHandoff();
         testSafeAvoidanceSuccessorAndPhysicalStopLine();
         std::cout<<"safe avoidance successor / physical stop-line deadline PASS\n";
         return 0;
