@@ -7,6 +7,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 import numpy as np
+from corridor_surface_bounds import surface_segments
 
 ROOT = Path(__file__).resolve().parents[2]
 NS = 'http://www.w3.org/2000/svg'
@@ -36,9 +37,81 @@ def text(x, y, label, size, color='white', anchor='middle'):
             f'paint-order="stroke fill">{html.escape(str(label))}</text>')
 
 
+class RoadBackground(list):
+    """Source driving footprints and sidewalks used to bound colored overlays."""
+    def __init__(self):
+        super().__init__()
+        self.driving = {}
+        self.sidewalks = []
+        self.clips = {}
+
+    @staticmethod
+    def path(xy):
+        from PyQt5.QtCore import QPointF
+        from PyQt5.QtGui import QPainterPath, QPolygonF
+        shape = QPainterPath()
+        shape.addPolygon(QPolygonF([QPointF(float(x), float(y)) for x, y in xy]))
+        shape.closeSubpath()
+        return shape
+
+    def clip(self, key):
+        if key not in self.driving:
+            return None
+        if key not in self.clips:
+            shape = self.driving[key]
+            for sidewalk in self.sidewalks:
+                if shape.boundingRect().intersects(sidewalk.boundingRect()):
+                    shape = shape.subtracted(sidewalk)
+            self.clips[key] = shape
+        return self.clips[key]
+
+    @staticmethod
+    def svg(shape, color, opacity=1, clip=None):
+        if clip is not None:
+            # Flattened stroke curves can cut across a concave road/sidewalk
+            # boundary. Clip the final straight SVG segments as well.
+            from PyQt5.QtGui import QPainterPath
+            flat = QPainterPath()
+            for poly in shape.toFillPolygons():
+                flat.addPolygon(poly)
+                flat.closeSubpath()
+            shape = flat.intersected(clip)
+        # Qt boolean paths retain disconnected pieces and holes. SVG uses the
+        # same even-odd fill rule for the rewound polygons.
+        commands = []
+        for poly in shape.toFillPolygons():
+            commands.append('M'+' L'.join(f'{p.x():.6f},{p.y():.6f}' for p in poly)+' Z')
+        return f'<path d="{" ".join(commands)}" fill="{color}" fill-opacity="{opacity}" fill-rule="evenodd"/>'
+
+    def polygon(self, vertices, key, **attrs):
+        clip = self.clip(key)
+        if clip is None:
+            return polygon(vertices, **attrs)
+        shape = self.path(np.asarray(vertices)*[1, -1])
+        result = self.svg(shape.intersected(clip), attrs.get('fill', '#fff000'), attrs.get('fill_opacity', 1), clip=clip)
+        if attrs.get('stroke'):
+            from PyQt5.QtGui import QPainterPathStroker
+            stroker = QPainterPathStroker()
+            stroker.setWidth(float(attrs.get('stroke_width', 1)))
+            result += self.svg(stroker.createStroke(shape).intersected(clip), attrs['stroke'], clip=clip)
+        return result
+
+    def line(self, vertices, key, color, width):
+        clip = self.clip(key)
+        if clip is None:
+            return line(vertices, color, width)
+        from PyQt5.QtGui import QPainterPath, QPainterPathStroker
+        shape = QPainterPath()
+        for i, (x, y) in enumerate(vertices):
+            (shape.moveTo if i == 0 else shape.lineTo)(float(x), float(-y))
+        stroker = QPainterPathStroker()
+        stroker.setWidth(float(width))
+        return self.svg(stroker.createStroke(shape).intersected(clip), color, clip=clip)
+
+
 def load_background(source=None):
     root = ET.parse(source or ROOT/'output/콜리더_게이트웨이/road_map.svg').getroot()
-    shapes = []
+    shapes = RoadBackground()
     for group in root.findall(f'{{{NS}}}g'):
         role = group.get('id')
         if role not in ('surface', 'markings', 'objects', 'object_labels'):
@@ -48,6 +121,16 @@ def load_background(source=None):
             if raw:
                 a = np.array([[float(v) for v in pair.split(',')] for pair in raw.split()])
                 bb = (a[:, 0].min(), a[:, 1].min(), a[:, 0].max(), a[:, 1].max())
+                if role == 'surface':
+                    import re
+                    title = element.find(f'{{{NS}}}title')
+                    match = re.fullmatch(r'road (\d+) section (\d+) lane (-?\d+) (\w+)', title.text or '') if title is not None else None
+                    if match:
+                        key = tuple(map(int, match.groups()[:3]))
+                        if match[4] == 'driving':
+                            shapes.driving[key] = shapes.path(a)
+                        elif match[4] == 'sidewalk':
+                            shapes.sidewalks.append(shapes.path(a))
             elif element.get('x') and element.get('y'):
                 x, y = float(element.get('x')), float(element.get('y'))
                 bb = (x-10, y-10, x+10, y+10)
@@ -69,22 +152,19 @@ def band(points):
 
 
 def draw(mission, geometry, background, leg_indices, bounds=None, closeup=False):
+    paint = background.polygon if isinstance(background, RoadBackground) else lambda a, k, **kw: polygon(a, **kw)
+    paint_line = background.line if isinstance(background, RoadBackground) else lambda a, k, c, w: line(a, c, w)
     legs = [mission['legs'][i] for i in leg_indices]
     allowed = {tuple(k) for leg in legs for k in leg['allowed']}
-    allowed-={tuple(k) for k in mission.get('surface_excluded_lanes',[])}
-    if mission.get('surface_clips'):
-        geometry=dict(geometry)
-        for clip in mission['surface_clips']:
-            k=tuple(clip['key']);p=geometry[k]['points']
-            selected=p[(p[:,3]>=clip.get('road_s_min',-math.inf)-1e-7)&(p[:,3]<=clip.get('road_s_max',math.inf)+1e-7)]
-            if len(selected)==0:allowed.discard(k)
-            else:geometry[k]=dict(geometry[k],points=selected)
+    segments = surface_segments(mission, geometry, allowed)
+    allowed = set(segments)
+    lane_pieces = [(k, p) for k in sorted(segments) for p in segments[k]]
     checkpoints = mission['checkpoints']
     seqs = {v for leg in legs for v in [leg['from_seq'],leg['entry_seq'],leg['exit_seq']]}
     if len(leg_indices) == len(mission['legs']): seqs = {cp['seq'] for cp in checkpoints}
     selected_cp = [cp for cp in checkpoints if cp['seq'] in seqs]
     cp_by_seq = {cp['seq']: cp for cp in checkpoints}
-    arrays = [geometry[k]['points'] for k in sorted(allowed) if k in geometry]
+    arrays = [p for k, p in lane_pieces]
     if bounds is None:
         xy = np.concatenate([a[:, :2] for a in arrays]+[np.array([[c['x'], c['y']] for c in selected_cp])])
         low, high = xy.min(axis=0), xy.max(axis=0)
@@ -98,14 +178,12 @@ def draw(mission, geometry, background, leg_indices, bounds=None, closeup=False)
     marks = ''.join(s for role, bb, s in background if role != 'surface' and visible(bb))
     corridor, boundaries, labels, arrows, gateways, warnings = [], [], [], [], [], []
     by_road = defaultdict(list)
-    for k in sorted(allowed):
-        if k not in geometry: continue
-        p = geometry[k]['points']
+    for k, p in lane_pieces:
         by_road[k[0]].append(p)
         title = f'road:section:lane {keytext(k)} | allowed surface (not collision approval)'
-        corridor.append(f'<g><title>{title}</title>'+polygon(band(p), fill='#fff000', fill_opacity='.68')+'</g>')
+        corridor.append(f'<g><title>{title}</title>'+paint(band(p), k, fill='#fff000', fill_opacity='.68')+'</g>')
         for end in (p[0], p[-1]):
-            boundaries.append(line([end[5:7], end[7:9]], '#123d51', max(.06,unit*.2)))
+            boundaries.append(paint_line([end[5:7], end[7:9]], k, '#123d51', max(.06,unit*.2)))
         length = sum(np.linalg.norm(p[i,:2]-p[i-1,:2]) for i in range(1,len(p)))
         if length > 10:
             for i in range(len(p)//2, len(p), max(len(p), 1)):
@@ -131,15 +209,14 @@ def draw(mission, geometry, background, leg_indices, bounds=None, closeup=False)
             if mission.get('mode')=='whole_mission_xodr_precomputed':
                 if leg.get('declared_gateway_index') is None:continue
                 n=leg['declared_gateway_index']
-            for k in leg.get('surface_lanes',leg['connection_lanes']):
-                p=geometry[tuple(k)]['points']
-                gateways.append(f'<g><title>G{n}: XODR connecting lane {keytext(k)}</title>'+polygon(
-                    band(p),fill='#ffe000',fill_opacity='.6',stroke='#ff8500',stroke_width=max(.18,unit*.7))+'</g>')
+            for k, p in [(tuple(k), p) for k in leg.get('surface_lanes',leg['connection_lanes']) for p in segments.get(tuple(k), [])]:
+                gateways.append(f'<g><title>G{n}: XODR connecting lane {keytext(k)}</title>'+paint(
+                    band(p),tuple(k),fill='#ffe000',fill_opacity='.6',stroke='#ff8500',stroke_width=max(.18,unit*.7))+'</g>')
             for direction in ('entry','exit'):
                 for a,b in leg.get('surface_'+direction+'_edges',leg[direction+'_edges']):
                     # Actual directed lane interface, not the nearest CP station.
                     p=geometry[tuple(a)]['points'][-1] if direction=='entry' else geometry[tuple(b)]['points'][0]
-                    gateways.append(line([p[5:7],p[7:9]],'#ff8200' if direction=='entry' else 'white',max(.45,unit*2)))
+                    gateways.append(paint_line([p[5:7],p[7:9]],tuple(a) if direction=='entry' else tuple(b),'#ff8200' if direction=='entry' else 'white',max(.45,unit*2)))
             if leg['connection_lanes']:
                 p=geometry[tuple(leg['connection_lanes'][0])]['points']
                 a=p[len(p)//2]
@@ -156,8 +233,8 @@ def draw(mission, geometry, background, leg_indices, bounds=None, closeup=False)
                 if len(p)<2: continue
                 # These transverse bands are a display convention, not stored gate polygons.
                 gateways.append(f'<g><title>{name} {keytext(k)}; '+
-                                ('checkpoint lane candidate' if is_entry else 'runtime targetLanes')+'</title>'+polygon(
-                                    band(p), fill='#fff500', stroke='#ff9200' if is_entry else '#f8ffff',
+                                ('checkpoint lane candidate' if is_entry else 'runtime targetLanes')+'</title>'+paint(
+                                    band(p), k, fill='#fff500', stroke='#ff9200' if is_entry else '#f8ffff',
                                     stroke_width=max(.3,unit*1.4), stroke_dasharray='' if is_entry else f'{unit*3} {unit*2}')+'</g>')
         cached={tuple(r['start']) for r in leg['cached_routes']}
         for k0 in leg['allowed']:
@@ -182,7 +259,7 @@ def draw(mission, geometry, background, leg_indices, bounds=None, closeup=False)
     ego_layer=[]
     display_corridors=mission.get('corridor_groups',mission.get('corridor_components',[]))
     for component in display_corridors:
-        available=[geometry[tuple(k)]['points'] for k in component['lanes'] if tuple(k) in allowed]
+        available=[p for k in component['lanes'] for p in segments.get(tuple(k), [])]
         if not available: continue
         p=max(available,key=len); a=p[len(p)//3]
         if x<=a[0]<=x+w and y<=-a[1]<=y+h:

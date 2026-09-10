@@ -7,6 +7,7 @@ from collections import defaultdict
 from heapq import heappop, heappush
 import math
 import numpy as np
+from corridor_surface_bounds import apply_surface_bounds, add_endpoint_surface
 
 
 def segment_distance(a,b,c,d):
@@ -63,11 +64,32 @@ class Network:
     def candidates(self,cp,heading,role='road',max_distance=30.):
         candidates={};xy=np.array([cp['x'],cp['y']]);junction_distances={}
         for k,g in self.geometry.items():
-            p=np.asarray(self.geometry[k]['points']);diff=xy-p[:,:2]
+            p=np.asarray(self.geometry[k]['points'])
+            if role in ('start','finish') and len(p)>1:
+                # Match between samples as well as on them. At a section seam
+                # a point just inside the next section must not snap back to
+                # the preceding section's final sample.
+                delta=np.diff(p[:,:2],axis=0)
+                denominator=np.maximum(np.sum(delta*delta,axis=1),1e-20)
+                fraction=np.clip(np.sum((xy-p[:-1,:2])*delta,axis=1)/denominator,0.,1.)
+                projected=p[:-1]+fraction[:,None]*(p[1:]-p[:-1])
+                turn=np.arctan2(np.sin(p[1:,2]-p[:-1,2]),np.cos(p[1:,2]-p[:-1,2]))
+                projected[:,2]=p[:-1,2]+fraction*turn
+                p=projected
+            diff=xy-p[:,:2]
             along=diff[:,0]*np.cos(p[:,2])+diff[:,1]*np.sin(p[:,2])
             across=-diff[:,0]*np.sin(p[:,2])+diff[:,1]*np.cos(p[:,2])
             surface=along**2+np.maximum(np.abs(across)-p[:,4]*.5,0.)**2
             i=int(np.argmin(surface));distance=math.sqrt(float(surface[i]))
+            if g['junction']>=0 and role in ('start','finish'):
+                angle=math.atan2(math.sin(p[i,2]-heading),math.cos(p[i,2]-heading))
+                candidates[k]=dict(component=k,distance_m=distance,heading_error_rad=angle,
+                    score=25.*distance**2+30.*(1.-math.cos(angle)), nearest_lane=k,
+                    road_s=float(p[i,3]), endpoint_lanes=[k],
+                    association='junction_start' if role=='start' else 'junction_terminal',
+                    junction_ids=[g['junction']],match_x=float(p[i,0]),match_y=float(p[i,1]),
+                    lane_heading_rad=float(p[i,2]))
+                continue
             if g['junction']>=0:
                 j=g['junction'];junction_distances[j]=min(junction_distances.get(j,float('inf')),distance)
                 continue
@@ -77,6 +99,14 @@ class Network:
             value=dict(component=c,distance_m=distance,heading_error_rad=angle,score=score,
                        nearest_lane=k,road_s=float(p[i,3]))
             if c not in candidates or (score,k)<(candidates[c]['score'],candidates[c]['nearest_lane']):candidates[c]=value
+        if role in ('start','finish'):
+            # Endpoints are physical occupancy, unlike approximate IN/OUT road
+            # hints. Half a metre covers the 0.5 m sample spacing, not a jump
+            # to an unrelated road several metres ahead of the vehicle.
+            nearest=min((v['distance_m'] for v in candidates.values()),default=math.inf)
+            limit=min(.5,nearest+.1)
+            return {c:dict(v,association=v.get('association','road_surface'))
+                    for c,v in candidates.items() if v['distance_m']<=limit}
         best_road=min((v['distance_m'] for v in candidates.values()),default=float('inf'))
         best_junction=min(junction_distances.values(),default=float('inf'))
         if role in ('entry','exit') and best_junction<best_road and best_junction<=max_distance:
@@ -98,42 +128,6 @@ class Network:
         # Never choose a distant reachable road merely to manufacture success.
         return {c:dict(v,association='road_surface') for c,v in candidates.items() if v['distance_m']<=max_distance}
 
-    def terminal_junction_candidates(self,cp,heading,road_candidates,
-                                     inside_tolerance=.5,hysteresis=1.):
-        """Return exact junction-lane finish candidates, or None for road mode.
-
-        A VTD PathShape may end inside a connector before it reaches the next
-        ordinary road.  Such a point is safe to use only when it lies inside a
-        directed connector surface and that surface is clearly closer than
-        every ordinary-road fallback.  Locally coincident connector aliases are
-        resolved in ``build``; distinct overlapping turns remain an error.
-        """
-        best_road=min((v['distance_m'] for v in road_candidates.values()),
-                      default=float('inf'))
-        xy=np.array([cp['x'],cp['y']]);matches={}
-        for k,g in self.geometry.items():
-            if g['junction']<0:continue
-            p=np.asarray(g['points']);diff=xy-p[:,:2]
-            along=diff[:,0]*np.cos(p[:,2])+diff[:,1]*np.sin(p[:,2])
-            across=-diff[:,0]*np.sin(p[:,2])+diff[:,1]*np.cos(p[:,2])
-            surface=along**2+np.maximum(np.abs(across)-p[:,4]*.5,0.)**2
-            i=int(np.argmin(surface));distance=math.sqrt(float(surface[i]))
-            angle=math.atan2(math.sin(p[i,2]-heading),math.cos(p[i,2]-heading))
-            if distance>inside_tolerance or best_road-distance<hysteresis or abs(angle)>math.pi/2:
-                continue
-            matches[k]=dict(distance_m=distance,heading_error_rad=angle,
-                score=25.*distance**2+30.*(1.-math.cos(angle)),nearest_lane=k,
-                road_s=float(p[i,3]),association='junction_terminal',
-                junction_ids=[g['junction']],match_x=float(p[i,0]),
-                match_y=float(p[i,1]),lane_heading_rad=float(p[i,2]))
-        if not matches:return None
-        # The authored final segment supplies a useful discriminator when
-        # several connector surfaces overlap.  Keep every tightly aligned
-        # alias, but never let a visibly different turn compete with it.
-        aligned={k:v for k,v in matches.items()
-                 if abs(v['heading_error_rad'])<=math.radians(10.)}
-        return aligned or matches
-
     @staticmethod
     def equivalent_terminal_aliases(matches,position_tolerance=.25,
                                     heading_tolerance=math.radians(5.)):
@@ -153,54 +147,55 @@ class Network:
             if abs(angle)>heading_tolerance:return False
         return True
 
-    def start_junction_candidates(self,cp,heading,road_candidates,
-                                  inside_tolerance=.5,hysteresis=1.):
-        """Return overlapping, directed connector lanes at the spawn point.
 
-        VTD may report any one of several geometrically overlapping junction
-        lanes at spawn (for example, M16 roads 2491/2515/6045).  If those lanes
-        all feed the same ordinary-road corridor, retain every alias so the
-        runtime corridor agrees with the simulator's map match.  A connector
-        is never accepted merely because it is nearby: the point must lie on
-        its surface, its direction must agree, and it must have one unambiguous
-        downstream ordinary-road component.
+    def match_lanes(self, match):
+        if 'endpoint_lanes' in match:
+            return match['endpoint_lanes']
+        return [k for k in self.components[match['component']]
+                if k[:2]==match['nearest_lane'][:2]]
+
+    def endpoint_region(self, cp, match, target, at_start, candidates):
+        """Only longitudinal connector paths reaching the selected road side.
+
+        Overlapping lane IDs are alternatives, never synthetic routing edges.
+        A fork to a different road is excluded even when it shares the spawn.
         """
-        best_road=min((v['distance_m'] for v in road_candidates.values()),
-                      default=float('inf'))
-        xy=np.array([cp['x'],cp['y']]);matches=defaultdict(dict)
-        for k,g in self.geometry.items():
-            if g['junction']<0:continue
-            p=np.asarray(g['points']);diff=xy-p[:,:2]
-            along=diff[:,0]*np.cos(p[:,2])+diff[:,1]*np.sin(p[:,2])
-            across=-diff[:,0]*np.sin(p[:,2])+diff[:,1]*np.cos(p[:,2])
-            surface=along**2+np.maximum(np.abs(across)-p[:,4]*.5,0.)**2
-            i=int(np.argmin(surface));distance=math.sqrt(float(surface[i]))
-            angle=math.atan2(math.sin(p[i,2]-heading),math.cos(p[i,2]-heading))
-            if distance>inside_tolerance or best_road-distance<hysteresis or abs(angle)>math.pi/2:
-                continue
-            pending=list(self.forward[k]);seen=set();components=set()
-            while pending:
-                lane=pending.pop()
-                if lane in seen:continue
-                seen.add(lane)
-                if lane in self.owner:components.add(self.owner[lane])
-                else:pending.extend(self.forward[lane]-seen)
-            if len(components)!=1:continue
-            component=next(iter(components))
-            matches[component][k]=dict(component=component,distance_m=distance,
-                heading_error_rad=angle,
-                score=25.*distance**2+30.*(1.-math.cos(angle)),nearest_lane=k,
-                road_s=float(p[i,3]),association='junction_start',
-                junction_ids=[g['junction']])
-        if not matches:return None
-        # Multiple overlapping connector aliases are safe only when they lead
-        # into the same downstream corridor.  Select that corridor by the best
-        # local surface/direction score, never by total remaining route length.
-        ranked=sorted((min(v['score'] for v in group.values()),component)
-                      for component,group in matches.items())
-        if len(ranked)>1 and abs(ranked[0][0]-ranked[1][0])<1e-9:
-            return None
-        return matches[ranked[0][1]]
+        if not match['association'].startswith('junction_'):
+            return set(), [], []
+        graph=self.forward if at_start else self.reverse
+        reference=match['heading_error_rad']
+        seeds={tuple(k) for m in candidates.values()
+               if m['association'].startswith('junction_')
+               and abs(math.atan2(math.sin(m['heading_error_rad']-reference),
+                                  math.cos(m['heading_error_rad']-reference)))<=math.radians(20)
+               for k in m.get('endpoint_lanes',[])}
+        seeds.add(tuple(match['nearest_lane']))
+        edges=set();seen=set();pending=list(seeds)
+        while pending:
+            k=pending.pop()
+            if k in seen:continue
+            seen.add(k)
+            if k in self.owner:continue
+            for b in graph[k]:
+                if b not in self.owner or b in target:
+                    edges.add((k,b));pending.append(b)
+        reverse=defaultdict(set)
+        for a,b in edges:reverse[b].add(a)
+        good=set();pending=list(seen&target)
+        while pending:
+            k=pending.pop()
+            if k in good:continue
+            good.add(k);pending.extend(reverse[k]-good)
+        viable_seeds=seeds&good
+        used=set();pending=list(viable_seeds)
+        while pending:
+            k=pending.pop()
+            if k in used:continue
+            used.add(k)
+            if k in self.owner:continue
+            pending.extend(b for b in graph[k] if b in good)
+        valid=[(a,b) if at_start else (b,a) for a,b in edges if a in used and b in used]
+        return used-set(self.owner), sorted(valid), sorted(viable_seeds)
 
     def advance(self,current,candidates,require_junction):
         dist={};previous={};queue=[]
@@ -218,7 +213,7 @@ class Network:
                 dist[nxt]=value;previous[nxt]=state;heappush(queue,(value,nxt))
         result={}
         for c,match in candidates.items():
-            for k in self.components[c]:
+            for k in self.match_lanes(match):
                 # All lanes are candidates, but a CP's road/section must actually
                 # be visited; membership in a large component alone can skip it.
                 if k[:2]!=match['nearest_lane'][:2]:continue
@@ -232,36 +227,6 @@ class Network:
                 result[k]=dict(cost=cost+match['score'],route=history['route']+route[1:],
                     matches=history['matches']+[match],
                     spans=history['spans']+[(len(history['route'])-1,len(history['route'])+len(route)-2)])
-        return result
-
-    def advance_terminal(self,current,candidates):
-        """Advance to an exact, directed junction lane used as the finish."""
-        dist={};previous={};queue=[]
-        for k,record in current.items():
-            dist[k]=record['cost'];previous[k]=None
-            heappush(queue,(record['cost'],k))
-        while queue:
-            cost,k=heappop(queue)
-            if cost!=dist[k]:continue
-            for b,step in self.search_graph[k]:
-                value=cost+step
-                if value>=dist.get(b,float('inf')):continue
-                dist[b]=value;previous[b]=k;heappush(queue,(value,b))
-        result={}
-        for target,raw_match in candidates.items():
-            if target not in dist:continue
-            chain=[];state=target
-            while previous[state] is not None:
-                chain.append(state);state=previous[state]
-            seed=state;route=[seed]+list(reversed(chain));history=current[seed]
-            owner=next((self.owner[k] for k in reversed(route) if k in self.owner),None)
-            if owner is None:continue
-            match=dict(raw_match,component=owner)
-            result[target]=dict(cost=dist[target]+match['score'],
-                route=history['route']+route[1:],
-                matches=history['matches']+[match],
-                spans=history['spans']+[(len(history['route'])-1,
-                                         len(history['route'])+len(route)-2)])
         return result
 
     def gateway(self,source_component,target_component):
@@ -291,7 +256,7 @@ class Network:
             status='connected' if entry and exit_ else 'UNRESOLVED')
 
 
-    def gateway_surface(self, gate):
+    def gateway_surface(self, gate, source=None, target=None):
         """Include adjoining XODR lane tapers without inventing routing edges.
 
         A lane born/ending at zero width has only one longitudinal interface.
@@ -299,8 +264,8 @@ class Network:
         provide an entry-to-exit route. Keep that distinction in the artifact.
         """
         core=set(gate['connection_lanes']);surface=set(core)
-        source=self.components[gate['source_component']]
-        target=self.components[gate['target_component']]
+        source=self.components[gate['source_component']] if source is None else source
+        target=self.components[gate['target_component']] if target is None else target
         sections={(k[0],k[1],k[2]>0) for k in core}
         candidates={}
         for k,g in self.geometry.items():
@@ -356,51 +321,75 @@ class Network:
             if i==0:a,b=cp,cps[i+1]
             elif i==len(cps)-1 or i%2==1:a,b=cps[i-1],cp
             else:a,b=cp,cps[i+1]
-            role='road' if i in (0,len(cps)-1) or result['checkpoint_pairing_warning'] else ('entry' if i%2==1 else 'exit')
-            candidates.append(self.candidates(cp,math.atan2(b['y']-a['y'],b['x']-a['x']),role))
-        terminal=None
-        start=None
-        if not result['checkpoint_pairing_warning']:
-            a,b=cps[0],cps[1]
-            start=self.start_junction_candidates(
-                a,math.atan2(b['y']-a['y'],b['x']-a['x']),candidates[0])
-        if not result['checkpoint_pairing_warning']:
-            a,b=cps[-2],cps[-1]
-            terminal=self.terminal_junction_candidates(
-                b,math.atan2(b['y']-a['y'],b['x']-a['x']),candidates[-1])
-        if terminal is not None and not self.equivalent_terminal_aliases(terminal):
-            result['failure']=dict(from_seq=len(cps)-1,to_seq=len(cps),
-                reason='Finish overlaps distinct junction lanes; an exact directed terminal cannot be selected safely.')
-            result['terminal_candidate_lanes']=sorted(terminal)
-            return result
-        result['candidate_counts']=[len(start) if start is not None and i==0 else
-                                    len(terminal) if terminal is not None and i==len(candidates)-1 else len(c)
-                                    for i,c in enumerate(candidates)]
-        current={}
-        if start is not None:
-            for k,match in start.items():
-                current[k]=dict(cost=match['score'],route=[k],matches=[match],spans=[])
-        else:
-            for c,match in candidates[0].items():
-                for k in self.components[c]:
-                    if k[:2]!=match['nearest_lane'][:2]:continue
-                    current[k]=dict(cost=match['score'],route=[k],matches=[match],spans=[])
-        for i in range(1,len(cps)):
-            if i==len(cps)-1 and terminal is not None:
-                current=self.advance_terminal(current,terminal)
-            else:
-                current=self.advance(current,candidates[i],require_junction=(i%2==0 and i<len(cps)-1 and not result['checkpoint_pairing_warning']))
-            if not current:
-                reason=('Exact junction finish is not reachable through the directed XODR graph; no ordinary-road fallback was used.'
-                        if i==len(cps)-1 and terminal is not None else
-                        'No directed XODR sequence through nearby road corridor candidates; no fabricated link.')
-                result['failure']=dict(from_seq=i,to_seq=i+1,reason=reason)
+            role=('start' if i==0 else 'finish' if i==len(cps)-1 else
+                  'road' if result['checkpoint_pairing_warning'] else 'entry' if i%2==1 else 'exit')
+            heading=cp.get('heading',math.atan2(b['y']-a['y'],b['x']-a['x']))
+            if not math.isfinite(heading):raise ValueError('Non-finite checkpoint heading')
+            options=self.candidates(cp,heading,role)
+            if 'heading' in cp and role in ('start','finish'):
+                options={c:m for c,m in options.items() if abs(m['heading_error_rad'])<=math.radians(75)}
+                # A measured heading is stronger evidence than total lane
+                # length. Do not select a different turning branch merely
+                # because its downstream section is shorter.
+                error=min((abs(m['heading_error_rad']) for m in options.values()),default=math.inf)
+                options={c:m for c,m in options.items() if abs(m['heading_error_rad'])<=error+math.radians(10)}
+            candidates.append(options)
+        # Preserve the remote terminal contract: coincident aliases may be
+        # targets together, but distinct overlapping turns are not interchangeable.
+        terminal={k:m for k,m in candidates[-1].items()
+                  if m['association']=='junction_terminal'}
+        if terminal:
+            aligned={k:m for k,m in terminal.items()
+                     if abs(m['heading_error_rad'])<=math.radians(10.)}
+            terminal=aligned or terminal
+            if 'heading' in cps[-1] and not self.equivalent_terminal_aliases(terminal):
+                # An authored/measured terminal heading can distinguish turns
+                # that a coarse 10-degree alignment bucket groups together.
+                # Keep a 3-degree ambiguity band; tied alternatives still fail
+                # the remote coincident-alias check below.
+                error=min(abs(m['heading_error_rad']) for m in terminal.values())
+                terminal={k:m for k,m in terminal.items()
+                          if abs(m['heading_error_rad'])<=error+math.radians(3.)}
+            if not self.equivalent_terminal_aliases(terminal):
+                result['failure']=dict(from_seq=len(cps)-1,to_seq=len(cps),
+                    reason='Finish overlaps distinct junction lanes; an exact directed terminal cannot be selected safely.')
+                result['terminal_candidate_lanes']=sorted(terminal)
                 return result
-        terminal_lanes=(set(current) if terminal is not None else set())
+            candidates[-1]={k:m for k,m in candidates[-1].items()
+                            if m['association']!='junction_terminal' or k in terminal}
+        result['candidate_counts']=[len(c) for c in candidates]
+        for index in (0,len(cps)-1):
+            if not candidates[index]:
+                result['failure']=dict(from_seq=cps[index]['seq'],to_seq=cps[index]['seq'],
+                    reason='endpoint_outside_driving_surface_or_heading_mismatch',
+                    endpoint='start' if index==0 else 'finish',max_surface_distance_m=.5)
+                return result
+        current={}
+        for c,match in candidates[0].items():
+            for k in self.match_lanes(match):
+                if k[:2]!=match['nearest_lane'][:2]:continue
+                current[k]=dict(cost=match['score'],route=[k],matches=[match],spans=[])
+        for i in range(1,len(cps)):
+            current=self.advance(current,candidates[i],require_junction=(i%2==0 and i<len(cps)-1 and not result['checkpoint_pairing_warning']))
+            if not current:
+                result['failure']=dict(from_seq=i,to_seq=i+1,reason='No directed XODR sequence through nearby road corridor candidates; no fabricated link.')
+                return result
         best=min(current.values(),key=lambda r:(r['cost'],r['route']));route=best['route'];selected=[]
         for k in route:
             c=self.owner.get(k)
             if c is not None and (not selected or selected[-1]!=c):selected.append(c)
+        # A lane-level search must not silently accept a goal behind its start
+        # on the same directed section (there is no reverse traversal edge).
+        for index,(lo,hi) in enumerate(best['spans']):
+            a,b=best['matches'][index:index+2]
+            if lo==hi and a['nearest_lane'][:2]==b['nearest_lane'][:2]:
+                direction=1 if a['nearest_lane'][2]<0 else -1
+                if direction*(b['road_s']-a['road_s']) < -.5:
+                    result['failure']=dict(from_seq=index+1,to_seq=index+2,reason='checkpoint_requires_reverse_travel')
+                    return result
+        if not selected:
+            result['failure']=dict(from_seq=1,to_seq=len(cps),reason='mission_has_no_regular_road_corridor')
+            return result
         for i,c in enumerate(selected,1):
             result['corridor_components'].append(dict(id=i,key=c,lanes=sorted(self.components[c]),roads=sorted({k[0] for k in self.components[c]})))
         for i,(a,b) in enumerate(zip(selected,selected[1:])):
@@ -416,39 +405,27 @@ class Network:
                 allowed=sorted(set().union(*(self.components[c] for c in selected))),entry_candidates=[],targets=[],
                 preferred=[],cached_routes=[],notes=[],connection_lanes=[],connection_edges=[],entry_edges=[],exit_edges=[],status='same_corridor')]
         result['checkpoint_matches']=[dict(seq=cp['seq'],**match) for cp,match in zip(cps,best['matches'])]
+        # Public component references remain keys in corridor_components;
+        # nearest_lane/endpoint_lanes retain the actual connector identity.
+        for index,component in ((0,selected[0]),(-1,selected[-1])):
+            if result['checkpoint_matches'][index]['association'].startswith('junction_'):
+                result['checkpoint_matches'][index]['component']=component
         result['witness_route']=route
         result['witness_lateral_edges']=[(a,b) for a,b in zip(route,route[1:]) if (a,b) in self.lateral]
         result['checkpoint_spans']=best['spans'];result['search_cost']=best['cost']
         result['intervals']=[dict(from_seq=i+1,to_seq=i+2,lane_route=route[a:b+1],
             intermediate_roads=list(dict.fromkeys(k[0] for k in route[a:b+1]))) for i,(a,b) in enumerate(best['spans'])]
-        terminal_lane=(tuple(best['matches'][-1]['nearest_lane'])
-                       if best['matches'][-1].get('association')=='junction_terminal'
-                       else None)
-        if terminal_lanes:
-            result['terminal_alias_lanes']=sorted(terminal_lanes)
-            result['terminal_alias_matches']=[terminal[k] for k in sorted(terminal_lanes)]
-        start_lanes=(set(start) if start is not None else set())
-        if start_lanes:
-            result['legs'][0]['allowed']=sorted(
-                set(map(tuple,result['legs'][0]['allowed']))|start_lanes)
-        if terminal_lanes:
-            # This is a longitudinal finish inside the last corridor, not an
-            # additional declared gateway.  Keep it visible/reachable without
-            # labelling the connector as a new intersection transition.
-            result['legs'][-1]['allowed']=sorted(
-                set(map(tuple,result['legs'][-1]['allowed']))|terminal_lanes)
         # An alternative must also be able to continue through later gateways,
         # not merely arrive somewhere on the next road.
-        next_good=(terminal_lanes if terminal_lanes else
-                   {k for k in self.components[selected[-1]]
-                    if k[:2]==best['matches'][-1]['nearest_lane'][:2]})
+        finish_lanes,finish_edges,finish_seeds=self.endpoint_region(cps[-1],best['matches'][-1],
+            self.components[selected[-1]],False,candidates[-1])
+        next_good=({a for a,b in finish_edges if a in self.components[selected[-1]]} if finish_lanes else
+                   {k for k in self.components[selected[-1]] if k[:2]==best['matches'][-1]['nearest_lane'][:2]})
         result['corridor_reachability']=[]
         for i in range(len(selected)-1,-1,-1):
             corridor=self.components[selected[i]]
             gate=result['legs'][i] if i<len(selected)-1 else None
             permitted=set(corridor)
-            if terminal_lanes and i==len(selected)-1:
-                permitted.update(terminal_lanes)
             if gate:permitted|=self.components[selected[i+1]]|set(gate['connection_lanes'])
             reverse=defaultdict(set)
             for a in permitted:
@@ -469,6 +446,22 @@ class Network:
             result['corridor_reachability'].append(dict(corridor=i+1,reachable=sorted(next_good),
                 not_reachable=sorted(corridor-next_good)))
         result['corridor_reachability'].reverse()
+        start_lanes,start_edges,start_seeds=self.endpoint_region(cps[0],best['matches'][0],
+            set(result['corridor_reachability'][0]['reachable']),True,candidates[0])
+        result['endpoint_connections']=dict(
+            start=dict(lanes=sorted(start_lanes),edges=start_edges,aliases=start_seeds),
+            finish=dict(lanes=sorted(finish_lanes),edges=finish_edges,aliases=finish_seeds))
+        add_endpoint_surface(self,result['endpoint_connections']['start'],
+            set(result['corridor_reachability'][0]['reachable']),True)
+        add_endpoint_surface(self,result['endpoint_connections']['finish'],self.components[selected[-1]],False)
+        if best['matches'][-1]['association']=='junction_terminal':
+            result['terminal_alias_lanes']=sorted(finish_seeds)
+            result['terminal_alias_matches']=[dict(candidates[-1][k],component=selected[-1])
+                                               for k in sorted(finish_seeds)]
+        start_surface=set(result['endpoint_connections']['start']['surface_lanes'])
+        finish_surface=set(result['endpoint_connections']['finish']['surface_lanes'])
+        result['legs'][0]['allowed']=sorted(set(result['legs'][0]['allowed'])|start_surface)
+        result['legs'][-1]['allowed']=sorted(set(result['legs'][-1]['allowed'])|finish_surface)
         for gate in result['legs']:
             if gate.get('connection_lanes'):self.gateway_surface(gate)
         # User-facing mission regions use start->entry / exit->next-entry /
@@ -485,52 +478,16 @@ class Network:
                 connector_indices=[g['index'] for g in related])
             region=set().union(*(self.components[c] for c in owners)) if owners else set()
             for g in related:region.update(g.get('surface_lanes',g['connection_lanes']))
-            # Owner-less XODR connector pieces can be internal to a corridor;
-            # this also carries an exact junction terminal into the final Cn.
-            region.update(k for k in keys if k not in self.owner)
-            if i==0:region.update(start_lanes)
-            if i==len(result['intervals'])-1:region.update(terminal_lanes)
+            region.update(keys)
+            if i==0:region.update(start_surface)
+            if i==len(result['intervals'])-1:region.update(finish_surface)
             group['lanes']=sorted(region)
             if is_gateway:
                 result['gateway_groups'].append(group)
                 for g in related:g['declared_gateway_index']=group['index']
             else:result['corridor_groups'].append(group)
         for g in result['legs']:g.setdefault('declared_gateway_index',None)
-        # Start/finish are longitudinal bounds across the road width, not lane
-        # targets. Do not paint an entire road behind spawn or beyond finish.
-        result['surface_clips']=[];excluded=set();limits={}
-        for at_start,match in ((True,best['matches'][0]),(False,best['matches'][-1])):
-            if at_start and match.get('association')=='junction_start':
-                for k in start_lanes:
-                    points=np.asarray(self.geometry[k]['points'])
-                    raw=start[k]
-                    field='road_s_min' if points[0,3]<=points[-1,3] else 'road_s_max'
-                    limits.setdefault(k,{})[field]=raw['road_s']
-                continue
-            if not at_start and match.get('association')=='junction_terminal':
-                for raw in (terminal[k] for k in sorted(terminal_lanes)):
-                    k=tuple(raw['nearest_lane']);points=np.asarray(self.geometry[k]['points'])
-                    field='road_s_max' if points[0,3]<=points[-1,3] else 'road_s_min'
-                    limits.setdefault(k,{})[field]=raw['road_s']
-                continue
-            c=match['component']
-            if selected.count(c)>1:continue  # another visit may need that area
-            graph=self.forward if at_start else self.reverse
-            pending=[k for k in self.components[c] if k[:2]==match['nearest_lane'][:2]]
-            seen=set()
-            while pending:
-                k=pending.pop()
-                if k in seen:continue
-                seen.add(k);pending.extend(b for b in graph[k] if b in self.components[c] and b not in seen)
-            sections={k[:2] for k in seen}
-            excluded.update(k for k in self.components[c] if k[:2] not in sections)
-            for k in self.components[c]:
-                if k[:2]!=match['nearest_lane'][:2]:continue
-                bounds=limits.setdefault(k,{})
-                field='road_s_min' if (at_start and k[2]<0) or (not at_start and k[2]>0) else 'road_s_max'
-                bounds[field]=match['road_s']
-        result['surface_excluded_lanes']=sorted(excluded)
-        result['surface_clips']=[dict(key=k,**bounds) for k,bounds in sorted(limits.items())]
+        apply_surface_bounds(self,result,selected,best['matches'])
         gaps=[];center_steps=[];checked=set()
         for a,b in zip(route,route[1:]):
             if (a,b) in self.lateral:continue
@@ -539,6 +496,7 @@ class Network:
             if gap>.1:center_steps.append(dict(from_lane=a,to_lane=b,gap_m=gap))
         # Check every selected gateway alternative as well as the witness route.
         pairs=list(zip(route,route[1:]))+[edge for gate in result['legs'] for edge in gate['connection_edges']]
+        pairs += result['endpoint_connections']['start']['surface_edges']+result['endpoint_connections']['finish']['surface_edges']
         pairs += [edge for gate in result['legs'] for extension in gate.get('surface_extensions',[])
                   for edge in extension['interface_edges']]
         for a,b in pairs:
@@ -558,9 +516,20 @@ class Network:
             if separation>.1:gaps.append(dict(from_lane=a,to_lane=b,surface_gap_m=separation))
         result['centerline_step_warnings']=center_steps
         result['geometry_gap_warnings']=gaps
-        result['initialized_ok']=all(g['status']!='UNRESOLVED' for g in result['legs'])
+        first=set(map(tuple,result['corridor_groups'][0]['lanes']))
+        last=set(map(tuple,result['corridor_groups'][-1]['lanes']))
+        endpoints_covered=(best['matches'][0]['nearest_lane'] in first and
+                           best['matches'][-1]['nearest_lane'] in last)
+        endpoint_paths=(not best['matches'][0]['association'].startswith('junction_') or
+                        best['matches'][0]['nearest_lane'] in start_seeds) and (
+                        not best['matches'][-1]['association'].startswith('junction_') or
+                        best['matches'][-1]['nearest_lane'] in finish_seeds)
+        result['initialized_ok']=all(g['status']!='UNRESOLVED' for g in result['legs']) and endpoints_covered and endpoint_paths
+        if not endpoints_covered or not endpoint_paths:
+            result['failure']=dict(reason='endpoint_missing_from_corridor_or_disconnected')
         result['validation']=dict(ordered_lane_graph_connected=True,gateway_interfaces_connected=result['initialized_ok'],
             checkpoint_rules_valid=not result['checkpoint_pairing_warning'],scenario_specific_rules=False,geometry_gap_count=len(gaps),
             surface_interfaces_connected=not gaps,centerline_step_count=len(center_steps),
+            endpoint_surfaces_covered=endpoints_covered,endpoint_paths_connected=endpoint_paths,
             runtime_applied=False,vehicle_feasibility_validated=False)
         return result

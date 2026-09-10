@@ -231,4 +231,123 @@ class WholeMissionTests(unittest.TestCase):
         self.assertEqual(len(layer.findall(ns+'polyline')),3)
 
 
+    def test_junction_start_keeps_all_compatible_aliases_and_real_route(self):
+        for shift,angle in [(0,0),(137,1.2),(-81,-2.4)]:
+            geo=dict([lane(11,0,10,junction=7),lane(12,0,10,.04,junction=7),
+                      lane(13,0,10,-.04,junction=7),lane(2,10,40)])
+            edges=[((r,0,-1),(2,0,-1)) for r in (11,12,13)]
+            rotation=np.array([[np.cos(angle),-np.sin(angle)],[np.sin(angle),np.cos(angle)]])
+            def transform(xy):return np.asarray(xy)@rotation.T+[shift,shift/2]
+            for g in geo.values():
+                p=g['points']
+                for col in (0,5,7):p[:,col:col+2]=transform(p[:,col:col+2])
+                p[:,2]+=angle
+            data=Network(geo,edges).build(mission(transform([(5,0),(35,0)]),'unseen'))
+            self.assertTrue(data['initialized_ok'],data.get('failure'))
+            self.assertEqual(data['checkpoint_matches'][0]['association'],'junction_start')
+            expected={(r,0,-1) for r in (11,12,13)}
+            self.assertTrue(expected<=set(data['corridor_groups'][0]['lanes']))
+            self.assertTrue(expected<=set(data['legs'][0]['allowed']))
+            self.assertIn(data['witness_route'][0],expected)
+            self.assertTrue(data['validation']['endpoint_paths_connected'])
+            self.assertTrue(set(data['endpoint_connections']['start']['edges'])<=set(edges))
+
+
+    def test_start_alias_for_another_exit_is_not_admitted(self):
+        geo=dict([lane(11,0,10,junction=7),lane(12,0,10,.03,junction=7),
+                  lane(2,10,40),lane(3,10,40,20)])
+        edges=[((11,0,-1),(2,0,-1)),((12,0,-1),(3,0,-1))]
+        data=Network(geo,edges).build(mission([(5,0),(35,0)]))
+        self.assertTrue(data['initialized_ok'])
+        self.assertNotIn((12,0,-1),data['corridor_groups'][0]['lanes'])
+        self.assertNotIn((3,0,-1),data['legs'][0]['allowed'])
+
+
+    def test_disconnected_connector_cannot_skip_to_nearby_road(self):
+        geo=dict([lane(11,0,10,junction=7),lane(2,10,40)])
+        data=Network(geo,[]).build(mission([(5,0),(35,0)]))
+        self.assertFalse(data['initialized_ok'])
+
+
+    def test_connector_chain_at_start_is_included(self):
+        geo=dict([lane(11,0,10,junction=7),lane(12,10,20,junction=7),lane(2,20,40)])
+        edges=[((11,0,-1),(12,0,-1)),((12,0,-1),(2,0,-1))]
+        data=Network(geo,edges).build(mission([(5,0),(35,0)]))
+        self.assertTrue(data['initialized_ok'])
+        self.assertEqual(data['witness_route'],[(11,0,-1),(12,0,-1),(2,0,-1)])
+        self.assertTrue({(11,0,-1),(12,0,-1)}<=set(data['corridor_groups'][0]['lanes']))
+
+
+    def test_junction_finish_and_aliases_belong_to_last_corridor(self):
+        geo=dict([lane(1,0,20),lane(11,20,40,junction=7),lane(12,20,40,.02,junction=7)])
+        edges=[((1,0,-1),(11,0,-1)),((1,0,-1),(12,0,-1))]
+        data=Network(geo,edges).build(mission([(5,0),(35,0)]))
+        self.assertTrue(data['initialized_ok'],data.get('failure'))
+        self.assertEqual(data['checkpoint_matches'][-1]['association'],'junction_terminal')
+        self.assertTrue({(11,0,-1),(12,0,-1)}<=set(data['corridor_groups'][-1]['lanes']))
+        self.assertIn(data['witness_route'][-1],[(11,0,-1),(12,0,-1)])
+
+
+    def test_endpoint_in_grass_is_rejected_not_snapped_onto_road(self):
+        geo=dict([lane(1,0,40)])
+        for coords in [[(5,5),(35,0)],[(5,0),(35,5)]]:
+            data=Network(geo,[]).build(mission(coords))
+            self.assertFalse(data['initialized_ok'])
+            self.assertEqual(data['failure']['reason'],'endpoint_outside_driving_surface_or_heading_mismatch')
+
+
+    def test_explicit_ego_heading_excludes_opposite_connector(self):
+        geo=dict([lane(11,0,10,junction=7),lane(12,10,0,junction=7),lane(2,10,40)])
+        edges=[((11,0,-1),(2,0,-1)),((12,0,-1),(2,0,-1))]
+        request=mission([(5,0),(35,0)])
+        request['checkpoints'][0]['heading']=0.
+        data=Network(geo,edges).build(request)
+        self.assertTrue(data['initialized_ok'])
+        self.assertNotIn((12,0,-1),data['corridor_groups'][0]['lanes'])
+        request['checkpoints'][0]['heading']=float('nan')
+        with self.assertRaises(ValueError):Network(geo,edges).build(request)
+
+
+    def test_same_lane_reverse_checkpoint_is_not_a_valid_forward_route(self):
+        data=Network(dict([lane(1,0,40)]),[]).build(mission([(35,0),(5,0)]))
+        self.assertFalse(data['initialized_ok'])
+        self.assertEqual(data['failure']['reason'],'checkpoint_requires_reverse_travel')
+
+
+    def test_measured_heading_is_not_overruled_by_shorter_wrong_branch(self):
+        geo=dict([lane(1,0,10),lane(11,10,100,junction=7),lane(12,10,20,junction=7)])
+        geo[(12,0,-1)]['points'][:,2]=.4
+        data=mission([(5,0),(15,0)])
+        data['checkpoints'][-1]['heading']=0.
+        result=Network(geo,[((1,0,-1),(11,0,-1)),((1,0,-1),(12,0,-1))]).build(data)
+        self.assertTrue(result['initialized_ok'])
+        self.assertEqual(result['checkpoint_matches'][-1]['nearest_lane'],(11,0,-1))
+
+
+
+    def test_precise_terminal_heading_resolves_distinct_turns(self):
+        source=lane(1,0,10);straight=lane(100,10,20,junction=1)
+        turn=lane(101,10,20,junction=1,y1=1.)
+        outgoing=lane(2,20,30)
+        network=Network(dict([source,straight,turn,outgoing]),
+            [(source[0],straight[0]),(source[0],turn[0]),(straight[0],outgoing[0]),(turn[0],outgoing[0])])
+        request=mission([(1,0),(14,0)])
+        ambiguous=network.build(request)
+        self.assertFalse(ambiguous['initialized_ok'])
+        request['checkpoints'][-1]['heading']=0.
+        result=network.build(request)
+        self.assertTrue(result['initialized_ok'])
+        self.assertEqual(result['terminal_alias_lanes'],[straight[0]])
+        self.assertEqual(result['checkpoint_matches'][-1]['association'],'junction_terminal')
+
+    def test_equal_heading_distinct_terminal_surfaces_remain_ambiguous(self):
+        source=lane(1,0,10);a=lane(100,10,20,junction=1)
+        b=lane(101,10,20,y=.4,junction=1);outgoing=lane(2,20,30)
+        network=Network(dict([source,a,b,outgoing]),[(source[0],a[0]),(source[0],b[0]),(a[0],outgoing[0]),(b[0],outgoing[0])])
+        request=mission([(1,0),(15,0)]);request['checkpoints'][-1]['heading']=0.
+        result=network.build(request)
+        self.assertFalse(result['initialized_ok'])
+        self.assertIn('distinct junction lanes',result['failure']['reason'])
+
+
 if __name__=='__main__':unittest.main()

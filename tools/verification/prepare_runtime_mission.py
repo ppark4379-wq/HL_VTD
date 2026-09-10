@@ -103,6 +103,9 @@ def runtime_legs(network, result):
             'gateway_interfaces_connected', 'surface_interfaces_connected')):
         raise ValueError(f'Invalid mission network: {result.get("failure", validation)}')
     matches = result['checkpoint_matches']
+    groups = result['corridor_groups']
+    if not groups or tuple(matches[0]['nearest_lane']) not in set(map(tuple, groups[0]['lanes'])):
+        raise ValueError('Matched start lane is missing from runtime first corridor')
     legs = []
     for corridor in result['corridor_groups']:
         start = corridor['from_seq'] - 1
@@ -132,6 +135,8 @@ def runtime_legs(network, result):
             else:
                 targets = {k for k in network.components[tuple(match['component'])]
                            if k[:2] == tuple(match['nearest_lane'])[:2]}
+        if not targets:
+            raise ValueError('Runtime mission has no target lanes for checkpoint '+str(exit_+1))
         allowed.update(targets)
         # Preserve a complete road-width handoff, including when an exit CP
         # is fitted well downstream of the physical gateway interface.
@@ -157,6 +162,8 @@ def runtime_legs(network, result):
                          to_checkpoint=exit_, final=final, allowed=sorted(allowed),
                          gateway_lanes=sorted(gate_lanes), targets=goal_records,
                          witness_route=witness))
+    if not legs or tuple(matches[0]['nearest_lane']) not in set(map(tuple, legs[0]['allowed'])):
+        raise ValueError('Matched start lane is missing from runtime first corridor')
     return legs
 
 
@@ -178,7 +185,8 @@ def main():
         if source_sha != manifest['source_sha256']:
             raise ValueError('Precomputed lane points belong to a different XODR; regenerate them before driving')
     with args.checkpoints.open(encoding='utf-8-sig', newline='') as f:
-        checkpoints = [dict(seq=int(r['seq']), x=float(r['x']), y=float(r['y']))
+        checkpoints = [dict(seq=int(r['seq']), x=float(r['x']), y=float(r['y']),
+                            **({'heading': float(r['heading'])} if r.get('heading', '').strip() else {}))
                        for r in csv.DictReader(f)]
     geometry = {tuple(g['key']): dict(g, points=np.asarray(g['points']))
                 for g in json.loads((args.geometry / 'lane_geometry.json').read_text())}

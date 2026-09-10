@@ -61,5 +61,36 @@ class RuntimeMissionTests(unittest.TestCase):
             runtime_legs(network, result)
 
 
+    def test_missing_start_lane_rejected_even_with_stale_validation_flags(self):
+        geometry, edges = fixtures.WholeMissionTests().parallel()
+        network = Network(geometry, edges)
+        result = network.build(fixtures.mission([(1, 0), (9, 0), (21, 0), (29, 0)]))
+        key = result['checkpoint_matches'][0]['nearest_lane']
+        result['corridor_groups'][0]['lanes'].remove(key)
+        with self.assertRaisesRegex(ValueError, 'start lane'):
+            runtime_legs(network, result)
+
+    def test_unknown_terminal_encoding_cannot_emit_empty_targets(self):
+        source=fixtures.lane(1,0,10)
+        connector=fixtures.lane(100,10,20,junction=1)
+        exit_=fixtures.lane(2,20,30)
+        network=Network(dict([source,connector,exit_]),[(source[0],connector[0]),(connector[0],exit_[0])])
+        result=network.build(fixtures.mission([(1,0),(15,0)]))
+        result['checkpoint_matches'][-1]['association']='unknown_terminal_encoding'
+        with self.assertRaisesRegex(ValueError, 'no target lanes'):
+            runtime_legs(network,result)
+
+    def test_coincident_terminal_aliases_are_all_runtime_targets(self):
+        source=fixtures.lane(1,0,10)
+        a=fixtures.lane(100,10,20,junction=1)
+        b=fixtures.lane(101,10,20,junction=1)
+        outgoing=fixtures.lane(2,20,30)
+        network=Network(dict([source,a,b,outgoing]),[(source[0],a[0]),(source[0],b[0]),(a[0],outgoing[0]),(b[0],outgoing[0])])
+        result=network.build(fixtures.mission([(1,0),(15,0)]))
+        targets=runtime_legs(network,result)[-1]['targets']
+        self.assertEqual({tuple(t['lane']) for t in targets},{a[0],b[0]})
+        self.assertTrue(all(abs(t['road_s']-5.)<1e-9 for t in targets))
+
+
 if __name__ == '__main__':
     unittest.main()
