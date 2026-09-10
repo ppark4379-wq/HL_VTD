@@ -36,5 +36,9 @@ session:
   # Provisional teleport observation threshold, NOT an official respawn rule.
   # VTD performs the relocation; the dashboard never sends respawn commands.
   respawn_jump_m: 5
+  # Coordinate jumps are retained as review candidates only. Set true solely
+  # after the selected VTD setup supplies and validates an authoritative
+  # respawn event source; otherwise item 6 remains unavailable.
+  respawn_detection_confirmed: false
 # School ranges load from school_zones_file. Signal mapping is still pending.
 metadata: {}

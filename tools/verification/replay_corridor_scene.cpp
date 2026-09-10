@@ -34,6 +34,7 @@ struct Options {
     double timeout{5.};
     double snapshotTime{-1.};
     bool localFallback{};
+    bool trackingRecovery{};
 };
 
 Options parse(int argc, char** argv) {
@@ -51,6 +52,7 @@ Options parse(int argc, char** argv) {
         else if (flag=="--timeoutseconds") result.timeout=std::stod(value);
         else if (flag=="--time") result.snapshotTime=std::stod(value);
         else if (flag=="--local-fallback") result.localFallback=value=="1";
+        else if (flag=="--tracking-recovery") result.trackingRecovery=value=="1";
         else throw std::runtime_error("Unknown argument: "+flag);
     }
     if (result.snapshot.empty() || result.mission.empty() || result.output.empty() ||
@@ -200,15 +202,20 @@ int main(int argc, char** argv) {
             buildCorridorTrackingPath(tracking,config.planner,world,map,mission,80.,&trace);
             ++polls;
             maxPollMs=std::max(maxPollMs,std::chrono::duration<double,std::milli>(Clock::now()-pollStart).count());
-            success=runtime.committedGlobalPathReachesGateway && !runtime.globalRouteReplanRequested;
-            if(success || runtime.globalRouteSearchFailed) break;
+            success=options.trackingRecovery ? runtime.trackingPathApproved :
+                runtime.committedGlobalPathReachesGateway && !runtime.globalRouteReplanRequested;
+            if(success || (!options.trackingRecovery && runtime.globalRouteSearchFailed)) break;
             if(std::chrono::duration<double>(Clock::now()-started).count()>=options.timeout) {
                 timedOut=true; break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         LaneChangeData local;
-        if(options.localFallback && !timedOut) {
+        if(options.localFallback) {
+            // A detached successful global route can keep being rejected at
+            // adoption until this diagnostic's global timeout. Local recovery
+            // must still be exercised: that is precisely its live use case.
+            timedOut=false;
             // The global planner above is unmodified. Exercise its local
             // fallback against the same fixed observation, without sending
             // commands or moving the vehicle synthetically.
@@ -252,7 +259,7 @@ int main(int argc, char** argv) {
             timedOut=!success && runtime.localFallbackPending;
         }
         const double wallMs=std::chrono::duration<double,std::milli>(Clock::now()-started).count();
-        const auto& path=options.localFallback?local.path:runtime.committedGlobalPath;
+        const auto& path=options.localFallback?local.path:options.trackingRecovery?tracking.waypoints:runtime.committedGlobalPath;
         if(!path.empty() && !savePath(path,(directory/(options.localFallback?
                 "local_path.csv":"global_path.csv")).string()))
             throw std::runtime_error("Cannot write diagnostic path CSV");

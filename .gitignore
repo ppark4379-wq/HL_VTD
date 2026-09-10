@@ -107,3 +107,6 @@ __pycache__/
 # Local competition guide and Windows download metadata
 /2026_HL_FMA_대회_안내문.md
 /2026_HL_FMA_대회_안내문.md:Zone.Identifier
+
+# Local video recordings (keep on disk, do not publish large binary files)
+/output/video_evidence/**/*.mjpeg

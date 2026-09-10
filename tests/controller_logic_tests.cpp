@@ -2200,6 +2200,52 @@ void testPreparedLaneChangeCancelsWhenBlockerMoves() {
     }
 }
 
+void testPreparedAvoidanceRequiresClearedContinuousSuccessor() {
+    const auto successor = makeStraightGlobalPath().waypoints;
+    LaneChangeData prepared;
+    prepared.phase = LaneChangePhase::Prepare;
+    prepared.obstacleId = 17;
+    WorldState world;
+    world.ego.x = 5.0F;
+    world.ego.y = -1.75F;
+    world.egoLaneWidth = 3.5;
+    WorldObjectState object;
+    object.raw.id = 17;
+    object.raw.x = 20.0F;
+    object.raw.y = -1.75F;
+    object.raw.length = 4.5F;
+    object.raw.width = 1.8F;
+    object.raw.speed = 2.0F;
+    world.objects.push_back(object);
+    // A moving actor which still occupies our original lane is not cleared.
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    // The SAME received ID moves away. Its old detour no longer has a cause.
+    world.objects.front().raw.y = -7.25F;
+    assert(canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    // A new danger or a detached successor must never cause route deletion.
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, false));
+    world.ego.y = -2.25F;
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    world.ego.y = -1.75F;
+    world.ego.heading = 0.3F;
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    world.ego.heading = 0.0F;
+    prepared.phase = LaneChangePhase::Execute;
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    prepared.phase = LaneChangePhase::Prepare;
+    prepared.roadConnectionManeuver = true;
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    prepared.roadConnectionManeuver = false;
+    prepared.localCorridorAvoidance = true;
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    prepared.localCorridorAvoidance = false;
+    world.objects.clear();
+    assert(canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    advanceLaneChangePhase(prepared, LaneChangeConfig{}, world, 0.05,
+        false, !canCancelClearedPreparedAvoidance(prepared, world, successor, true), true);
+    assert(prepared.phase == LaneChangePhase::None);
+}
+
 void testStationaryAdjacentVehicleUsesShortRangeCaution() {
     PlanningBehaviorConfig config;
     config.stationaryAdjacentVehicleCautionSpeed = 20.0 / 3.6;
@@ -2897,6 +2943,12 @@ int main(int argc, char** argv) {
         std::cout << "preserved-safety subset: PASS (12 tests; not the full suite)\n";
         return 0;
     }
+    if (argc == 2 && std::string(argv[1]) == "--prepared-avoidance") {
+        testPreparedLaneChangeCancelsWhenBlockerMoves();
+        testPreparedAvoidanceRequiresClearedContinuousSuccessor();
+        std::cout << "prepared avoidance live-blocker/continuous-successor: PASS\n";
+        return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--traffic-stop-regression") {
         testLaneChangeExecutionBlockedByTrafficStops();
         return 0;
@@ -2944,6 +2996,7 @@ int main(int argc, char** argv) {
     testNearbyAdjacentVehicleCapsSpeedBeforeCutIn();
     testLeadBrakingUsesRelativeStoppingDistance();
     testPreparedLaneChangeCancelsWhenBlockerMoves();
+    testPreparedAvoidanceRequiresClearedContinuousSuccessor();
     testStationaryAdjacentVehicleUsesShortRangeCaution();
     testCrossTrafficWaitingVehicleCapsBeforeLaunch();
     testMeasuredReverseObjectMotionDrivesPrediction();

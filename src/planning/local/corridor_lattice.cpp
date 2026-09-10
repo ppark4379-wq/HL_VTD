@@ -1,4 +1,6 @@
 #include "planning/local/corridor_lattice.hpp"
+#include "planning/local/recovery_selection.hpp"
+#include "planning/local/corridor_surface_query.hpp"
 #include "planning/global/reference_path_generator.hpp"
 #include "planning/collision/collision_checker.hpp"
 #include "logger/decision_trace.hpp"
@@ -45,11 +47,12 @@ struct CorridorLocalRouteWorker {
         std::size_t leg{};
         std::uint64_t epoch{}, signature{};
         double clearance{}, elapsedMs{}, receiveTime{};
-        int blocker{-1};
+        int blocker{-1}, searchTier{};
         bool success{}, timedOut{}, exception{};
         std::size_t expanded{};
         std::vector<Waypoint> path;
         std::vector<std::string> diagnostics;
+        std::shared_ptr<CorridorReentryScope> reentryScope;
     };
     std::shared_ptr<CorridorRuntime> runtime;
     std::shared_ptr<const PathGeneratorData> map;
@@ -78,7 +81,7 @@ bool visible(const PrecomputedLaneNetwork& n,std::int64_t id) {
     return p.replacedByTransition<0 && lane!=n.lanes.end() && lane->second.topologyStatus!="excluded_by_review";
 }
 std::int64_t containing(const CorridorRuntime& r,double x,double y,double yaw,
-                        bool corridorOnly=true);
+                        bool corridorOnly=true,const std::vector<bool>* surfaceOverride=nullptr);
 void addEdge(CorridorRuntime& r,std::int64_t from,CorridorEdge e) {
     if(!visible(r.network,from) || !visible(r.network,e.to)) return;
     r.forward[from].push_back(e);
@@ -110,6 +113,8 @@ void activate(CorridorRuntime& r,const MissionCorridorData& mission) {
     r.recoveryTrackingPathProgress=0;
     r.recoveryTrackingPathClearance=-1.;
     r.recoveryTrackingPathReachesReference=false;
+    r.recoveryTrackingPathRelocalized=false;r.trackingPathRelocalized=false;
+    r.localFallbackRelocalizationRequested=false;
     r.referenceRecoveryFailureLane={};
     r.referenceRecoveryFailureValid=false;
     r.referenceRecoveryFailureRoadS=0.;
@@ -565,14 +570,14 @@ bool curve(std::vector<Waypoint>& out,const Waypoint& start,double startK,
     return out.size()>2;
 }
 std::int64_t containing(const CorridorRuntime& r,double x,double y,double yaw,
-                        bool corridorOnly) {
+                        bool corridorOnly,const std::vector<bool>* surfaceOverride) {
     const int gx=static_cast<int>(std::floor(x/10.)),gy=static_cast<int>(std::floor(y/10.));
     std::int64_t result=-1;double best=inf;
     const double c=std::cos(yaw),s=std::sin(yaw);
     for(int dx=-1;dx<=1;++dx) for(int dy=-1;dy<=1;++dy) {
         const auto cell=r.spatial.find({gx+dx,gy+dy});if(cell==r.spatial.end()) continue;
         for(auto id:cell->second) {
-            if((corridorOnly && !r.surfaceAllowed[id]) ||
+            if((corridorOnly && !(surfaceOverride ? (*surfaceOverride)[id] : r.surfaceAllowed[id])) ||
                (!corridorOnly && !visible(r.network,id))) continue;
             const auto& p=r.network.points[id];
             const double dx=x-p.pose.x,dy=y-p.pose.y,radius=p.width/2.+.6;
@@ -600,12 +605,15 @@ bool boundaryAllowed(const PathGeneratorData& map,const Waypoint& a,const Waypoi
 }
 bool surfaceAndMarks(const CorridorRuntime& r,const PathGeneratorData& map,
                      std::vector<Waypoint>& path,const WorldState& world,std::string& reason,
-                     bool corridorOnly=true,Waypoint* rejectedPoint=nullptr) {
+                     bool corridorOnly=true,Waypoint* rejectedPoint=nullptr,
+                     const std::vector<bool>* surfaceOverride=nullptr) {
     const auto ego=egoFootprint(world);
     const int bodySteps=std::max(1,int(std::ceil(ego.length/.5)));
     std::int64_t previous=-1;
+    corridor_detail::SurfaceQuery surfaceQuery(r,corridorOnly,surfaceOverride);
     for(auto& p:path) {
-        const auto id=containing(r,p.x,p.y,p.yaw,corridorOnly);
+        const double c=std::cos(p.yaw),s=std::sin(p.yaw);
+        const auto id=surfaceQuery.containing(p.x,p.y,c,s);
         if(id<0) {
             if(rejectedPoint) *rejectedPoint=p;
             reason=corridorOnly?"center_outside_corridor":"center_outside_driving_surface";return false;
@@ -616,11 +624,9 @@ bool surfaceAndMarks(const CorridorRuntime& r,const PathGeneratorData& map,
         }
         previous=id;
         p.roadId=center.roadId;p.sectionIndex=center.sectionIndex;p.laneId=center.laneId;p.roadS=center.roadS;
-        const double c=std::cos(p.yaw),s=std::sin(p.yaw);
         for(int i=0;i<=bodySteps;++i) for(double side:{-ego.width/2.,0.,ego.width/2.}) {
             const double along=-ego.rearExtent()+ego.length*double(i)/bodySteps;
-            const auto corner=containing(r,p.x+along*c-side*s,p.y+along*s+side*c,p.yaw,
-                                         corridorOnly);
+            const auto corner=surfaceQuery.containing(p.x+along*c-side*s,p.y+along*s+side*c,c,s);
             if(corner<0) {
                 if(rejectedPoint) {
                     *rejectedPoint=p;rejectedPoint->x=p.x+along*c-side*s;
@@ -1825,11 +1831,16 @@ bool ensureObstacleAwareGlobalRoute(
 // on a raw sample whose forward link was replaced by a merge/split curve.
 bool recoverTrackingPath(std::vector<Waypoint>& output,const CorridorRuntime& r,
                          const PathGeneratorData& map,const WorldState& world,
-                         double horizon,DecisionTraceData* trace) {
+                         double horizon,DecisionTraceData* trace,
+                         const CorridorReentryScope* scope=nullptr,
+                         const MissionCorridorData* mission=nullptr) {
     using Choice=std::pair<double,std::int64_t>;
     const int gx=int(std::floor(world.ego.x/10.));
     const int gy=int(std::floor(world.ego.y/10.));
     const double c=std::cos(world.ego.heading),s=std::sin(world.ego.heading);
+    const std::vector<double> recoveryLengths=scope
+        ?std::vector<double>{6.,8.,10.,12.,14.,16.,20.,24.,28.,32.,35.}
+        :std::vector<double>{12.,21.,30.};
     auto attempt=[&](bool physicalNetwork,std::size_t& tested) {
         std::map<std::pair<LaneKey,int>,Choice> choices;
         for(int dx=-4;dx<=4;++dx) for(int dy=-4;dy<=4;++dy) {
@@ -1837,13 +1848,14 @@ bool recoverTrackingPath(std::vector<Waypoint>& output,const CorridorRuntime& r,
             if(cell==r.spatial.end()) continue;
             for(const auto id:cell->second) {
                 if(physicalNetwork?!visible(r.network,id):!r.trackingAllowed[id]) continue;
+                if(scope && (!r.allowed[id] || !std::isfinite(r.gatewayCost[id]))) continue;
                 const auto& p=r.network.points[id];
                 const double px=p.pose.x-world.ego.x,py=p.pose.y-world.ego.y;
                 const double ahead=px*c+py*s;
                 if(ahead<6. || ahead>35. || std::abs(-px*s+py*c)>10. ||
                    p.width<egoFootprint(world).width || std::abs(normalizeAngle(p.pose.yaw-world.ego.heading))>1.) continue;
-                for(int bucket=0;bucket<3;++bucket) {
-                    const double score=std::abs(ahead-(12.+9.*bucket));
+                for(int bucket=0;bucket<int(recoveryLengths.size());++bucket) {
+                    const double score=std::abs(ahead-recoveryLengths[bucket]);
                     const auto key=std::make_pair(keyOf(p.pose),bucket);
                     const auto old=choices.find(key);
                     if(old==choices.end() || score<old->second.first) choices[key]={score,id};
@@ -1859,8 +1871,15 @@ bool recoverTrackingPath(std::vector<Waypoint>& output,const CorridorRuntime& r,
             start.roadId=world.egoRoadId;start.sectionIndex=world.egoSectionIndex;
             start.laneId=world.egoLaneId;start.roadS=world.egoRoadS;
             std::vector<Waypoint> candidate;double maxK{};std::string reason;
-            if(!curve(candidate,start,r.curvature,target,&maxK) ||
-               !surfaceAndMarks(r,map,candidate,world,reason,!physicalNetwork)) continue;
+            if(!curve(candidate,start,r.curvature,target,&maxK)) continue;
+            Waypoint rejected;
+            if(!surfaceAndMarks(r,map,candidate,world,reason,!physicalNetwork,&rejected,
+                                scope?&scope->surface:nullptr)) {
+                if(scope)traceDecision(trace,"corridor_relocalization","bridge_rejected",
+                    "target="+std::to_string(target.pose.roadId)+":"+std::to_string(target.pose.laneId)+
+                    " reason="+reason+" point="+std::to_string(rejected.x)+":"+std::to_string(rejected.y));
+                continue;
+            }
             const double completion=candidate.back().s;
             auto tail=forwardPath(r,id,horizon,completion,physicalNetwork);
             if(!smoothSourceJoins(tail,r,map,world,nullptr,!physicalNetwork)) continue;
@@ -1871,6 +1890,9 @@ bool recoverTrackingPath(std::vector<Waypoint>& output,const CorridorRuntime& r,
                                20.*maxK+(std::isfinite(r.gatewayCost[id])?0.:20.);
             if(score>=best) continue;
             for(const auto& p:tail) append(candidate,p);
+            if(scope && (!mission || !corridorReentryPreservesMission(candidate,r,*mission,world,*scope))) continue;
+            if(scope && !corridorTrackingPathIsSafe(candidate,world,r.laneConfig.latticeObstacleClearance,
+                                                   nullptr,nullptr,&map)) continue;
             output=std::move(candidate);best=score;
         }
         return std::isfinite(best);
@@ -2254,6 +2276,7 @@ bool remainingAttachedPath(std::vector<Waypoint>& suffix,
     suffix.assign(path.begin()+nearest,path.end());
     return true;
 }
+
 }
 
 bool corridorTrackingPathIsSafe(const std::vector<Waypoint>& path,const WorldState& world,
@@ -2320,7 +2343,13 @@ bool localTrajectorySafe(const std::vector<Waypoint>& path,const WorldState& wor
     moving.objects.erase(std::remove_if(moving.objects.begin(),moving.objects.end(),
         [](const auto& o){return isStationaryRouteObstacle(o);}),moving.objects.end());
     if(!moving.objects.empty()) {
-        moving.egoSpeed=std::max({.5,std::abs(world.egoSpeed),config.localFallbackSpeed});
+        // Worker checks the possible open-passage speed, not the former
+        // universal 5 km/h cap. The command thread also rechecks current
+        // observations at the curvature/clearance-selected manoeuvre speed.
+        const double speed=margin+1e-6>=config.latticeObstacleClearance
+            ?std::min(config.localFallbackOpenSpeed,config.maximumLaneChangeSpeed)
+            :std::min(config.localFallbackSpeed,config.localFallbackOpenSpeed);
+        moving.egoSpeed=std::max({.5,std::abs(world.egoSpeed),speed});
         LocalPathData local;local.valid=true;local.points=path;
         checkPredictedCollisions(safety,moving,local,behavior.collisionPredictionHorizon,
                                 behavior.collisionPredictionStep,true,&map);
@@ -2331,28 +2360,173 @@ bool localTrajectorySafe(const std::vector<Waypoint>& path,const WorldState& wor
 // This search owns a separate startup snapshot and never modifies a global
 // goal, route, margin, revision or failure flag. Only its bounded local mask
 // and local centre/offset states are searched.
+std::shared_ptr<CorridorReentryScope> makeReentryScope(
+    const CorridorRuntime& r,const PathGeneratorData& map,const WorldState& world,
+    bool outsideCorridor,bool relocalizing=false) {
+    auto scope=std::make_shared<CorridorReentryScope>();
+    scope->outsideCorridor=outsideCorridor;
+    scope->allowed=r.globalSearchAllowed;
+    scope->surface=r.surfaceAllowed;
+    scope->preview.resize(r.allowed.size(),false);
+    for(std::size_t id=0;id<r.allowed.size();++id) {
+        scope->allowed[id]=scope->allowed[id] || r.allowed[id];
+        scope->preview[id]=scope->allowed[id] && !r.allowed[id];
+    }
+    if(!outsideCorridor) return scope;
+    // This is a local surface/bridge permission, not a change to the route
+    // graph, gateway costs or mission targets. Only same-direction pavement
+    // within roughly one lane of an official lane can enter the local graph.
+    for(const auto& point:r.network.points) {
+        if(scope->allowed[point.id] || !visible(r.network,point.id) ||
+           std::hypot(point.pose.x-world.ego.x,point.pose.y-world.ego.y)>120.) continue;
+        // A displaced car can already be on a connector which diverges more
+        // than one lane from the corridor. Admit only a short origin-lane
+        // apron; the endpoint/whole return certificate still requires the
+        // official gateway. Never add that lane to global mission authority.
+        if(relocalizing && keyOf(point.pose)==LaneKey{world.egoRoadId,world.egoSectionIndex,world.egoLaneId}) {
+            const double dx=point.pose.x-world.ego.x,dy=point.pose.y-world.ego.y;
+            const double ahead=dx*std::cos(world.ego.heading)+dy*std::sin(world.ego.heading);
+            if(ahead>=-egoFootprint(world).length && ahead<=40. && std::hypot(dx,dy)<=45. &&
+               std::abs(normalizeAngle(point.pose.yaw-world.ego.heading))<.8) {
+                scope->allowed[point.id]=scope->surface[point.id]=true;
+                continue;
+            }
+        }
+        const int gx=int(std::floor(point.pose.x/10.)),gy=int(std::floor(point.pose.y/10.));
+        bool permitted=false;
+        for(int dx=-1;dx<=1 && !permitted;++dx) for(int dy=-1;dy<=1 && !permitted;++dy) {
+            const auto cell=r.spatial.find({gx+dx,gy+dy});if(cell==r.spatial.end()) continue;
+            for(const auto id:cell->second) {
+                if(!r.allowed[id] && !scope->preview[id]) continue;
+                const auto& official=r.network.points[id];
+                if(gap(point.pose,official.pose)>4.0 ||
+                   std::abs(normalizeAngle(point.pose.yaw-official.pose.yaw))>.35) continue;
+                double a{},b{};
+                if(sampleRoadElevation(a,map,point.pose.roadId,point.pose.roadS) &&
+                   sampleRoadElevation(b,map,official.pose.roadId,official.pose.roadS) &&
+                   std::abs(a-b)>1.) continue;
+                if(!boundaryAllowed(map,point.pose,official.pose)) continue;
+                permitted=true;break;
+            }
+        }
+        if(permitted) scope->allowed[point.id]=scope->surface[point.id]=true;
+    }
+    return scope;
+}
+
+} // namespace
+
+bool corridorReentryPreservesMission(const std::vector<Waypoint>& path,const CorridorRuntime& r,
+    const MissionCorridorData& mission,const WorldState& world,
+    const CorridorReentryScope& scope) {
+    if(path.size()<2 || scope.preview.size()!=r.allowed.size()) return false;
+    const auto* leg=activeMissionLeg(mission);if(!leg) return false;
+    // Geometric recovery may temporarily leave the corridor, but must end on
+    // an official centreline with a gateway-reaching directed suffix.
+    const auto end=containing(r,path.back().x,path.back().y,path.back().yaw);
+    if(end<0 || (!std::isfinite(r.gatewayCost[end]) && !scope.preview[end]) ||
+       gap(path.back(),r.network.points[end].pose)>.75) return false;
+    double outside=0.;bool visitedGateway=leg->gatewayLanes.empty();
+    bool visitedTarget=false, crossedTarget=false;
+    corridor_detail::SurfaceQuery surfaceQuery(r);
+    for(std::size_t i=0;i<path.size();++i) {
+        const auto& p=path[i];
+        if(leg->gatewayLanes.count(keyOf(p))) visitedGateway=true;
+        if(missionPointIsTarget(*leg,p)) visitedTarget=true;
+        const auto station=leg->targetRoadS.find(keyOf(p));
+        if(station!=leg->targetRoadS.end() && std::abs(p.roadS-station->second)<=.75)
+            crossedTarget=true;
+        if(i && surfaceQuery.containing(p.x,p.y,std::cos(p.yaw),std::sin(p.yaw))<0)
+            outside+=gap(path[i-1],p);
+    }
+    if(outside>40.) return false;
+    Waypoint start=path.front();start.roadId=world.egoRoadId;
+    start.sectionIndex=world.egoSectionIndex;start.laneId=world.egoLaneId;start.roadS=world.egoRoadS;
+    const bool startedPastTarget=missionPointIsTarget(*leg,start);
+    if(!startedPastTarget && (scope.preview[end] || missionPointIsTarget(*leg,path.back())) &&
+       !leg->targetRoadS.empty() && !crossedTarget) return false;
+    if(scope.preview[end] && !startedPastTarget && (!visitedTarget || !visitedGateway)) return false;
+    if(leg->targetLanes.count(keyOf(path.back())) &&
+       !leg->targetLanes.count(keyOf(start)) && !visitedGateway) return false;
+    return true;
+}
+
+namespace {
+
 bool searchLocalCorridor(std::vector<Waypoint>& output,CorridorRuntime& r,
     const PathGeneratorData& map,const WorldState& world,const MissionCorridorData& mission,
     const LaneChangeConfig& config,const PlanningBehaviorConfig& behavior,
     double clearance,double minimumDistance,LocalClock::time_point deadline,
-    std::size_t& expanded,bool& timedOut,DecisionTraceData* trace) {
+    std::size_t& expanded,bool& timedOut,DecisionTraceData* trace,
+    const CorridorReentryScope* scope=nullptr) {
     output.clear();
-    const auto start=nearest(r,world);
-    if(start<0 || !r.allowed[start]) return false;
-    const auto expired=[&](){return LocalClock::now()>=deadline || expanded>=12000;};
+    auto start=nearest(r,world);
+    const auto& allowed=scope?scope->allowed:r.allowed;
+    const auto* surface=scope?&scope->surface:nullptr;
+    corridor_detail::SurfaceQuery surfaceQuery(r,true,surface);
+    if(scope) {
+        double best=inf;
+        for(const auto& point:r.network.points) {
+            if(!allowed[point.id]) continue;
+            const double d=std::hypot(point.pose.x-world.ego.x,point.pose.y-world.ego.y);
+            const double yaw=std::abs(normalizeAngle(point.pose.yaw-world.ego.heading));
+            if(d>4. || yaw>.8) continue;
+            const bool same=keyOf(point.pose)==LaneKey{world.egoRoadId,world.egoSectionIndex,world.egoLaneId};
+            const double score=d+2.*yaw+(same?0.:2.);
+            if(score<best) {best=score;start=point.id;}
+        }
+    }
+    if(start<0 || !allowed[start]) return false;
+    auto searchDeadline=deadline;
+    const auto expired=[&](){return LocalClock::now()>=searchDeadline || expanded>=12000;};
     using Item=std::pair<double,std::int64_t>;
     std::priority_queue<Item,std::vector<Item>,std::greater<Item>> frontier;
     std::vector<double> along(r.network.points.size(),inf);
     std::vector<std::int64_t> nodes;
     along[start]=0.;frontier.push({0.,start});
-    const double horizon=std::clamp(config.localFallbackHorizon,15.,120.);
+    const double horizon=std::clamp(config.localFallbackHorizon+(scope?30.:0.),15.,120.);
+    std::map<std::int64_t,std::vector<CorridorEdge>> reconnects;
+    const auto bridges=[&](std::int64_t id)->const std::vector<CorridorEdge>& {
+        auto [entry,inserted]=reconnects.emplace(id,std::vector<CorridorEdge>{});
+        if(!inserted || !scope || scope->preview[id] ||
+           (r.allowed[id] && r.gatewayLateralSteps[id]==0)) return entry->second;
+        const auto& from=r.network.points[id].pose;
+        const int gx=int(std::floor(from.x/10.)),gy=int(std::floor(from.y/10.));
+        std::map<std::pair<LaneKey,int>,std::pair<double,std::int64_t>> choices;
+        for(int dx=-4;dx<=4;++dx) for(int dy=-4;dy<=4;++dy) {
+            const auto cell=r.spatial.find({gx+dx,gy+dy});if(cell==r.spatial.end()) continue;
+            for(const auto to:cell->second) {
+                if((!r.allowed[to] && !scope->preview[to]) || !visible(r.network,to)) continue;
+                const auto& p=r.network.points[to].pose;
+                // Ordinary same-road lateral edges already cover this move.
+                // These extra curves exist only for overlapping connector
+                // roads that have no direct lateral edge in the XODR graph.
+                if(p.roadId==from.roadId && p.sectionIndex==from.sectionIndex) continue;
+                const double px=p.x-from.x,py=p.y-from.y;
+                const double along=px*std::cos(from.yaw)+py*std::sin(from.yaw);
+                const double lateral=-px*std::sin(from.yaw)+py*std::cos(from.yaw);
+                if(along<6. || along>35. || std::abs(lateral)>4. ||
+                   std::abs(normalizeAngle(p.yaw-from.yaw))>.6) continue;
+                const std::array<double,6> lengths{{6.,8.,12.,16.,24.,32.}};
+                for(int bucket=0;bucket<int(lengths.size());++bucket) {
+                    const double score=std::abs(along-lengths[bucket]);
+                    const auto key=std::make_pair(keyOf(p),bucket);
+                    const auto old=choices.find(key);
+                    if(old==choices.end() || score<old->second.first) choices[key]={score,to};
+                }
+            }
+        }
+        for(const auto& item:choices) entry->second.push_back({item.second.second,
+            gap(from,r.network.points[item.second.second].pose),-1,true});
+        return entry->second;
+    };
     while(!frontier.empty()) {
         if(expired()) {timedOut=true;return false;}
         const auto [distance,id]=frontier.top();frontier.pop();
         if(distance>along[id]+1e-8) continue;
         nodes.push_back(id);
         const auto visit=[&](const CorridorEdge& edge) {
-            if(edge.to<0 || !r.allowed[edge.to] || !std::isfinite(r.gatewayCost[edge.to])) return;
+            if(edge.to<0 || !allowed[edge.to] || (!scope && !std::isfinite(r.gatewayCost[edge.to]))) return;
             const double next=distance+std::max(.0001,edge.distance);
             if(next<=horizon && next+1e-8<along[edge.to]) {
                 along[edge.to]=next;frontier.push({next,edge.to});
@@ -2360,6 +2534,7 @@ bool searchLocalCorridor(std::vector<Waypoint>& output,CorridorRuntime& r,
         };
         for(const auto& edge:r.forward[id]) visit(edge);
         for(const auto& edge:r.globalLateral[id]) visit(edge);
+        for(const auto& edge:bridges(id)) visit(edge);
     }
     if(nodes.empty() || minimumDistance>horizon) return false;
     std::vector<int> localIndex(r.network.points.size(),-1);
@@ -2415,8 +2590,8 @@ bool searchLocalCorridor(std::vector<Waypoint>& output,CorridorRuntime& r,
         const auto& p=r.network.points[point(id)];
         const auto adjacent=slot==0?p.rightPoint:p.leftPoint;
         const bool permitted=slot==0?p.rightChangeAllowed:p.leftChangeAllowed;
-        return permitted && adjacent>=0 && r.allowed[adjacent] &&
-            std::isfinite(r.gatewayCost[adjacent]);
+        return permitted && adjacent>=0 && allowed[adjacent] &&
+            (scope || std::isfinite(r.gatewayCost[adjacent]));
     };
     const auto pose=[&](int id) {
         auto p=r.network.points[point(id)].pose;
@@ -2457,7 +2632,21 @@ bool searchLocalCorridor(std::vector<Waypoint>& output,CorridorRuntime& r,
         return path.size()>=2;
     };
     std::size_t geometryRejected=0;
-    for(int attempt=0;attempt<8;++attempt) {
+    // Prefer a complete, checked lane-centre solution, not a continuously
+    // changing centre cost. Reuse graph/edge checks in the unrestricted pass;
+    // a failed centre probe must not remove narrow-gap states or gateway exits.
+    // A long rolling horizon is not an obstacle: with an empty forward scene
+    // it must not postpone settling by seeding clusterEnd from minimumDistance.
+    // Try a route-coherent settled tail first. This is a candidate preference,
+    // not a new legality rule: the original unrestricted search remains last.
+    const double obstacleClearedAt=obstacleSpans.empty()?0.:
+        clusterEnd+body.rearExtent()+clearance;
+    // Edges end at the next sampled road point, not at exactly 12.000m.
+    // Match the graph's 0.75m sampling tolerance, otherwise every nominal
+    // 12m lane-centre attachment can be rejected at 12.xm mid-manoeuvre.
+    const double preferredSettleEnd=obstacleClearedAt+12.+.75;
+    const auto search=[&](bool centresOnly,bool settledPreference) {
+    for(int attempt=0;attempt<(scope?16:8);++attempt) {
         if(expired()) {timedOut=true;return false;}
         std::vector<double> distance(count,inf);
         std::vector<Parent> parent(count);
@@ -2480,14 +2669,39 @@ bool searchLocalCorridor(std::vector<Waypoint>& output,CorridorRuntime& r,
                     if(settledTail>=std::max(8.,config.gatewayReserveDistance)) break;
                 }
             }
-            if(current%offsets==centre && along[id]>=minimumDistance &&
-               settledTail>=std::max(8.,config.gatewayReserveDistance) &&
-               std::isfinite(r.gatewayCost[id]) && !occupied(current) &&
+            if(current%offsets==centre && along[id]>=minimumDistance-(scope?tailReserve:0.) &&
+               (scope || settledTail>=std::max(8.,config.gatewayReserveDistance)) &&
+               (std::isfinite(r.gatewayCost[id]) || (scope && scope->preview[id])) && !occupied(current) &&
                (r.ordinaryRoadPoint[id] || missionPointIsTarget(*activeMissionLeg(mission),pose(current)))) {
                 reached=current;break;
             }
             const auto relax=[&](const CorridorEdge& edge,int targetOffset,bool generated) {
+                if(centresOnly && targetOffset!=centre) return;
                 if(edge.to<0 || localIndex[edge.to]<0 || expired()) return;
+                if(settledPreference) {
+                    // Give a physically clear offset up to 12m to settle. A
+                    // narrow passage or a required gateway alignment can still
+                    // use every original sample in the unrestricted fallback.
+                    if(along[edge.to]>=preferredSettleEnd && targetOffset!=centre)
+                        return;
+                    const auto& fromPose=r.network.points[id].pose;
+                    const auto& toPose=r.network.points[edge.to].pose;
+                    const auto actualFrom=pose(current);
+                    const double fromOffset=std::abs(
+                        -(actualFrom.x-fromPose.x)*std::sin(fromPose.yaw)+
+                         (actualFrom.y-fromPose.y)*std::cos(fromPose.yaw));
+                    // A centre endpoint 20m away is still a 20m off-centre
+                    // return curve. Limit the return itself, not only its
+                    // discrete endpoint's offset slot, in this preferred pass.
+                    if(generated && fromOffset>.05 &&
+                       along[edge.to]>preferredSettleEnd) return;
+                    const bool sameRoad=fromPose.roadId==toPose.roadId &&
+                        fromPose.sectionIndex==toPose.sectionIndex;
+                    const bool changesLane=sameRoad && fromPose.laneId!=toPose.laneId;
+                    const bool gatewayAlignment=r.gatewayLateralSteps[edge.to]<r.gatewayLateralSteps[id];
+                    if(along[id]>=obstacleClearedAt && changesLane && !gatewayAlignment)
+                        return;
+                }
                 const int next=state(edge.to,targetOffset);
                 if(forbidden.count({current,next}) || occupied(next)) return;
                 const auto a=pose(current),b=pose(next);
@@ -2505,9 +2719,10 @@ bool searchLocalCorridor(std::vector<Waypoint>& output,CorridorRuntime& r,
                         for(const double fraction:{.2,.5,.8}) {
                             const auto& p=path[std::size_t(fraction*(path.size()-1))];
                             const auto box=vehicleFootprintAt(body,{p.x,p.y,p.yaw});
-                            if(containing(r,p.x,p.y,p.yaw)<0) {valid=false;break;}
+                            const double c=std::cos(p.yaw),s=std::sin(p.yaw);
+                            if(surfaceQuery.containing(p.x,p.y,c,s)<0) {valid=false;break;}
                             for(const auto& corner:box.corners)
-                                if(containing(r,corner.x,corner.y,p.yaw)<0) {valid=false;break;}
+                                if(surfaceQuery.containing(corner.x,corner.y,c,s)<0) {valid=false;break;}
                             if(!valid) break;
                         }
                     }
@@ -2529,6 +2744,7 @@ bool searchLocalCorridor(std::vector<Waypoint>& output,CorridorRuntime& r,
                 }
             }
             for(const auto& edge:r.globalLateral[id]) for(int o=0;o<offsets;++o) relax(edge,o,true);
+            for(const auto& edge:bridges(id)) for(int o=0;o<offsets;++o) relax(edge,o,true);
             for(const auto& edge:r.globalInLaneShift[id])
                 for(int o=0;o<offsets;++o)
                     if(o!=current%offsets || current==firstState) relax(edge,o,true);
@@ -2545,32 +2761,100 @@ bool searchLocalCorridor(std::vector<Waypoint>& output,CorridorRuntime& r,
             if(expired()) {timedOut=true;output.clear();return false;}
             const auto& step=parent[next];std::vector<Waypoint> part;std::string reason;
             if(!geometry(part,step.from,next,step.edge,step.generated) ||
-               !surfaceAndMarks(r,map,part,world,reason) ||
+               !surfaceAndMarks(r,map,part,world,reason,true,nullptr,surface) ||
                !stationaryPathClear(part,world,clearance,0,nullptr,&map)) {
                 forbidden.insert({step.from,next});++geometryRejected;valid=false;break;
             }
             for(const auto& p:part) append(output,p);
         }
         if(!valid) {output.clear();continue;}
+        if(scope) {
+            // Certify the settled tail as geometry after choosing the return
+            // node. Requiring it in a point/offset-only A* parent chain loses
+            // feasible paths when the cheapest parent keeps delaying rejoin.
+            const double joinedAt=output.back().s;
+            const auto tail=forwardPath(r,point(reached),tailReserve,joinedAt);
+            if(tail.empty() || tail.back().s-joinedAt<tailReserve-.5) {
+                forbidden.insert({parent[reached].from,reached});output.clear();continue;
+            }
+            for(const auto& p:tail) append(output,p);
+        }
         repairTrackingTangents(output);
         std::string reason;
         if(expired()) {timedOut=true;output.clear();return false;}
-        if(smoothSourceJoins(output,r,map,world,&reason) &&
+        // The expanded surface has already been checked for every selected
+        // edge. Recheck the assembled path and its return certificate rather
+        // than handing a surface-only permission to the ordinary tracker.
+        bool geometryOkay=scope
+            ? surfaceAndMarks(r,map,output,world,reason,true,nullptr,surface) &&
+                corridorReentryPreservesMission(output,r,mission,world,*scope)
+            : smoothSourceJoins(output,r,map,world,&reason);
+        if(scope && !geometryOkay) traceDecision(trace,"corridor_local_fallback","return_certificate_rejected",
+            "surface_reason="+reason+" end="+std::to_string(output.back().x)+":"+std::to_string(output.back().y));
+        if(scope && geometryOkay) for(std::size_t i=1;i<output.size();++i) {
+            const double ds=gap(output[i-1],output[i]);
+            if(ds<1e-6 || ds>.75 || std::abs(normalizeAngle(output[i].yaw-output[i-1].yaw))/ds>
+               maximumCurvature+.002) {
+                geometryOkay=false;
+                traceDecision(trace,"corridor_local_fallback","return_join_rejected",
+                    "ds="+std::to_string(ds)+" yaw_step="+std::to_string(normalizeAngle(output[i].yaw-output[i-1].yaw)));
+                break;
+            }
+        }
+        if(geometryOkay &&
            localTrajectorySafe(output,world,map,config,behavior,clearance)) {
             traceDecision(trace,"corridor_local_fallback","local_route_built",
                 "points="+std::to_string(output.size())+" clearance="+std::to_string(clearance)+
                 " expanded="+std::to_string(expanded)+" geometry_rejected="+std::to_string(geometryRejected)+
-                " endpoint_gateway_reachable=1 claims_gateway_reached=0");
+                " sampling="+std::string(centresOnly?"lane_centres":"full_offsets")+
+                " settled_tail_preference="+std::to_string(settledPreference)+
+                " endpoint_gateway_reachable=1 claims_gateway_reached=0 tier="+
+                std::to_string(scope?(scope->outsideCorridor?2:1):0));
             return true;
+        }
+        if(scope && !geometryOkay) {
+            // A rejected return/goal is one candidate, not proof that every
+            // earlier return point also misses the gate. Try another bridge.
+            int rejected=reached;
+            for(auto it=order.rbegin();it!=order.rend();++it)
+                if(parent[*it].generated) {rejected=*it;break;}
+            forbidden.insert({parent[rejected].from,rejected});
+            ++geometryRejected;output.clear();continue;
         }
         output.clear();return false;
     }
     output.clear();return false;
+    };
+    const auto probeStarted=LocalClock::now();
+    // Spend at most a quarter of the remaining search time (8 ms maximum).
+    // The nominal/tight clearance budgets and the command-thread work do not
+    // increase. Geometry checks already made here remain useful to full A*.
+    searchDeadline=std::min(deadline,probeStarted+std::min(
+        deadline>probeStarted?(deadline-probeStarted)/4:LocalClock::duration::zero(),
+        std::chrono::duration_cast<LocalClock::duration>(std::chrono::milliseconds(8))));
+    if(search(true,true)) return true;
+    traceDecision(trace,"corridor_local_fallback","centre_probe_fallback",
+                  "full_offset_samples_retained=1");
+    // Preserve dense offset sampling before the complete blocker group, while
+    // preferring an ordinary centred continuation afterwards. Both probes run
+    // inside the existing worker deadline; no synchronous replanning is added.
+    const auto settleProbeStarted=LocalClock::now();
+    searchDeadline=std::min(deadline,settleProbeStarted+std::min(
+        deadline>settleProbeStarted?(deadline-settleProbeStarted)/4:LocalClock::duration::zero(),
+        std::chrono::duration_cast<LocalClock::duration>(std::chrono::milliseconds(8))));
+    timedOut=false;
+    forbidden.clear();
+    if(search(false,true)) return true;
+    searchDeadline=deadline;
+    timedOut=false;
+    forbidden.clear(); // assembled-path failures can depend on the parent chain
+    return search(false,false);
 }
 
 bool attachLocalResult(std::vector<Waypoint>& path,const std::vector<Waypoint>& candidate,
     CorridorRuntime& r,const PathGeneratorData& map,const WorldState& world,
-    const LaneChangeConfig& config,const PlanningBehaviorConfig& behavior,double margin) {
+    const LaneChangeConfig& config,const PlanningBehaviorConfig& behavior,double margin,
+    const MissionCorridorData& mission,const CorridorReentryScope* scope=nullptr) {
     if(candidate.size()<2) return false;
     std::size_t nearestIndex=0;double best=inf;
     for(std::size_t i=0;i<candidate.size();++i) {
@@ -2597,7 +2881,7 @@ bool attachLocalResult(std::vector<Waypoint>& path,const std::vector<Waypoint>& 
                 std::max(.1,gap(path[index-1],path[index+1]));
             std::vector<Waypoint> bridge;double maximum{};std::string reason;
             if(!curve(bridge,actual,r.curvature,target,&maximum) ||
-               !surfaceAndMarks(r,map,bridge,world,reason)) continue;
+               !surfaceAndMarks(r,map,bridge,world,reason,true,nullptr,scope?&scope->surface:nullptr)) continue;
             for(auto it=end+1;it!=path.end();++it) append(bridge,*it);
             if(!localTrajectorySafe(bridge,world,map,config,behavior,margin)) continue;
             path=std::move(bridge);joined=true;break;
@@ -2605,16 +2889,326 @@ bool attachLocalResult(std::vector<Waypoint>& path,const std::vector<Waypoint>& 
         if(!joined) return false;
     }
     if(!localTrajectorySafe(path,world,map,config,behavior,margin)) return false;
+    if(scope) {
+        // The unchanged suffix was swept in the worker; any newly attached
+        // prefix was swept above with the same permission. Do not repeat that
+        // full-map body sweep on the real-time command thread.
+        if(!corridorReentryPreservesMission(path,r,mission,world,*scope)) return false;
+    }
     double station=world.egoPathS;
     for(std::size_t i=0;i<path.size();++i) {if(i) station+=gap(path[i-1],path[i]);path[i].s=station;}
     return true;
 }
 } // namespace
 
+namespace {
+struct RecoveryBounds {
+    double minX{inf}, maxX{-inf}, minY{inf}, maxY{-inf};
+};
+
+RecoveryBounds recoveryBounds(const Obb2D& box) {
+    RecoveryBounds bounds;
+    for (const auto& p : box.corners) {
+        bounds.minX = std::min(bounds.minX, p.x);
+        bounds.maxX = std::max(bounds.maxX, p.x);
+        bounds.minY = std::min(bounds.minY, p.y);
+        bounds.maxY = std::max(bounds.maxY, p.y);
+    }
+    return bounds;
+}
+
+bool recoveryBoundsOverlap(const RecoveryBounds& a, const RecoveryBounds& b) {
+    // Strict separation only: touching/overlapping bounds still use the
+    // original SAT computation. Keep near-boundary floating-point cases in
+    // SAT too; this padding is only on the cheap rejection test.
+    constexpr double roundoffGuard = 1e-6;
+    return !(a.maxX + roundoffGuard < b.minX || b.maxX + roundoffGuard < a.minX ||
+             a.maxY + roundoffGuard < b.minY || b.maxY + roundoffGuard < a.minY);
+}
+
+// SAT minimum translation depth, including containment. Zero denotes no
+// overlap. Recovery prices contact; ordinary collision checks remain binary.
+double recoveryOverlapDepth(const Obb2D& a, const Obb2D& b) {
+    double depth = inf;
+    for (const auto* box : {&a, &b}) {
+        for (std::size_t i = 0; i < 2; ++i) {
+            const auto& p = box->corners[i];
+            const auto& q = box->corners[i + 1];
+            const double length = std::hypot(q.x - p.x, q.y - p.y);
+            if (length < 1e-6) return 0.;
+            const double nx = -(q.y - p.y) / length, ny = (q.x - p.x) / length;
+            double amin = inf, amax = -inf, bmin = inf, bmax = -inf;
+            for (const auto& corner : a.corners) {
+                const double s = corner.x * nx + corner.y * ny;
+                amin = std::min(amin, s); amax = std::max(amax, s);
+            }
+            for (const auto& corner : b.corners) {
+                const double s = corner.x * nx + corner.y * ny;
+                bmin = std::min(bmin, s); bmax = std::max(bmax, s);
+            }
+            if (amax <= bmin || bmax <= amin) return 0.;
+            depth = std::min(depth, std::min(amax - bmin, bmax - amin));
+        }
+    }
+    return std::isfinite(depth) ? depth : 0.;
+}
+}
+
+bool prepareCorridorProgressRecovery(
+    PathPlannerData& output, bool& contactExpected, std::size_t& searchCursor,
+    const WorldState& world, const PathGeneratorData& map,
+    const MissionCorridorData& mission, const LaneChangeConfig& laneConfig,
+    const PlanningBehaviorConfig& behavior,
+    const std::vector<Waypoint>& reference,
+    const std::vector<int>& confirmedStationaryObjectIds, DecisionTraceData* trace,
+    double failedHeadingChange, bool* retainedReference) {
+    if (retainedReference) *retainedReference = false;
+    if (behavior.simulationProgressRecovery != 1. || !map.corridorRuntime ||
+        !world.inputValid || world.respawnDetected || !activeMissionLeg(mission)) return false;
+    auto& r = *map.corridorRuntime;
+    activate(r, mission);
+    const auto startId = nearest(r, world);
+    if (startId < 0) return false;
+    const auto body = egoFootprint(world);
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double, std::milli>(behavior.progressRecoverySearchBudgetMs));
+    Waypoint start = r.network.points[startId].pose;
+    start.x = world.ego.x; start.y = world.ego.y; start.yaw = world.ego.heading;
+    start.s = world.egoPathValid ? world.egoPathS : 0.;
+    std::vector<Waypoint> best;
+    double bestCost = inf;
+    bool bestContact = false;
+    bool bestTerminalContact = false, bestIsIncumbent = false;
+    std::size_t checked = 0;
+    struct RecoveryObject {
+        const WorldObjectState* object;
+        bool moving, protectedActor;
+        double vx, vy;
+        RecoveryBounds bounds;
+        Obb2D horizonBox;
+        RecoveryBounds horizonBounds;
+    };
+    std::vector<RecoveryObject> objects;
+    objects.reserve(world.objects.size());
+    for (const auto& object : world.objects) {
+        const bool vulnerable = object.raw.length <= 2.5 &&
+            object.raw.width <= 1.5 && object.raw.height >= 1.;
+        const bool confirmed = std::find(confirmedStationaryObjectIds.begin(),
+            confirmedStationaryObjectIds.end(), static_cast<int>(object.raw.id)) !=
+            confirmedStationaryObjectIds.end();
+        const bool moving = std::abs(object.raw.speed) >= .3;
+        const double vx = moving ? objectVelocityX(object) : 0.;
+        const double vy = moving ? objectVelocityY(object) : 0.;
+        const auto horizonBox = moving ? makeObb2D(
+            object.raw.x + vx * behavior.collisionPredictionHorizon,
+            object.raw.y + vy * behavior.collisionPredictionHorizon,
+            object.raw.heading, object.raw.length, object.raw.width) : object.obb;
+        // Immutable for this search invocation only; no stale-scene cache.
+        objects.push_back({&object, moving, moving || !confirmed || vulnerable, vx, vy,
+            recoveryBounds(object.obb), horizonBox, recoveryBounds(horizonBox)});
+    }
+    const auto consider = [&](std::vector<Waypoint> path, const char* source, bool incumbent = false) {
+        if (path.size() < 3 || gap(path.front(), start) > .4 ||
+            std::abs(normalizeAngle(path.front().yaw - start.yaw)) > .2) return;
+        double length = 0., maxK = 0.;
+        path.front().s = start.s;
+        for (std::size_t i = 1; i < path.size(); ++i) {
+            const double ds = gap(path[i - 1], path[i]);
+            if (!std::isfinite(ds) || ds > .75 || ds < 1e-6) return;
+            const double k = std::abs(normalizeAngle(path[i].yaw - path[i - 1].yaw)) / ds;
+            if (!std::isfinite(k) || k > maximumCurvature + .002) return;
+            maxK = std::max(maxK, k); length += ds;
+            path[i].s = start.s + length;
+            if (length >= 40.) { path.resize(i + 1); break; }
+        }
+        if (length < 8.) return;
+        if (std::isfinite(failedHeadingChange)) {
+            const auto preview = std::lower_bound(path.begin(), path.end(), start.s + 3.,
+                [](const auto& p, double station) { return p.s < station; });
+            if (preview != path.end() && std::abs(normalizeAngle(
+                    preview->yaw - start.yaw - failedHeadingChange)) < .06) return;
+        }
+        std::string reason;
+        // May leave the mission corridor to use another physical driving
+        // lane, but never manufacture a path across missing road geometry.
+        if (!surfaceAndMarks(r, map, path, world, reason, false)) {
+            traceCandidatePath(trace, keyOf(path.back()), path, "rejected", reason);
+            return;
+        }
+        double contactLength = 0., depthIntegral = 0., maximumDepth = 0., lastContactDistance = 0.;
+        bool terminalContact = false;
+        for (std::size_t i = 0; i < path.size(); ++i) {
+            const auto& p = path[i];
+            const auto box = vehicleFootprintAt(body, {p.x, p.y, p.yaw});
+            const auto bounds = recoveryBounds(box);
+            double depth = 0.;
+            const double time = std::min(behavior.collisionPredictionHorizon,
+                (p.s - start.s) / std::max(.2, behavior.progressRecoverySpeed));
+            for (const auto& cached : objects) {
+                const auto& object = *cached.object;
+                if (!corridorObstacleAtPathLevel(map, p, object)) continue;
+                // Keep current occupancy as well as the short-term moving
+                // prediction: a stopped vehicle can start during the escape.
+                double objectDepth = recoveryBoundsOverlap(bounds, cached.bounds)
+                    ? recoveryOverlapDepth(box, object.obb) : 0.;
+                if (cached.moving) {
+                    if (time == behavior.collisionPredictionHorizon) {
+                        if (recoveryBoundsOverlap(bounds, cached.horizonBounds))
+                            objectDepth = std::max(objectDepth,
+                                recoveryOverlapDepth(box, cached.horizonBox));
+                    } else {
+                        const auto predicted = makeObb2D(
+                            object.raw.x + cached.vx * time,
+                            object.raw.y + cached.vy * time,
+                            object.raw.heading, object.raw.length, object.raw.width);
+                        if (recoveryBoundsOverlap(bounds, recoveryBounds(predicted)))
+                            objectDepth = std::max(objectDepth, recoveryOverlapDepth(box, predicted));
+                    }
+                }
+                // Contact is negotiable only for confirmed static obstacles.
+                // A recently stopped actor retains dynamic protection until
+                // the ordinary stationary-confirmation timer has expired.
+                if (objectDepth > 0. && cached.protectedActor) return;
+                depth = std::max(depth, objectDepth);
+            }
+            const double ds = i ? p.s - path[i - 1].s : .2;
+            if (depth > 0.) {
+                contactLength += ds; depthIntegral += ds * depth;
+                maximumDepth = std::max(maximumDepth, depth);
+                lastContactDistance = p.s - start.s;
+                if (path.back().s - p.s < 2.) terminalContact = true;
+            }
+        }
+        const auto endId = containing(r, path.back().x, path.back().y, path.back().yaw, false);
+        const bool reachable = endId >= 0 && std::isfinite(r.gatewayCost[endId]);
+        // Clear exits dominate paths that finish inside a body. Among paths
+        // that escape, minimize penetration and contact distance. An initial
+        // overlap is not a rejection, so driving out of it remains possible.
+        // Contact/terminal classes are compared separately below. Keeping a
+        // huge fixed terminal penalty here would also inflate the 5% switch
+        // threshold and hide substantial improvements in penetration depth.
+        const double cost = 1000. * maximumDepth + 100. * depthIntegral + 100. * contactLength +
+            25. * lastContactDistance +
+            (reachable ? 0. : 20.) + 5. * maxK + 2. / length;
+        ++checked;
+        if (!best.empty() && !recovery_selection::better(
+                {contactLength > 0., terminalContact, cost},
+                {bestContact, bestTerminalContact, bestCost}, bestIsIncumbent)) return;
+        bestCost = cost; bestContact = contactLength > 0.; best = std::move(path);
+        bestTerminalContact = terminalContact; bestIsIncumbent = incumbent;
+        traceCandidatePath(trace, keyOf(best.back()), best, "viable", source);
+    };
+
+    // Revalidate and rescore the remaining incumbent FIRST in today's scene.
+    // This retains the best discovered path across budgeted searches without
+    // reusing stale collision costs. Similar alternatives do not cause weaving.
+    std::vector<Waypoint> suffix;
+    if (remainingAttachedPath(suffix, reference, world))
+        consider(std::move(suffix), "simulation_contact_cost_stored_path", true);
+
+    struct Endpoint { std::int64_t id; double offset; };
+    std::vector<Endpoint> specs;
+    for (const auto& distances : std::array<std::array<double, 3>, 3>{{
+            {{6., 8., 10.}}, {{12., 16., 20.}}, {{24., 30., 40.}}}}) {
+        for (const auto& entry : targets(r, startId, distances, body.width)) {
+            const double room = std::max(0., r.network.points[entry.second].width / 2. -
+                body.width / 2. - laneConfig.minimumLaneEdgeClearance);
+            for (const double offset : {0., -room, room}) specs.push_back({entry.second, offset});
+        }
+    }
+    // Short steering primitives cover a gap between sampled endpoints. They
+    // ramp curvature from the measured value and undergo the same footprint
+    // and curvature checks as map-connected quintics.
+    constexpr std::array<double, 7> bends{{0., -.33, .33, -.67, .67, -1., 1.}};
+    const std::size_t total = specs.size() + bends.size();
+    std::array<std::vector<std::size_t>, 3> families;
+    const auto familyOf = [](double lateral) -> std::size_t {
+        return lateral < -.25 ? 0 : lateral > .25 ? 2 : 1;
+    };
+    for (std::size_t i = 0; i < specs.size(); ++i) {
+        auto p = r.network.points[specs[i].id].pose;
+        p.x -= specs[i].offset * std::sin(p.yaw);
+        p.y += specs[i].offset * std::cos(p.yaw);
+        const double lateral = -(p.x-start.x)*std::sin(start.yaw) +
+                                 (p.y-start.y)*std::cos(start.yaw);
+        families[familyOf(lateral)].push_back(i);
+    }
+    // Insert a steering primitive near the front of each family as well, so
+    // map-endpoint ordering cannot starve the non-map escape shapes.
+    for (std::size_t i = 0; i < bends.size(); ++i) {
+        auto& family = families[familyOf(bends[i])];
+        const auto position = std::min<std::size_t>(1 + i / 3, family.size());
+        family.insert(family.begin() + position, specs.size() + i);
+    }
+    const auto order = recovery_selection::balancedOrder(families);
+    std::array<std::size_t, 3> attempted{};
+    std::size_t searched = 0;
+    for (std::size_t count = 0; count < total; ++count) {
+        const std::size_t index = order[searchCursor++ % total];
+        ++searched;
+        for (std::size_t family = 0; family < families.size(); ++family)
+            if (std::find(families[family].begin(), families[family].end(), index) != families[family].end())
+                ++attempted[family];
+        std::vector<Waypoint> path;
+        if (index < specs.size()) {
+            const auto spec = specs[index];
+            auto target = r.network.points[spec.id];
+            target.pose.x -= spec.offset * std::sin(target.pose.yaw);
+            target.pose.y += spec.offset * std::cos(target.pose.yaw);
+            double maxK{};
+            if (curve(path, start, r.curvature, target, &maxK)) {
+                const auto tail = forwardPath(r, spec.id, 12., path.back().s);
+                for (auto p : tail) {
+                    p.x -= spec.offset * std::sin(p.yaw);
+                    p.y += spec.offset * std::cos(p.yaw);
+                    append(path, p);
+                }
+                consider(std::move(path), "simulation_contact_cost_quintic");
+            }
+        } else {
+            Waypoint p = start;
+            append(path, p);
+            const double targetK = bends[index - specs.size()] * maximumCurvature;
+            for (int step = 1; step <= 80; ++step) {
+                const double u = std::min(1., (step - .5) * .2 / 3.);
+                const double k = (1. - u) * std::clamp(r.curvature, -maximumCurvature, maximumCurvature) + u * targetK;
+                const double midYaw = p.yaw + .1 * k;
+                p.x += .2 * std::cos(midYaw); p.y += .2 * std::sin(midYaw);
+                p.yaw = normalizeAngle(p.yaw + .2 * k);
+                append(path, p);
+            }
+            consider(std::move(path), "simulation_contact_cost_steering_arc");
+        }
+        // A directional round is the smallest budget unit (at most three
+        // candidates). Budget exhaustion must not select just the first side.
+        if (searched % 3 == 0 && std::chrono::steady_clock::now() >= deadline) break;
+    }
+    traceDecision(trace, "progress_recovery", "balanced_search",
+        "right=" + std::to_string(attempted[0]) + " straight=" + std::to_string(attempted[1]) +
+        " left=" + std::to_string(attempted[2]) + " attempted=" + std::to_string(searched) +
+        " total=" + std::to_string(total) + " incumbent_retained=" + std::to_string(bestIsIncumbent));
+    if (best.empty()) {
+        traceDecision(trace, "progress_recovery", "no_drivable_geometry",
+                      "retry_cursor=" + std::to_string(searchCursor));
+        return false;
+    }
+    output.waypoints = std::move(best); output.nearestIndex = 0;
+    if (retainedReference) *retainedReference = bestIsIncumbent;
+    contactExpected = bestContact;
+    traceCandidatePath(trace, keyOf(output.waypoints.back()), output.waypoints,
+                       "selected", "simulation_progress_recovery_contact_allowed");
+    traceDecision(trace, "progress_recovery", "path_selected",
+        "contact_expected=" + std::to_string(bestContact) +
+        " cost=" + std::to_string(bestCost) + " checked=" + std::to_string(checked));
+    return true;
+}
+
 bool prepareLocalCorridorFallback(LaneChangeData& replacement,const LaneChangeConfig& config,
     const PlanningBehaviorConfig& safety,const WorldState& world,const PathGeneratorData& map,
     const MissionCorridorData& mission,const std::vector<Waypoint>& reference,DecisionTraceData* trace) {
-    if(!map.corridorRuntime || !mission.valid || !world.inputValid || !world.egoLaneValid || !world.egoPathValid)
+    if(!map.corridorRuntime || !mission.valid || !world.inputValid || !world.egoLaneValid ||
+       (!world.egoPathValid && !map.corridorRuntime->localFallbackRelocalizationRequested))
         return false;
     auto& r=*map.corridorRuntime;
     if(!r.localRouteWorker || !activeMissionLeg(mission)) return false;
@@ -2622,6 +3216,7 @@ bool prepareLocalCorridorFallback(LaneChangeData& replacement,const LaneChangeCo
     if(r.localFallbackLeg!=mission.activeLegIndex || world.respawnDetected) {
         r.localFallbackLeg=mission.activeLegIndex;++r.localFallbackEpoch;
         r.localFallbackRetryAt={};r.localFallbackIssued=false;
+        r.localFallbackSearchTier=0;r.localFallbackSearchBlocker=-1;
     }
     auto& worker=*r.localRouteWorker;
     const auto now=LocalClock::now();
@@ -2641,10 +3236,23 @@ bool prepareLocalCorridorFallback(LaneChangeData& replacement,const LaneChangeCo
         return corridorStationaryFreeDistance(nearby,world,config.latticeObstacleClearance,&map,&blocker);
     };
     double freeDistance=nearbyFreeDistance(reference);
+    // A detached/exhausted reference is not evidence that the road ahead is
+    // clear. Scan a physical continuation solely to trigger checked recovery;
+    // it is never adopted as a route to an arbitrary successor.
+    if(!std::isfinite(freeDistance)) {
+        const auto physical=containing(r,world.ego.x,world.ego.y,world.ego.heading,false);
+        if(physical>=0) freeDistance=nearbyFreeDistance(
+            forwardPath(r,physical,activation+1.,world.egoPathS,true));
+    }
     // Judge the reference actually being selected, not a stale stored global
     // path or global failure flags. A blocked reference needs local help even
     // if the global producer has mistakenly kept its approved flag set.
-    const bool needed=(blocker>=0 && freeDistance<=activation) || rolling;
+    const bool relocalizing=r.localFallbackRelocalizationRequested;
+    const bool obstacleNeeded=blocker>=0 && freeDistance<=activation;
+    const bool needed=obstacleNeeded || rolling || relocalizing;
+    if(needed && blocker!=r.localFallbackSearchBlocker) {
+        r.localFallbackSearchBlocker=blocker;r.localFallbackSearchTier=0;
+    }
     r.localFallbackEngaged=needed;
     if(worker.pending.valid() && worker.pending.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
         auto result=worker.pending.get();r.localFallbackPending=false;
@@ -2653,11 +3261,12 @@ bool prepareLocalCorridorFallback(LaneChangeData& replacement,const LaneChangeCo
         traceDecision(trace,"corridor_local_fallback","worker_completed",
             "success="+std::to_string(result.success)+" ms="+std::to_string(result.elapsedMs)+
             " expanded="+std::to_string(result.expanded)+" timeout="+std::to_string(result.timedOut)+
-            " clearance="+std::to_string(result.clearance));
+            " clearance="+std::to_string(result.clearance)+" tier="+std::to_string(result.searchTier));
         std::vector<Waypoint> attached;
         if(needed && !world.respawnDetected && result.success && result.leg==mission.activeLegIndex &&
            result.epoch==r.localFallbackEpoch &&
-           attachLocalResult(attached,result.path,r,map,world,config,safety,result.clearance)) {
+           attachLocalResult(attached,result.path,r,map,world,config,safety,result.clearance,
+                             mission,result.reentryScope.get())) {
             const auto& end=attached.back();
             replacement={};replacement.phase=LaneChangePhase::Prepare;
             replacement.routeMode=LaneChangeRouteMode::KeepTargetLane;
@@ -2677,6 +3286,7 @@ bool prepareLocalCorridorFallback(LaneChangeData& replacement,const LaneChangeCo
             replacement.turnSignal=std::abs(lateral)<.2?0U:lateral>0.?1U:2U;
             replacement.outwardTurnSignal=replacement.turnSignal;
             replacement.path=std::move(attached);r.localFallbackIssued=true;
+            r.localFallbackSearchTier=0;
             r.localFallbackRetryAt=now+std::chrono::duration_cast<LocalClock::duration>(
                 std::chrono::duration<double>(config.localFallbackRetryInterval));
             traceCandidatePath(trace,replacement.reconnectLane,replacement.path,"selected","bounded_local_corridor_multistep");
@@ -2685,6 +3295,9 @@ bool prepareLocalCorridorFallback(LaneChangeData& replacement,const LaneChangeCo
                 std::to_string(replacement.path.size()));
             return true;
         }
+        if(!result.success && result.leg==mission.activeLegIndex &&
+           result.epoch==r.localFallbackEpoch && result.blocker==blocker)
+            r.localFallbackSearchTier=std::min(2,result.searchTier+1);
         r.localFallbackRetryAt=now+std::chrono::duration_cast<LocalClock::duration>(
             std::chrono::duration<double>(config.localFallbackRetryInterval));
         traceDecision(trace,"corridor_local_fallback",result.success?"stale_or_unattached_result":"no_local_route",
@@ -2700,32 +3313,89 @@ bool prepareLocalCorridorFallback(LaneChangeData& replacement,const LaneChangeCo
     const auto mapSnapshot=worker.map;
     const auto epoch=r.localFallbackEpoch;
     const double initialCurvature=r.curvature;
+    const int searchTier=r.localFallbackSearchTier;
     double obstacleLength=0.;
     for(const auto& object:world.objects) if(static_cast<int>(object.raw.id)==blocker) obstacleLength=object.raw.length;
-    const double minimumDistance=rolling?std::max(20.,config.localFallbackHorizon*.6):
+    const double minimumDistance=(relocalizing && !obstacleNeeded)?25.:rolling?std::max(20.,config.localFallbackHorizon*.6):
         std::max(15.,std::max(0.,freeDistance)+obstacleLength+egoFootprint(world).length+std::max(8.,config.gatewayReserveDistance));
+    // A horizon renewal is not permission to redraw a safe committed return.
+    // Keep its centre-bound suffix and extend only its actual longitudinal
+    // successor first. New hazards still reject the complete extended path.
+    const auto continuationReference=rolling && !obstacleNeeded && !relocalizing
+        ?reference:std::vector<Waypoint>{};
     try {
         worker.pending=std::async(std::launch::async,[snapshot,mapSnapshot,world,mission,config,safety,
-            signature,epoch,blocker,minimumDistance,initialCurvature]() {
+            signature,epoch,blocker,minimumDistance,initialCurvature,searchTier,relocalizing,continuationReference]() {
             CorridorLocalRouteWorker::Result result;result.leg=mission.activeLegIndex;
             result.epoch=epoch;result.signature=signature;result.receiveTime=world.receiveTime;result.blocker=blocker;
+            result.searchTier=searchTier;
             const auto started=LocalClock::now();
+            const double budget=searchTier>0?config.localReentrySearchBudgetMs:config.localFallbackSearchBudgetMs;
             const auto deadline=started+std::chrono::duration_cast<LocalClock::duration>(
-                std::chrono::duration<double,std::milli>(std::max(1.,config.localFallbackSearchBudgetMs)));
+                std::chrono::duration<double,std::milli>(std::max(1.,budget)));
             DecisionTraceData diagnostics;diagnostics.enabled=true;
             try {
                 activate(*snapshot,mission);
                 snapshot->curvature=initialCurvature;
+                if(searchTier>0) result.reentryScope=makeReentryScope(
+                    *snapshot,*mapSnapshot,world,searchTier>1,relocalizing);
                 const auto nominalDeadline=started+std::chrono::duration_cast<LocalClock::duration>(
-                    std::chrono::duration<double,std::milli>(std::max(1.,config.localFallbackSearchBudgetMs*.4)));
+                    std::chrono::duration<double,std::milli>(std::max(1.,budget*.4)));
+                const auto extendCommittedReturn=[&]() {
+                    if(continuationReference.empty() || result.reentryScope || LocalClock::now()>=deadline)
+                        return false;
+                    std::vector<Waypoint> candidate;
+                    if(!remainingAttachedPath(candidate,continuationReference,world) ||
+                       candidate.back().s-candidate.front().s<8.) return false;
+                    // Match adoption's tighter attachment envelope. A stale
+                    // but loosely projected reference must fall through to A*
+                    // here, not repeatedly produce an unadoptable extension.
+                    if(std::hypot(candidate.front().x-world.ego.x,candidate.front().y-world.ego.y)>.75 ||
+                       std::abs(normalizeAngle(candidate.front().yaw-world.ego.heading))>.25) return false;
+                    const auto end=candidate.back();
+                    const auto id=containing(*snapshot,end.x,end.y,end.yaw);
+                    if(id<0 || !snapshot->allowed[id] || !std::isfinite(snapshot->gatewayCost[id])) return false;
+                    const auto& centre=snapshot->network.points[id].pose;
+                    const double lateral=-(end.x-centre.x)*std::sin(centre.yaw)+
+                                          (end.y-centre.y)*std::cos(centre.yaw);
+                    if(std::abs(lateral)>.05 || std::abs(normalizeAngle(end.yaw-centre.yaw))>.1)
+                        return false;
+                    const auto tail=forwardPath(*snapshot,id,
+                        std::max(8.,minimumDistance-(end.s-candidate.front().s)+1.),end.s);
+                    for(std::size_t i=1;i<tail.size();++i) append(candidate,tail[i]);
+                    if(candidate.back().s-candidate.front().s<minimumDistance) return false;
+                    const auto goal=containing(*snapshot,candidate.back().x,candidate.back().y,candidate.back().yaw);
+                    if(goal<0 || !snapshot->allowed[goal] || !std::isfinite(snapshot->gatewayCost[goal])) return false;
+                    std::string reason;
+                    if(!smoothSourceJoins(candidate,*snapshot,*mapSnapshot,world,&reason) ||
+                       !surfaceAndMarks(*snapshot,*mapSnapshot,candidate,world,reason,true) ||
+                       !localTrajectorySafe(candidate,world,*mapSnapshot,config,safety,result.clearance)) return false;
+                    result.path=std::move(candidate);
+                    traceDecision(&diagnostics,"corridor_local_fallback","committed_return_extended",
+                        "existing_return_preserved=1 longitudinal_successor_only=1 all_obstacles_rechecked=1");
+                    return true;
+                };
                 result.clearance=config.latticeObstacleClearance;
-                result.success=searchLocalCorridor(result.path,*snapshot,*mapSnapshot,world,mission,config,safety,
-                    result.clearance,minimumDistance,nominalDeadline,result.expanded,result.timedOut,&diagnostics);
+                // Pose reattachment is not necessarily an obstacle detour:
+                // first connect directly to a nearby official gateway-reaching
+                // lane, with the expanded mask confined to the checked bridge.
+                if(relocalizing && searchTier==2) {
+                    result.success=recoverTrackingPath(result.path,*snapshot,*mapSnapshot,world,
+                        std::max(10.,config.gatewayReserveDistance),&diagnostics,result.reentryScope.get(),&mission) &&
+                        localTrajectorySafe(result.path,world,*mapSnapshot,config,safety,result.clearance);
+                    if(!result.success)result.path.clear();
+                }
+                if(!result.success)result.success=extendCommittedReturn();
+                if(!result.success)result.success=searchLocalCorridor(result.path,*snapshot,*mapSnapshot,world,mission,config,safety,
+                    result.clearance,minimumDistance,nominalDeadline,result.expanded,result.timedOut,&diagnostics,
+                    result.reentryScope.get());
                 if(!result.success && LocalClock::now()<deadline &&
                    config.latticeTightObstacleClearance<config.latticeObstacleClearance) {
                     result.clearance=std::max(0.,config.latticeTightObstacleClearance);result.timedOut=false;
-                    result.success=searchLocalCorridor(result.path,*snapshot,*mapSnapshot,world,mission,config,safety,
-                        result.clearance,minimumDistance,deadline,result.expanded,result.timedOut,&diagnostics);
+                    result.success=extendCommittedReturn();
+                    if(!result.success)result.success=searchLocalCorridor(result.path,*snapshot,*mapSnapshot,world,mission,config,safety,
+                        result.clearance,minimumDistance,deadline,result.expanded,result.timedOut,&diagnostics,
+                        result.reentryScope.get());
                 }
             } catch(...) {result.exception=true;result.success=false;result.path.clear();}
             result.elapsedMs=std::chrono::duration<double,std::milli>(LocalClock::now()-started).count();
@@ -2735,7 +3405,8 @@ bool prepareLocalCorridorFallback(LaneChangeData& replacement,const LaneChangeCo
         traceDecision(trace,"corridor_local_fallback","worker_started",
             "blocker="+std::to_string(blocker)+" free_distance="+std::to_string(freeDistance)+
             " horizon="+std::to_string(config.localFallbackHorizon)+" minimum_endpoint="+std::to_string(minimumDistance)+
-            " budget_ms="+std::to_string(config.localFallbackSearchBudgetMs));
+            " budget_ms="+std::to_string(searchTier>0?config.localReentrySearchBudgetMs:config.localFallbackSearchBudgetMs)+
+            " tier="+std::to_string(searchTier)+" relocalizing="+std::to_string(relocalizing));
     } catch(const std::exception& error) {
         r.localFallbackPending=false;r.localFallbackRetryAt=now+std::chrono::milliseconds(500);
         traceDecision(trace,"corridor_local_fallback","launch_failed",error.what());
@@ -2753,6 +3424,7 @@ bool retainCorridorAvoidanceTail(const PathGeneratorData& map,const MissionCorri
     std::vector<Waypoint> suffix;
     if(!remainingAttachedPath(suffix,path,world)) return false;
     r.recoveryTrackingPath=std::move(suffix);r.recoveryTrackingPathProgress=0;
+    r.recoveryTrackingPathRelocalized=false;
     r.recoveryTrackingPathLeg=r.activeLeg;r.recoveryTrackingPathClearance=clearance;
     r.recoveryTrackingPathReachesReference=false;
     traceDecision(trace,"corridor_lattice","safe_avoidance_tail_retained",
@@ -2776,6 +3448,7 @@ static bool buildCorridorTrackingGeometry(PathPlannerData& output,const PathPlan
         r.pendingGatewayHandoffPath.clear();
         if(keep) {
             r.recoveryTrackingPath=std::move(tail);
+            r.recoveryTrackingPathRelocalized=false;
             r.recoveryTrackingPathLeg=r.activeLeg;
             r.recoveryTrackingPathProgress=0;
             r.recoveryTrackingPathClearance=r.laneConfig.latticeObstacleClearance;
@@ -2790,6 +3463,7 @@ static bool buildCorridorTrackingGeometry(PathPlannerData& output,const PathPlan
     const auto recoverAndCache=[&]() {
         if(!recoverTrackingPath(output.waypoints,r,map,world,horizon,trace))
             return false;
+        r.recoveryTrackingPathRelocalized=false;
         r.recoveryTrackingPath=output.waypoints;
         r.recoveryTrackingPathClearance=r.laneConfig.latticeObstacleClearance;
         r.recoveryTrackingPathLeg=r.activeLeg;
@@ -2800,6 +3474,7 @@ static bool buildCorridorTrackingGeometry(PathPlannerData& output,const PathPlan
         return true;
     };
     const auto cacheCurrentOutput=[&]() {
+        r.recoveryTrackingPathRelocalized=false;
         r.recoveryTrackingPath=output.waypoints;
         r.recoveryTrackingPathClearance=r.laneConfig.latticeObstacleClearance;
         r.recoveryTrackingPathLeg=r.activeLeg;
@@ -2824,6 +3499,7 @@ static bool buildCorridorTrackingGeometry(PathPlannerData& output,const PathPlan
                                  nullptr,nullptr,&map)) return true;
     if(recoveryRouteSlice(output.waypoints,r,world,horizon,map)) {
         r.trackingPathValidatedClearance=r.recoveryTrackingPathClearance;
+        r.trackingPathRelocalized=r.recoveryTrackingPathRelocalized;
         return true;
     }
     if(!globalAttempted && ensureObstacleAwareGlobalRoute(
@@ -2955,8 +3631,30 @@ bool buildCorridorTrackingPath(PathPlannerData& output,const PathPlannerConfig& 
                               const MissionCorridorData& mission,double horizon,DecisionTraceData* trace) {
     auto& r=*map.corridorRuntime;
     r.trackingPathApproved=false;r.trackingPathBlockingObject=-1;
+    r.trackingPathRelocalized=false;
     r.trackingPathValidatedClearance=-1.;
-    const bool geometry=buildCorridorTrackingGeometry(output,config,world,map,mission,horizon,trace);
+    bool geometry=buildCorridorTrackingGeometry(output,config,world,map,mission,horizon,trace);
+    std::vector<Waypoint> attached;
+    // Recovery must run before the caller invalidates its active-path world.
+    // Missing trajectory is itself a trigger, even with zero nearby objects.
+    r.localFallbackRelocalizationRequested=!geometry ||
+        !remainingAttachedPath(attached,output.waypoints,world);
+    if(r.localFallbackRelocalizationRequested) {
+        LaneChangeData recovered;
+        if(prepareLocalCorridorFallback(recovered,r.laneConfig,PlanningBehaviorConfig{},
+            world,map,mission,output.waypoints,trace)) {
+            output.waypoints=std::move(recovered.path);output.config=config;
+            r.recoveryTrackingPath=output.waypoints;
+            r.recoveryTrackingPathLeg=r.activeLeg;r.recoveryTrackingPathProgress=0;
+            r.recoveryTrackingPathClearance=recovered.validatedObstacleClearance;
+            r.recoveryTrackingPathReachesReference=false;
+            r.recoveryTrackingPathRelocalized=true;r.trackingPathRelocalized=true;
+            r.trackingPathValidatedClearance=recovered.validatedObstacleClearance;
+            r.localFallbackRelocalizationRequested=false;geometry=true;
+            traceDecision(trace,"corridor_lattice","lost_path_rejoined",
+                "checked_current_pose_bridge=1 official_gateway_reachable=1 mission_not_skipped=1");
+        }
+    }
     if(geometry) {
         const double clearance=r.trackingPathValidatedClearance>=0.
             ?r.trackingPathValidatedClearance:r.laneConfig.latticeObstacleClearance;
@@ -2968,6 +3666,13 @@ bool buildCorridorTrackingPath(PathPlannerData& output,const PathPlannerConfig& 
                 "blocker="+std::to_string(r.trackingPathBlockingObject)+
                 " points="+std::to_string(output.waypoints.size())+
                 " geometry_is_reference_only=1");
+    }
+    if(r.trackingPathRelocalized) {
+        // Low-speed return, not a new general cruising-speed policy.
+        const double speed=r.laneConfig.localFallbackSpeed;
+        output.config.straightSpeed=std::min(output.config.straightSpeed,speed);
+        output.config.curveSpeed=std::min(output.config.curveSpeed,speed);
+        output.config.sharpCurveSpeed=std::min(output.config.sharpCurveSpeed,speed);
     }
     // Geometry remains available to local avoidance; approval is independent.
     return geometry;
@@ -3014,6 +3719,7 @@ bool buildReferenceRecoveryTrackingPath(
         return false;
     }
     r.referenceRecoveryFailureValid=false;
+    r.recoveryTrackingPathRelocalized=false;
     r.recoveryTrackingPath=output.waypoints;
     r.recoveryTrackingPathClearance=r.laneConfig.latticeObstacleClearance;
     r.recoveryTrackingPathLeg=r.activeLeg;

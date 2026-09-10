@@ -126,8 +126,12 @@ def runtime_legs(network, result):
                 raise ValueError('Declared intersection has no outgoing XODR interface')
         else:
             match = matches[exit_]
-            targets = {k for k in network.components[tuple(match['component'])]
-                       if k[:2] == tuple(match['nearest_lane'])[:2]}
+            if match.get('association') == 'junction_terminal':
+                targets = {tuple(k) for k in result.get(
+                    'terminal_alias_lanes', [match['nearest_lane']])}
+            else:
+                targets = {k for k in network.components[tuple(match['component'])]
+                           if k[:2] == tuple(match['nearest_lane'])[:2]}
         allowed.update(targets)
         # Preserve a complete road-width handoff, including when an exit CP
         # is fitted well downstream of the physical gateway interface.
@@ -137,7 +141,9 @@ def runtime_legs(network, result):
         for k in sorted(targets):
             points = np.asarray(network.geometry[k]['points'])
             if final:
-                station = matches[exit_]['road_s']
+                aliases = {tuple(item['nearest_lane']): item['road_s']
+                           for item in result.get('terminal_alias_matches', [])}
+                station = aliases.get(k, matches[exit_]['road_s'])
             else:
                 # A short distance INSIDE the exit lane prevents a tangent
                 # touch or an overlapping incoming lane from advancing a leg.

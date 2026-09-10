@@ -10,29 +10,352 @@
     <TrafficElements/>
     <PulkTraffic/>
     <TrafficControl>
+        <Path Name="Path01" PathId="1">
+            <Waypoint PathOption="shortest" s="4.6656862162098058e+01" TrackId="3180"/>
+            <Waypoint PathOption="shortest" s="4.1397224837701287e+00" TrackId="2806"/>
+            <Waypoint PathOption="shortest" s="3.8712187414353785e+01" TrackId="2756"/>
+            <Waypoint PathOption="shortest" s="8.1793814667562742e+01" TrackId="2718"/>
+        </Path>
+        <Path Name="Path02" PathId="2">
+            <Waypoint PathOption="shortest" s="1.1555286316920589e+02" TrackId="2811"/>
+            <Waypoint PathOption="shortest" s="5.0414617473040408e+00" TrackId="2806"/>
+            <Waypoint PathOption="shortest" s="5.6848631279018683e+01" TrackId="2756"/>
+        </Path>
+        <Path Name="Path03" PathId="3">
+            <Waypoint PathOption="shortest" s="1.1734373751103092e+01" TrackId="2804"/>
+            <Waypoint PathOption="shortest" s="3.6428582203699769e+00" TrackId="2809"/>
+            <Waypoint PathOption="shortest" s="1.7691469387793344e+01" TrackId="2812"/>
+            <Waypoint PathOption="shortest" s="9.3188174139608648e+01" TrackId="2816"/>
+        </Path>
+        <Path Name="Path04" PathId="4">
+            <Waypoint PathOption="shortest" s="8.6014677352794511e+00" TrackId="2807"/>
+            <Waypoint PathOption="shortest" s="3.1819369737548826e+01" TrackId="2808"/>
+            <Waypoint PathOption="shortest" s="3.7256269712111219e+01" TrackId="2812"/>
+            <Waypoint PathOption="shortest" s="1.1271906305013241e+02" TrackId="2816"/>
+        </Path>
+        <Path Name="Path05" PathId="5">
+            <Waypoint PathOption="shortest" s="1.7295483901999168e+02" TrackId="2810"/>
+            <Waypoint PathOption="shortest" s="3.3058728312042049e+01" TrackId="2811"/>
+        </Path>
         <Player>
             <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_White" Name="Ego"/>
             <Init>
                 <Speed Value="0.0000000000000000e+00"/>
-                <PosAbsolute X="7.9825852601538850e+02" Y="5.7811685818873912e+02" Z="3.8893040009615575e+01" Direction="3.6455400116199814e+00" AlignToRoad="true"/>
+                <PosAbsolute X="1.4634619561911697e+03" Y="6.2492612332545787e+02" Z="5.7450301375000002e+01" Direction="4.7580151908871073e+00" AlignToRoad="true"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="Kawasaki_ZX-9R_green" Name="New Player"/>
+            <Init>
+                <Speed Value="2.7777777777777777e+00"/>
+                <PosRoute/>
+                <PathRef StartS="3.0000000000000000e+02" EndAction="continue" TargetS="1.0236978553305611e+03" StartLane="-2" PathId="1"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player01"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosAbsolute X="1.5028824462890625e+03" Y="9.8135888671875000e+02" Z="5.2923732000000001e+01" Direction="3.6855728929315221e+00" AlignToRoad="true"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player01 Copy "/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosAbsolute X="1.5128227539062500e+03" Y="9.8735412597656250e+02" Z="5.2923732000000001e+01" Direction="3.6855728929315221e+00" AlignToRoad="true"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player02"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="5.0715203409470234e+01" EndAction="continue" TargetS="2.5938308100682548e+02" StartLane="-2" PathId="2"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player03"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="1.5661175455868868e+01" EndAction="continue" TargetS="2.0782254371971567e+02" StartLane="-2" PathId="3"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="Peugeot_207_2011_belle ile blue" Name="New Player04"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="4.5968767751943645e+01" EndAction="continue" TargetS="1.0236978553305613e+03" StartLane="-2" PathId="1"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="VW_PassatVariant_2011_tornado red" Name="New Player06"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="3.6000000000000000e+02" EndAction="continue" TargetS="1.0236978553305611e+03" StartLane="-3" PathId="1"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="MB_Actros_2007_brown" Name="New Player06 Copy "/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="3.7000000000000000e+02" EndAction="continue" TargetS="1.0236978553305611e+03" StartLane="-2" PathId="1"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="SkodaSuperb_15_Black" Name="New Player06 Copy 01"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="3.5000000000000000e+02" EndAction="continue" TargetS="1.0236978553305611e+03" StartLane="-2" PathId="1"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="Segway" Name="New Player05"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosAbsolute X="1.4396763916015625e+03" Y="4.3365881347656250e+02" Z="5.9972593599077001e+01" Direction="3.1784349495379089e+00" AlignToRoad="true"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="MB_Sprinter_2007_blue" Name="New Player07"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosPathShape/>
+                <PathShapeRef StartS="1.0000000000000000e-02" EndAction="continue" TargetS="8.9925930601401859e+01" UsedFor="steering" PathShapeId="3"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player08"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="4.6183339452322961e+01" EndAction="continue" TargetS="2.7747885309697972e+02" StartLane="-1" PathId="4"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="ApriliaSR50_05_BlackRed" Name="New Player09"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="2.4827818932273118e+01" EndAction="continue" TargetS="1.0763002732985279e+02" StartLane="-2" PathId="5"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="AlfaRomeo_Brera_10_BiancoSpino" Name="New Player10"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="6.5873579746320900e+02" EndAction="continue" TargetS="1.0236978553305613e+03" StartLane="-4" PathId="1"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="SkodaSuperb_15_Black" Name="New Player06 Copy 02"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="1.4233331900606024e+02" EndAction="continue" TargetS="1.0236978553305611e+03" StartLane="-2" PathId="1"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="VW_PassatVariant_2011_tornado red" Name="New Player06 Copy 03"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="1.5200000000000000e+02" EndAction="continue" TargetS="1.0236978553305611e+03" StartLane="-3" PathId="1"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="internal" AdaptDriverToVehicleType="true" Type="MB_Actros_2007_brown" Name="New Player06 Copy 04"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosRoute/>
+                <PathRef StartS="1.6433000000000001e+02" EndAction="continue" TargetS="1.0236978553305611e+03" StartLane="-2" PathId="1"/>
+            </Init>
+        </Player>
+        <Player>
+            <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="BMW_7_2009_blue" Name="New Player11"/>
+            <Init>
+                <Speed Value="0.0000000000000000e+00"/>
+                <PosAbsolute X="1.4666602783203125e+03" Y="5.4513238525390625e+02" Z="5.7450301375000002e+01" Direction="4.7541972478157204e+00" AlignToRoad="true"/>
             </Init>
         </Player>
         <PlayerActions Player="Ego"/>
+        <PlayerActions Player="New Player">
+            <Action Name="">
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.1000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="1.1000000000000000e+01" X="1.4634619561911697e+03" Y="6.2492612332545787e+02"/>
+                <SpeedChange Rate="2.0000000000000000e+02" Target="0.0000000000000000e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+            <Action Name="">
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.5000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="1.5000000000000000e+01" X="1.4634619561911697e+03" Y="6.2492612332545787e+02"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="5.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player01"/>
+        <PlayerActions Player="New Player01 Copy "/>
+        <PlayerActions Player="New Player02">
+            <Action Name="">
+                <PosAbsolute CounterID="" CounterComp="COMP_EQ" Radius="8.0000000000000000e+00" X="1.4574066162109375e+03" Y="5.5072888183593750e+02" NetDist="false" CounterVal="0" Pivot="Ego"/>
+                <LaneChange Direction="1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Time="3.0000000000000000e+00"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player03">
+            <Action Name="">
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="2.1000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="2.1000000000000000e+01" X="1.4634619561911697e+03" Y="6.2492612332545787e+02"/>
+                <SpeedChange Rate="2.0000000000000000e+02" Target="1.3888888888888889e+01" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player04">
+            <Action Name="">
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.4000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="1.4000000000000000e+01" X="1.4634619561911697e+03" Y="6.2492612332545787e+02"/>
+                <LaneChange Direction="-1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Time="3.0000000000000000e+00"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+            <Action Name="">
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.4000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="1.4000000000000000e+01" X="1.4634619561911697e+03" Y="6.2492612332545787e+02"/>
+                <LaneChange Direction="1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="5.0000000000000000e+00" Time="3.0000000000000000e+00"/>
+            </Action>
+            <Action Name="">
+                <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.4000000000000000e+01" CounterVal="0" Pivot="Ego"/>
+                <EditorPos Radius="1.4000000000000000e+01" X="1.4634619561911697e+03" Y="6.2492612332545787e+02"/>
+                <LaneChange Direction="-1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="1.2000000000000000e+01" Time="3.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player06">
+            <Action Name="">
+                <PosAbsolute CounterID="" CounterComp="COMP_EQ" Radius="1.6000000000000000e+01" X="1.4525250121944941e+03" Y="8.4670285733928176e+02" NetDist="false" CounterVal="0" Pivot="Ego"/>
+                <SpeedChange Rate="2.0000000000000000e+01" Target="8.3333333333333339e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player06 Copy ">
+            <Action Name="">
+                <PosAbsolute CounterID="" CounterComp="COMP_EQ" Radius="1.6000000000000000e+01" X="1.4536596915085363e+03" Y="8.4647393710858069e+02" NetDist="false" CounterVal="0" Pivot="Ego"/>
+                <SpeedChange Rate="2.0000000000000000e+01" Target="8.3333333333333339e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player06 Copy 01">
+            <Action Name="">
+                <PosAbsolute CounterID="" CounterComp="COMP_EQ" Radius="1.7000000000000000e+01" X="1.4546256392027444e+03" Y="8.4553077952620583e+02" NetDist="false" CounterVal="0" Pivot="Ego"/>
+                <SpeedChange Rate="2.0000000000000000e+01" Target="8.3333333333333339e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player05"/>
+        <PlayerActions Player="New Player07">
+            <Action Name="">
+                <PosAbsolute CounterID="" CounterComp="COMP_EQ" Radius="1.0000000000000000e+01" X="1.4689600830078125e+03" Y="4.8175341796875000e+02" NetDist="false" CounterVal="0" Pivot="Ego"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player08">
+            <Action Name="">
+                <PosAbsolute CounterID="" CounterComp="COMP_EQ" Radius="2.4000000000000000e+01" X="1.3815621029922806e+03" Y="5.4545298708603661e+02" NetDist="false" CounterVal="0" Pivot="Ego"/>
+                <SpeedChange Rate="2.0000000000000000e+02" Target="1.1111111111111112e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player09">
+            <Action Name="">
+                <PosAbsolute CounterID="" CounterComp="COMP_EQ" Radius="5.0000000000000000e+00" X="1.3061757207517142e+03" Y="5.7679361129206472e+02" NetDist="false" CounterVal="0" Pivot="Ego"/>
+                <SpeedChange Rate="1.0000000000000000e+02" Target="1.3888888888888889e+01" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player10"/>
+        <PlayerActions Player="New Player06 Copy 02">
+            <Action Name="">
+                <PosAbsolute CounterID="" CounterComp="COMP_EQ" Radius="1.7000000000000000e+01" X="1.4821576216246194e+03" Y="1.0631519343113621e+03" NetDist="false" CounterVal="0" Pivot="Ego"/>
+                <SpeedChange Rate="2.0000000000000000e+01" Target="8.3333333333333339e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player06 Copy 03">
+            <Action Name="">
+                <PosAbsolute CounterID="" CounterComp="COMP_EQ" Radius="1.6000000000000000e+01" X="1.4718948852413691e+03" Y="1.0570967172025630e+03" NetDist="false" CounterVal="0" Pivot="Ego"/>
+                <SpeedChange Rate="2.0000000000000000e+01" Target="8.3333333333333339e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player06 Copy 04">
+            <Action Name="">
+                <PosAbsolute CounterID="" CounterComp="COMP_EQ" Radius="1.6000000000000000e+01" X="1.4864244620163488e+03" Y="1.0543205557609244e+03" NetDist="false" CounterVal="0" Pivot="Ego"/>
+                <SpeedChange Rate="2.0000000000000000e+01" Target="8.3333333333333339e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+            </Action>
+        </PlayerActions>
+        <PlayerActions Player="New Player11"/>
     </TrafficControl>
     <MovingObjectsControl>
         <PathShape ShapeId="1" ShapeType="polyline" Closed="false" Name="PathShape01">
-            <Waypoint X="1.4365098876953125e+03" Y="1.1988666992187500e+03" Options="0x00000000" Z="4.5626840700000002e+01" Weight="1.0000000000000000e+00" Yaw="4.7453110735982031e+00" Pitch="6.2640886490864496e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.4359041748046875e+03" Y="1.2087850341796875e+03" Options="0x00000000" Z="4.5626840700000002e+01" Weight="1.0000000000000000e+00" Yaw="4.7456744412773864e+00" Pitch="6.2643357146369052e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
             <Waypoint X="1.4614484863281250e+03" Y="4.4163696289062500e+02" Options="0x00000000" Z="6.0096997299999998e+01" Weight="1.0000000000000000e+00" Yaw="3.7430467562321015e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
             <Waypoint X="1.4493298339843750e+03" Y="4.3332025146484375e+02" Options="0x00000000" Z="6.0096997299999998e+01" Weight="1.0000000000000000e+00" Yaw="3.1655569775553007e+00" Pitch="2.9263912986108333e-02" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
             <Waypoint X="1.4168170166015625e+03" Y="4.3254095458984375e+02" Options="0x00000000" Z="5.9145000000000003e+01" Weight="1.0000000000000000e+00" Yaw="2.2706804956902524e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
             <Waypoint X="1.4099045410156250e+03" Y="4.4074966430664062e+02" Options="0x00000000" Z="5.9145000000000003e+01" Weight="1.0000000000000000e+00" Yaw="2.3203982436564345e+00" Pitch="4.4359630423470173e-02" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
-            <Waypoint X="1.3155815429687500e+03" Y="5.4207928466796875e+02" Options="0x00000000" Z="5.3000000000000000e+01" Weight="1.0000000000000000e+00" Yaw="1.8594981792291627e+00" Pitch="3.3991055852457111e-02" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
-            <Waypoint X="1.3060943603515625e+03" Y="5.7402270507812500e+02" Options="0x00000000" Z="5.1866896750000002e+01" Weight="1.0000000000000000e+00" Yaw="2.7711556368917534e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
-            <Waypoint X="1.2776385498046875e+03" Y="5.8507397460937500e+02" Options="0x00000000" Z="5.1866896750000002e+01" Weight="1.0000000000000000e+00" Yaw="3.9174460206252024e+00" Pitch="9.8814081988384921e-03" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
-            <Waypoint X="1.1161234130859375e+03" Y="4.2661303710937500e+02" Options="0x00000000" Z="4.9630981867000003e+01" Weight="1.0000000000000000e+00" Yaw="5.6543897844024054e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
-            <Waypoint X="1.1327568359375000e+03" Y="4.1451602172851562e+02" Options="0x00000000" Z="4.9630981867000003e+01" Weight="1.0000000000000000e+00" Yaw="3.5858284089998735e-02" Pitch="6.2577745101040021e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
-            <Waypoint X="1.1809283447265625e+03" Y="4.1624411010742188e+02" Options="0x00000000" Z="5.0856109395518807e+01" Weight="1.0000000000000000e+00" Yaw="3.5858284089998735e-02" Pitch="6.2577745101040021e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.3155815429687500e+03" Y="5.4207928466796875e+02" Options="0x00000000" Z="5.3000000000000000e+01" Weight="1.0000000000000000e+00" Yaw="2.5074482603470551e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.3074615478515625e+03" Y="5.4805139160156250e+02" Options="0x00000000" Z="5.3000000000000000e+01" Weight="1.0000000000000000e+00" Yaw="1.6208099136542609e+00" Pitch="4.3627209856561211e-02" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.3061639404296875e+03" Y="5.7397485351562500e+02" Options="0x00000000" Z="5.1866896750000002e+01" Weight="1.0000000000000000e+00" Yaw="1.6265141826689075e-01" Pitch="6.2547086996281855e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.3690888671875000e+03" Y="5.8430090332031250e+02" Options="0x00000000" Z="5.3683242946143082e+01" Weight="1.0000000000000000e+00" Yaw="1.6265141826689075e-01" Pitch="6.2547086996281855e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
         </PathShape>
+        <PathShape ShapeId="2" ShapeType="polyline" Closed="false" Name="PathShape02">
+            <Waypoint X="1.4508679199218750e+03" Y="4.3769137573242188e+02" Options="0x00000000" Z="6.0096997299999998e+01" Weight="1.0000000000000000e+00" Yaw="4.7333747850081034e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.4510136718750000e+03" Y="4.3074713134765625e+02" Options="0x00000000" Z="6.0096997299999998e+01" Weight="1.0000000000000000e+00" Yaw="1.2599218264533827e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.4518393554687500e+03" Y="4.3331701660156250e+02" Options="0x00000000" Z="6.0096997299999998e+01" Weight="1.0000000000000000e+00" Yaw="4.7722993904238766e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.4523676757812500e+03" Y="4.2450906372070312e+02" Options="0x00000000" Z="6.0096997299999998e+01" Weight="1.0000000000000000e+00" Yaw="4.7722993904238766e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+        </PathShape>
+        <PathShape ShapeId="3" ShapeType="spline" Closed="false" Name="PathShape03">
+            <Waypoint X="1.4689498291015625e+03" Y="4.8133453369140625e+02" Options="0x00000000" Z="5.9691275309576724e+01" Weight="1.0000000000000000e+00" Yaw="3.5077430327562991e+00" Pitch="6.2519712565908954e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.4662852783203125e+03" Y="4.8031283569335938e+02" Options="0x00000000" Z="5.9726069445715126e+01" Weight="1.0000000000000000e+00" Yaw="0.0000000000000000e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.4626330733176244e+03" Y="4.7871753139354058e+02" Options="0x00000000" Z="5.9708459749057575e+01" Weight="1.0000000000000000e+00" Yaw="0.0000000000000000e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.4629075927734375e+03" Y="4.7395855712890625e+02" Options="0x00000000" Z="5.9988993764262958e+01" Weight="1.0000000000000000e+00" Yaw="4.7700097108549073e+00" Pitch="6.2809626597361365e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.4632101285150432e+03" Y="4.6871390223124388e+02" Options="0x00000000" Z="6.0070195513174532e+01" Weight="1.0000000000000000e+00" Yaw="0.0000000000000000e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.4662653886287123e+03" Y="3.9948288977862438e+02" Options="0x00000000" Z="6.0165789954278594e+01" Weight="1.0000000000000000e+00" Yaw="0.0000000000000000e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.4667889404296875e+03" Y="3.9451037597656250e+02" Options="0x00000000" Z="6.0165789954278594e+01" Weight="1.0000000000000000e+00" Yaw="4.8172916361298812e+00" Pitch="6.2809626597361365e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+        </PathShape>
+        <Character CharacterType="female_adult" Class="pedestrian" Appearance="Hannah3" Name="New Character">
+            <StartPosAbs X="1.4509191894531250e+03" Y="4.3772604370117188e+02" Z="6.0096997299999998e+01" Direction="4.7855476459286370e+00"/>
+        </Character>
+        <CharacterActions Character="New Character">
+            <Action Name="">
+                <PosAbsolute CounterID="" CounterComp="COMP_EQ" Radius="1.0000000000000000e+01" X="1.4509191894531250e+03" Y="4.3772604370117188e+02" NetDist="false" CounterVal="0" Pivot="Ego"/>
+                <Motion Move="run" Rate="0.0000000000000000e+00" Speed="4.4000000953674316e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
+                <CharacterPath Loop="false" PathShape="2" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Beam="true" ClampToGround="false"/>
+            </Action>
+        </CharacterActions>
+        <Object Type="other" Name="New Object" Definition="Bucket01">
+            <Scaling X="2.0000000000000000e+00" Y="2.0000000000000000e+00" Z="2.0000000000000000e+00"/>
+            <StartPosAbs X="1.4447878417968750e+03" Y="9.6972869873046875e+02" Z="4.5094459178350832e+01" Direction="0.0000000000000000e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00"/>
+        </Object>
+        <Object Type="other" Name="New Object01" Definition="DuplexRamp01">
+            <StartPosAbs X="1.4468155517578125e+03" Y="9.4891119384765625e+02" Z="4.5538090364454199e+01" Direction="4.7489134440867344e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00"/>
+        </Object>
+        <Object Type="pole" Name="New Object02" Definition="RdPoleRedWhite">
+            <Scaling X="3.0000000000000000e+00" Y="3.0000000000000000e+00" Z="3.0000000000000000e+00"/>
+            <StartPosAbs X="1.4570659179687500e+03" Y="6.8742193603515625e+02" Z="5.6741213396283193e+01" Direction="5.0380357266220752e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00"/>
+        </Object>
+        <Object Type="other" Name="New Object03" Definition="Fuelcan01">
+            <Scaling X="3.0000000000000000e+00" Y="3.0000000000000000e+00" Z="3.0000000000000000e+00"/>
+            <StartPosAbs X="1.4615625000000000e+03" Y="6.7476226806640625e+02" Z="5.7106719133443058e+01" Direction="1.5916814802848107e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00"/>
+        </Object>
+        <Object Type="other" Name="New Object04" Definition="MiscBoomgateCtrlBox">
+            <Scaling X="2.0000000000000000e+00" Y="2.0000000000000000e+00" Z="2.0000000000000000e+00"/>
+            <StartPosAbs X="1.4594282226562500e+03" Y="6.4590533447265625e+02" Z="5.7450301375000002e+01" Direction="4.7123889803846897e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00"/>
+        </Object>
+        <ObjectActions Object="New Object"/>
+        <ObjectActions Object="New Object01"/>
+        <ObjectActions Object="New Object02"/>
+        <ObjectActions Object="New Object03"/>
+        <ObjectActions Object="New Object04"/>
     </MovingObjectsControl>
     <LightSigns>
         <SignalController Id="1" DelayRef="-1" Delay="0.0000000000000000e+00">

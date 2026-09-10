@@ -18,13 +18,26 @@ bool preparePrecomputedMission(MissionCorridorData& output,
                                const std::string& directory,
                                std::string* error) {
     output = {};
+    namespace fs = std::filesystem;
+    // The exported lane geometry is only an input to this startup's Python
+    // precompute.  Remove it after the artifact has been loaded, and also on
+    // generator/load failures, so repeated config checks cannot fill the disk
+    // with orphaned startup-<pid> directories.
+    struct ScratchDirectoryGuard {
+        fs::path path;
+        ~ScratchDirectoryGuard() {
+            if (path.empty()) return;
+            std::error_code ignored;
+            fs::remove_all(path, ignored);
+        }
+    } scratchGuard;
     try {
-        namespace fs = std::filesystem;
         auto dest = fs::absolute(directory);
 #ifndef _WIN32
         // Separate simultaneous startup/config checks so neither can load
         // the other mission's checkpoint result.
         dest /= "startup-"+std::to_string(getpid());
+        scratchGuard.path = dest;
 #endif
         if (!exportMissionMap(map, dest.string()))
             throw std::runtime_error("cannot export loaded XODR lane geometry");

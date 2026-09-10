@@ -5,14 +5,21 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, field
+import gzip
+import hashlib
+import json
+import os
 import re
 import shlex
 import subprocess
 import sys
+import threading
 import time
+import uuid
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
+from typing import BinaryIO
 
 from validate_scenario import REPO_ROOT, load_manifest, validate_scenario
 from vtd_scp import ScpError, VtdScpClient
@@ -30,6 +37,352 @@ TRAFFIC_LOSS_MARKERS = (
     "connection <traffic> lost",
 )
 TRAFFIC_CONNECTED_MARKER = '"<traffic> connected"'
+EVIDENCE_MANIFEST_NAME = "evidence_manifest.json"
+EVIDENCE_LOCK_NAME = ".evidence.lock"
+ACTIVE_ASSESSMENT_PROFILE = Path("/tmp/hl_vtd_active_assessment.json")
+
+
+class EvidenceExistsError(RuntimeError):
+    pass
+
+
+def publish_active_assessment_profile(
+    path: Path,
+    scenario_id: str,
+    run_id: str,
+    route_file: Path,
+    scenario_file: Path,
+    checkpoints_file: Path | None,
+    mission_start_leg: int,
+) -> str:
+    """Atomically tell the dashboard which validated route is being driven."""
+    token = uuid.uuid4().hex
+    payload = {
+        "schema_version": 1,
+        "status": "RUNNING",
+        "ownership_token": token,
+        "publisher_pid": os.getpid(),
+        "created_wall_time_ns": time.time_ns(),
+        "scenario_id": scenario_id,
+        "run_id": run_id,
+        "route_csv": str(route_file.resolve()),
+        "scenario_file": str(scenario_file.resolve()),
+        "checkpoints_csv": str(checkpoints_file.resolve()) if checkpoints_file else None,
+        "mission_start_leg": mission_start_leg,
+        "section_count": 5,
+        "max_projection_distance_m": 20.0,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{token}.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+    return token
+
+
+def clear_active_assessment_profile(path: Path, ownership_token: str) -> None:
+    """Remove only the profile published by this run, never another runner's."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+        return
+    if payload.get("ownership_token") == ownership_token:
+        path.unlink(missing_ok=True)
+
+
+class ControllerExitBeforePlay(ScpError):
+    """HL_VTD ended before VTD Play, including a misleading exit status 0."""
+
+    def __init__(self, exit_code: int):
+        self.controller_exit_code = exit_code
+        # A clean child exit is still an automation failure when it happens
+        # before Play. Preserve real failure codes, but never report this case
+        # as a successful runner invocation.
+        self.runner_exit_code = exit_code if exit_code != 0 else 2
+        super().__init__(f"HL_VTD exited before Play with status {exit_code}")
+
+
+def file_evidence(path: Path) -> dict:
+    record = {"path": str(path)}
+    try:
+        stat = path.stat()
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        record.update(size=stat.st_size, sha256=digest.hexdigest())
+    except OSError as error:
+        record["error"] = str(error)
+    return record
+
+
+class RvizHistoryRecorder:
+    """Best-effort compressed history of the logger's atomic latest.json."""
+
+    def __init__(self, directory: Path, poll_interval: float = .01):
+        self.directory = directory
+        self.latest = directory / "latest.json"
+        self.history = directory / "frames.jsonl.gz"
+        self.poll_interval = poll_interval
+        self.stop_event = threading.Event()
+        self.thread: threading.Thread | None = None
+        self.output = None
+        self.last_signature = None
+        self.last_frame: int | None = None
+        self.captured_frames = 0
+        self.estimated_missed_frames = 0
+        self.read_errors = 0
+        self.error: str | None = None
+
+    def start(self) -> None:
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self.output = gzip.open(
+            self.history, "xt", encoding="utf-8", compresslevel=1
+        )
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _capture(self) -> None:
+        try:
+            raw = self.latest.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return
+        except OSError:
+            self.read_errors += 1
+            return
+        try:
+            frame = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeError):
+            # latest.json is atomically replaced by the controller, but retain
+            # a diagnostic if a foreign writer violates that contract.
+            self.read_errors += 1
+            return
+        if not isinstance(frame, dict):
+            self.read_errors += 1
+            return
+        signature = (frame.get("frame"), frame.get("time_s"))
+        if signature == self.last_signature:
+            return
+        number = frame.get("frame")
+        if isinstance(number, int) and not isinstance(number, bool):
+            if self.last_frame is not None and number > self.last_frame + 1:
+                self.estimated_missed_frames += number - self.last_frame - 1
+            self.last_frame = number
+        assert self.output is not None
+        self.output.write(
+            json.dumps(frame, ensure_ascii=False, separators=(",", ":")) + "\n"
+        )
+        self.captured_frames += 1
+        if self.captured_frames % 20 == 0:
+            self.output.flush()
+        self.last_signature = signature
+
+    def _run(self) -> None:
+        try:
+            while not self.stop_event.wait(self.poll_interval):
+                self._capture()
+            self._capture()
+        except Exception as error:
+            self.error = str(error)
+
+    def close(self) -> None:
+        self.stop_event.set()
+        if self.thread is not None:
+            self.thread.join(timeout=2)
+        if self.output is not None:
+            try:
+                self.output.close()
+            except OSError as error:
+                self.error = str(error)
+            self.output = None
+
+    def status(self) -> dict:
+        return {
+            "path": str(self.history),
+            "format": "gzip_json_lines",
+            "capture_mode": "best_effort_latest_json_poll",
+            "captured_frames": self.captured_frames,
+            "estimated_missed_frames": self.estimated_missed_frames,
+            "read_errors": self.read_errors,
+            "error": self.error,
+        }
+
+
+class EvidenceBundle:
+    def __init__(self, directory: Path, scenario_id: str, run_id: str,
+                 inputs: dict[str, Path]):
+        self.directory = directory
+        self.lock_path = directory / EVIDENCE_LOCK_NAME
+        self.manifest_path = directory / EVIDENCE_MANIFEST_NAME
+        self.finalized = False
+        self.rviz_history: RvizHistoryRecorder | None = None
+        directory.mkdir(parents=True, exist_ok=True)
+        try:
+            with self.lock_path.open("x", encoding="utf-8") as stream:
+                stream.write(f"pid={os.getpid()}\n")
+        except FileExistsError as error:
+            raise EvidenceExistsError(str(directory)) from error
+        existing = [path for path in directory.iterdir()
+                    if path != self.lock_path]
+        if existing:
+            self.lock_path.unlink(missing_ok=True)
+            raise EvidenceExistsError(str(directory))
+        try:
+            self.manifest = {
+                "schema_version": 1,
+                "status": "PREPARING",
+                "scenario_id": scenario_id,
+                "run_id": run_id,
+                "created_at": datetime.now().astimezone().isoformat(),
+                "exit_code": None,
+                "command": None,
+                "console_capture": {
+                    "scope": "controller_process",
+                    "stdout": "console.stdout.log",
+                    "stderr": "console.stderr.log",
+                },
+                "video_evidence": {
+                    "included": False,
+                    "status": "requires_dashboard_recorder",
+                    "reason": (
+                        "run_scenario does not own the dashboard mainRS/birdRS "
+                        "capture streams"
+                    ),
+                    "required_dashboard_integration": (
+                        "--record-video-dir <separate-empty-video-directory>"
+                    ),
+                    "directory_constraint": (
+                        "Do not create this run directory or a child of it "
+                        "before run_scenario --evidence claims the run ID; use "
+                        "a separate output/video_evidence directory and "
+                        "correlate the two manifests by timestamps."
+                    ),
+                },
+                "inputs": {name: file_evidence(path)
+                           for name, path in inputs.items() if path is not None},
+                "artifacts": [],
+            }
+            self._write_manifest()
+        except BaseException:
+            self.lock_path.unlink(missing_ok=True)
+            self.manifest_path.unlink(missing_ok=True)
+            self.manifest_path.with_suffix(".json.tmp").unlink(missing_ok=True)
+            raise
+
+    def _write_manifest(self) -> None:
+        temporary = self.manifest_path.with_suffix(".json.tmp")
+        temporary.write_text(
+            json.dumps(self.manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(self.manifest_path)
+
+    def set_command(self, command: list[str]) -> None:
+        self.manifest["command"] = command
+        self._write_manifest()
+
+    def start(self, visualization_directory: Path) -> None:
+        self.manifest["status"] = "RUNNING"
+        self.rviz_history = RvizHistoryRecorder(visualization_directory)
+        self.rviz_history.start()
+        self._write_manifest()
+
+    def finalize(self, exit_code: int, status: str | None = None) -> None:
+        if self.finalized:
+            return
+        if self.rviz_history is not None:
+            self.rviz_history.close()
+            self.manifest["rviz_history"] = self.rviz_history.status()
+        self.lock_path.unlink(missing_ok=True)
+        artifacts = []
+        for path in sorted(self.directory.rglob("*")):
+            if (not path.is_file() or path == self.manifest_path
+                    or path.name == self.manifest_path.with_suffix(".json.tmp").name):
+                continue
+            record = file_evidence(path)
+            record["path"] = str(path.relative_to(self.directory))
+            artifacts.append(record)
+        self.manifest.update(
+            status=status or ("COMPLETED" if exit_code == 0 else "FAILED"),
+            exit_code=exit_code,
+            completed_at=datetime.now().astimezone().isoformat(),
+            artifacts=artifacts,
+        )
+        self._write_manifest()
+        self.finalized = True
+
+
+def open_console_logs(directory: Path | None) -> tuple[BinaryIO | None, BinaryIO | None]:
+    if directory is None:
+        return None, None
+    stdout = (directory / "console.stdout.log").open("xb")
+    try:
+        stderr = (directory / "console.stderr.log").open("xb")
+    except BaseException:
+        stdout.close()
+        raise
+    return stdout, stderr
+
+
+def close_console_logs(streams: tuple[BinaryIO | None, BinaryIO | None]) -> None:
+    for stream in streams:
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError as error:
+                # Closing an evidence sidecar must not replace the controller's
+                # actual exit status.
+                print(
+                    f"[evidence] warning: console log close failed: {error}",
+                    file=sys.stderr,
+                )
+
+
+def start_controller(
+    command: list[str], evidence_directory: Path | None = None
+) -> tuple[subprocess.Popen[bytes], tuple[BinaryIO | None, BinaryIO | None]]:
+    streams = open_console_logs(evidence_directory)
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=REPO_ROOT,
+            stdout=streams[0],
+            stderr=streams[1],
+        )
+    except BaseException:
+        close_console_logs(streams)
+        raise
+    return process, streams
+
+
+def run_controller(
+    command: list[str], evidence_directory: Path | None = None
+) -> int:
+    process, streams = start_controller(command, evidence_directory)
+    try:
+        return process.wait()
+    except BaseException:
+        terminate_process(process)
+        raise
+    finally:
+        close_console_logs(streams)
+
+
+def finish_evidence(
+    bundle: EvidenceBundle | None, exit_code: int, status: str | None = None
+) -> int:
+    if bundle is not None:
+        try:
+            bundle.finalize(exit_code, status)
+        except Exception as error:
+            # Evidence I/O must never replace the controller or runner status.
+            print(
+                f"[evidence] warning: manifest finalization failed: {error}",
+                file=sys.stderr,
+            )
+    return exit_code
 
 
 def scenario_requires_traffic(scenario_file: Path) -> bool:
@@ -288,6 +641,14 @@ def parse_args() -> argparse.Namespace:
         help="Write the detailed planning decision trace to this file",
     )
     parser.add_argument(
+        "--evidence",
+        action="store_true",
+        help=(
+            "Create a non-overwriting evidence bundle in the run directory "
+            "(decision/timing, compressed RViz history, console logs, manifest)"
+        ),
+    )
+    parser.add_argument(
         "--rviz-data",
         action="store_true",
         help=(
@@ -317,6 +678,15 @@ def parse_args() -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Print the resolved files and command without starting HL_VTD",
+    )
+    parser.add_argument(
+        "--active-assessment-profile",
+        type=Path,
+        default=ACTIVE_ASSESSMENT_PROFILE,
+        help=(
+            "Atomic dashboard route-profile handoff "
+            f"(default: {ACTIVE_ASSESSMENT_PROFILE})"
+        ),
     )
     args = parser.parse_args()
     if not 1 <= args.scp_port <= 65535:
@@ -429,8 +799,10 @@ def run_automated(
     scp_host: str,
     ready_file: Path,
     requires_traffic: bool,
+    evidence_directory: Path | None = None,
 ) -> int:
     controller: subprocess.Popen[bytes] | None = None
+    console_streams: tuple[BinaryIO | None, BinaryIO | None] = (None, None)
     traffic_monitor: TrafficHealthMonitor | None = None
     with VtdScpClient(scp_host, args.scp_port, args.vtd_timeout) as scp:
         try:
@@ -477,7 +849,9 @@ def run_automated(
                 "[auto-vtd] follower and bird view popups configured for Ego"
             )
             print("[auto-vtd] VTD is initialized; starting HL_VTD")
-            controller = subprocess.Popen(command, cwd=REPO_ROOT)
+            controller, console_streams = start_controller(
+                command, evidence_directory
+            )
             try:
                 controller.wait(timeout=0.1)
             except subprocess.TimeoutExpired:
@@ -486,6 +860,8 @@ def run_automated(
             while not ready_file.is_file():
                 early_exit = controller.poll()
                 if early_exit is not None:
+                    if evidence_directory is not None:
+                        raise ControllerExitBeforePlay(early_exit)
                     raise ScpError(
                         f"HL_VTD exited before Play with status {early_exit}"
                     )
@@ -539,8 +915,11 @@ def run_automated(
                     )
                 time.sleep(0.1)
         finally:
-            if controller is not None:
-                terminate_process(controller)
+            try:
+                if controller is not None:
+                    terminate_process(controller)
+            finally:
+                close_console_logs(console_streams)
             ready_file.unlink(missing_ok=True)
             try:
                 print("[auto-vtd] stopping VTD")
@@ -587,17 +966,59 @@ def main() -> int:
         / run_id
         / "run.csv"
     ).resolve()
-    # Rendered scenario/config and the mission corridor visualization all belong
-    # to this run. Create the run directory before any of them are generated.
-    log_file.parent.mkdir(parents=True, exist_ok=True)
+    run_directory = log_file.parent
     checkpoints_file = (report.package / "checkpoints.csv").resolve()
     if not checkpoints_file.is_file():
         checkpoints_file = None
+    evidence: EvidenceBundle | None = None
+    if args.evidence:
+        inputs = {
+            "package_manifest": (report.package / "scenario.yaml").resolve(),
+            "scenario": report.scenario_file.resolve(),
+            "route": report.route_file.resolve(),
+            "network_config": args.config.resolve(),
+            "controller_binary": binary,
+        }
+        if checkpoints_file is not None:
+            inputs["checkpoints"] = checkpoints_file
+        try:
+            evidence = EvidenceBundle(
+                run_directory, scenario_id, run_id, inputs
+            )
+        except (EvidenceExistsError, OSError) as error:
+            suggestion = f"{run_id}_{default_run_id()}"
+            print(
+                "[evidence] refusing to reuse a non-empty or claimed run "
+                f"directory: {run_directory}\n"
+                f"[evidence] choose a unique run ID, for example: "
+                f"--run-id {suggestion}\n"
+                "[evidence] alternatively omit --run-id to generate one "
+                f"automatically ({error}).",
+                file=sys.stderr,
+            )
+            return 2
+    else:
+        run_directory.mkdir(parents=True, exist_ok=True)
+    # Rendered scenario/config and the mission corridor visualization all belong
+    # to this run. Create the run directory before any of them are generated.
     mission_output = (
-        log_file.parent / "mission_corridor.svg"
+        run_directory / "mission_corridor.svg"
         if checkpoints_file is not None else None
     )
-    visualization_dir = log_file.parent / "rviz" if args.rviz_data else None
+    visualization_dir = (
+        run_directory / "rviz" if args.rviz_data or evidence is not None else None
+    )
+    decision_log = (
+        run_directory / "decision.log"
+        if evidence is not None
+        else (args.decision_log.resolve() if args.decision_log else None)
+    )
+    if evidence is not None and args.decision_log is not None:
+        print(
+            "[evidence] --decision-log is managed inside the bundle as "
+            f"{decision_log}; requested path was not used.",
+            file=sys.stderr,
+        )
     scenario_file = report.scenario_file.resolve()
     try:
         parameter_values = resolve_parameters(
@@ -614,15 +1035,15 @@ def main() -> int:
                 print(f"[parameter] {name}={value:g}")
     except (OSError, ET.ParseError, ParameterError) as error:
         print(f"[run_scenario] parameter rendering failed: {error}", file=sys.stderr)
-        return 2
-    ready_file = log_file.parent / "controller.ready" if args.auto_vtd else None
+        return finish_evidence(evidence, 2, "SETUP_FAILED")
+    ready_file = run_directory / "controller.ready" if args.auto_vtd else None
     try:
         runtime_control_config = render_control_config(
-            report.manifest, log_file.parent / "control.rendered.yaml"
+            report.manifest, run_directory / "control.rendered.yaml"
         )
     except (OSError, ValueError, RuntimeError) as error:
         print(f"[run_scenario] control config rendering failed: {error}", file=sys.stderr)
-        return 2
+        return finish_evidence(evidence, 2, "SETUP_FAILED")
     command = build_command(
         binary,
         args.config.resolve(),
@@ -631,7 +1052,7 @@ def main() -> int:
         run_id,
         log_file,
         ready_file,
-        args.decision_log.resolve() if args.decision_log else None,
+        decision_log,
         bool(report.manifest.get("control", {}).get("ignore_traffic_lights", False)),
         runtime_control_config,
         checkpoints_file,
@@ -640,6 +1061,15 @@ def main() -> int:
         mission_start_leg=report.manifest.get("runtime", {}).get(
             "mission_start_leg", 0),
     )
+    if evidence is not None:
+        try:
+            evidence.set_command(command)
+        except OSError as error:
+            print(
+                f"[evidence] cannot record the controller command: {error}",
+                file=sys.stderr,
+            )
+            return finish_evidence(evidence, 2, "SETUP_FAILED")
 
     # Build the checkpoint corridor and its image before touching VTD. This
     # catches a disconnected mission early and guarantees that dry-runs also
@@ -650,19 +1080,26 @@ def main() -> int:
                 f"[run_scenario] HL_VTD executable not found: {binary}",
                 file=sys.stderr,
             )
-            return 2
+            return finish_evidence(evidence, 2, "SETUP_FAILED")
         mission_check = command + ["--check-config"]
         completed = subprocess.run(
             mission_check, cwd=REPO_ROOT, check=False,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
         if completed.returncode != 0:
+            if evidence is not None:
+                (run_directory / "preflight.stdout.log").write_text(
+                    completed.stdout, encoding="utf-8"
+                )
+                (run_directory / "preflight.stderr.log").write_text(
+                    completed.stderr, encoding="utf-8"
+                )
             print(
                 "[run_scenario] checkpoint corridor generation failed:\n"
                 + completed.stdout + completed.stderr,
                 file=sys.stderr,
             )
-            return 2
+            return finish_evidence(evidence, 2, "SETUP_FAILED")
         print(f"[mission] corridor map saved: {mission_output}")
 
     print()
@@ -675,6 +1112,9 @@ def main() -> int:
         print(f"Map SVG  : {mission_output}")
     if visualization_dir is not None:
         print(f"RViz data: {visualization_dir}")
+    if evidence is not None:
+        print(f"Evidence : {run_directory}")
+        print(f"Manifest : {evidence.manifest_path}")
     print(f"Log      : {log_file}")
     print(f"Command  : {shlex.join(command)}")
     if args.auto_vtd:
@@ -682,7 +1122,7 @@ def main() -> int:
             scp_host = args.scp_host or load_vtd_host(args.config.resolve())
         except (OSError, ValueError, RuntimeError) as error:
             print(f"[run_scenario] {error}", file=sys.stderr)
-            return 2
+            return finish_evidence(evidence, 2, "SETUP_FAILED")
         print(f"VTD SCP  : {scp_host}:{args.scp_port} (automatic Load/Apply/Play/Stop)")
         vtd_scenario_file = (
             args.vtd_scenario_file or scenario_file
@@ -696,30 +1136,70 @@ def main() -> int:
 
     if args.dry_run:
         print("[run_scenario] dry-run; HL_VTD was not started.")
-        return 0
+        return finish_evidence(evidence, 0, "DRY_RUN")
     if not binary.is_file():
         print(
             f"[run_scenario] HL_VTD executable not found: {binary}",
             file=sys.stderr,
         )
-        return 2
+        return finish_evidence(evidence, 2, "SETUP_FAILED")
+
+    profile_path = getattr(
+        args, "active_assessment_profile", ACTIVE_ASSESSMENT_PROFILE
+    )
+    try:
+        profile_token = publish_active_assessment_profile(
+            profile_path,
+            scenario_id,
+            run_id,
+            report.route_file,
+            scenario_file,
+            checkpoints_file,
+            report.manifest.get("runtime", {}).get("mission_start_leg", 0),
+        )
+        print(f"Assessment: {profile_path} ({scenario_id} / {run_id})")
+    except OSError as error:
+        print(
+            f"[run_scenario] cannot publish dashboard assessment route: {error}",
+            file=sys.stderr,
+        )
+        return finish_evidence(evidence, 2, "SETUP_FAILED")
 
     try:
+        if evidence is not None:
+            assert visualization_dir is not None
+            evidence.start(visualization_dir)
         if args.auto_vtd:
             assert ready_file is not None
             ready_file.unlink(missing_ok=True)
-            return run_automated(
+            exit_code = run_automated(
                 args, command, vtd_scenario_file, scp_host,
                 ready_file, scenario_requires_traffic(scenario_file),
+                run_directory if evidence is not None else None,
             )
-        completed = subprocess.run(command, cwd=REPO_ROOT, check=False)
-        return completed.returncode
+        else:
+            exit_code = run_controller(
+                command, run_directory if evidence is not None else None
+            )
+        return finish_evidence(evidence, exit_code)
     except KeyboardInterrupt:
         print("\n[run_scenario] interrupted", file=sys.stderr)
-        return 130
+        return finish_evidence(evidence, 130, "INTERRUPTED")
+    except ControllerExitBeforePlay as error:
+        print(f"[run_scenario] automation failed: {error}", file=sys.stderr)
+        if evidence is not None:
+            evidence.manifest["controller_exit_code"] = error.controller_exit_code
+        return finish_evidence(
+            evidence, error.runner_exit_code, "AUTOMATION_FAILED"
+        )
     except ScpError as error:
         print(f"[run_scenario] automation failed: {error}", file=sys.stderr)
-        return 2
+        return finish_evidence(evidence, 2, "AUTOMATION_FAILED")
+    except OSError as error:
+        print(f"[run_scenario] controller launch failed: {error}", file=sys.stderr)
+        return finish_evidence(evidence, 2, "LAUNCH_FAILED")
+    finally:
+        clear_active_assessment_profile(profile_path, profile_token)
 
 
 if __name__ == "__main__":

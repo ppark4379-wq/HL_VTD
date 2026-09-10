@@ -31,11 +31,22 @@ def main():
                       start_trigger=payload['start_source'],control_monitor_required=True,
                       completion=payload['completion'],finish_line=payload['finish_line'],finish_candidates=payload['finish_candidates'],
                       school_zone_validation=payload['school_zone_validation'],feature_counts=payload['feature_counts'],
-                      respawn_detection='PROVISIONAL_COORDINATE_JUMP' if engine.session.get('respawn_jump_m') is not None else 'UNCONFIGURED',
+                      respawn_detection=(
+                          'CONFIRMED_EVENT_SOURCE'
+                          if engine.respawn_detection_confirmed
+                          else 'REVIEW_ONLY_COORDINATE_JUMP'
+                          if engine.session.get('respawn_jump_m') is not None
+                          else 'UNCONFIGURED'
+                      ),
                       object_feed_complete=engine.meta.get('object_feed_complete',False))
         server.VIDEO_RTSP_URL=server.configured_rtsp_url()
-        command,source,error=server.video_capture_command()
-        report['video']={'candidate':source,'error':error,'capture_started':False}
+        server.VIDEO_RTSP_URLS={"mainrs":server.VIDEO_RTSP_URL,"birdrs":None}
+        views={}
+        for view in ("mainrs","birdrs"):
+            command,source,error=server.video_capture_command(view)
+            views[view]={'candidate':source,'error':error,'capture_started':False}
+        # Preserve the former top-level mainRS fields for existing consumers.
+        report['video']={**views['mainrs'],'views':views}
         if args.probe_rdb:
             decoder=Decoder(); end=time.monotonic()+3; sample=None
             try:

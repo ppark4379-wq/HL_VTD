@@ -862,22 +862,16 @@ bool initializeMissionCorridor(MissionCorridorData& output,
 
 bool missionPointIsTarget(const MissionLegData& leg, const Waypoint& point) {
     const LaneKey key{point.roadId, point.sectionIndex, point.laneId};
-    if(leg.topologyAuthority && !leg.finalLeg) {
-        // An intersection exit checkpoint identifies a directed road, not a
-        // mandatory lane centre. A safe parallel lane on that same permitted
-        // exit road completes the gateway too; other turns/roads do not.
-        if(key.laneId==0 || !leg.allowedLanes.count(key) ||
-           !std::isfinite(point.roadS)) return false;
-        for(const auto& target:leg.targetLanes) {
-            if(target.roadId!=key.roadId || target.laneId==0 ||
-               (target.laneId>0)!=(key.laneId>0)) continue;
-            const auto station=leg.targetRoadS.find(target);
-            if(station==leg.targetRoadS.end() || !std::isfinite(station->second)) continue;
-            if(key.laneId<0 ? point.roadS>=station->second-.25
-                            : point.roadS<=station->second+.25) return true;
-        }
-        return false;
-    }
+    // A topology artifact has already selected the directed handoff lane(s)
+    // that preserve the whole mission.  Do not broaden that contract to every
+    // parallel lane on the same exit road.  A neighbouring lane can have a
+    // different successor at the very next junction: M15's 2809/-2 reaches
+    // 2975 -> 2811, while 2809/-1 reaches 2969.  Treating both as the current
+    // leg's zero-cost goal advanced mission progress on the irreversible
+    // branch and also made an obstacle candidate into that lane look
+    // gateway-preserving.  Safe alternatives must be emitted explicitly in
+    // targetLanes by the whole-mission precompute, where their downstream
+    // connectivity can be proven.
     if (!leg.targetLanes.count(key)) return false;
     const auto station = leg.targetRoadS.find(key);
     if (station == leg.targetRoadS.end()) return !leg.topologyAuthority;

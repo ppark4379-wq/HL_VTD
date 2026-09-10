@@ -430,7 +430,11 @@ std::vector<LaneMatch> expandToNearbyDrivingLanes(
     // 실제로 연결되지 않는 checkpoint 조합이 된다. 주변의 모든 driving
     // lane을 후보로 열고, 뒤 DP가 checkpoint 전체를 합법적으로 연결하는
     // road/lane 조합을 고르게 한다.
-    constexpr double kMaximumNearbyLaneDistance = 8.5;
+    // 대회 checkpoint는 특정 차선의 정밀 좌표가 아니라 교차로 진입/진출의
+    // 대략적인 위치다. 넓은 교차로에서는 올바른 approach/exit lane 중심이
+    // 좌표에서 10 m 이상 떨어질 수 있으므로 한 차로 폭 수준의 반경으로
+    // 제한하면 가까운 connectingRoad에 잘못 고정된다.
+    constexpr double kMaximumNearbyLaneDistance = 15.0;
     std::vector<LaneMatch> candidates = containing;
     for (const auto& [key, segment] : data.laneSegments) {
         if (key.laneId == 0 || segment.points.empty()) continue;
@@ -500,12 +504,19 @@ double checkpointLanePenalty(const PathGeneratorData& data,
         std::min(match.pointIndex, segment->second.points.size() - 1)];
     const double headingError = std::abs(normalizeAngle(
         point.yaw - checkpointHeading(data.checkpoints, checkpointIndex)));
-    // checkpoint 사이 직선은 곡선 도로에서 정확한 tangent는 아니므로 hard
-    // reject하지 않고, 반대방향/큰 우회 후보만 비용으로 강하게 억제한다.
+    // checkpoint 사이 직선은 곡선 도로의 정확한 tangent는 아니지만, 진행
+    // 방향과 거의 반대인 차선은 큰 순환 우회만 만들므로 후보에서 제외한다.
+    constexpr double kMaximumHeadingError = 2.35;
+    if (headingError > kMaximumHeadingError) {
+        return std::numeric_limits<double>::infinity();
+    }
     return match.distance * 10.0 + headingError * headingError * 20.0;
 }
 
 }  // namespace
+
+bool smoothAlternatingSamplingSpikes(std::vector<Waypoint>& path);
+bool smoothSameRoadHeadingSteps(std::vector<Waypoint>& path);
 
 // Ego GT의 heading까지 사용하여 반대 방향 차선 오매칭을 줄인다.
 LaneMatch matchEgoToLane(const PathGeneratorData& data, const GtFrame& gt) {
@@ -517,11 +528,36 @@ LaneMatch matchEgoToLane(const PathGeneratorData& data, const GtFrame& gt) {
     // 동적 계획법으로 선택해, 가까워도 큰 우회가 필요한 lane은 제외한다.
 std::vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
         std::vector<std::vector<LaneMatch>> candidateSets;
-        for (const Checkpoint& checkpoint : data.checkpoints) {
+        for (std::size_t checkpointIndex = 0;
+             checkpointIndex < data.checkpoints.size(); ++checkpointIndex) {
+            const Checkpoint& checkpoint = data.checkpoints[checkpointIndex];
             const std::vector<LaneMatch> containing =
                 findContainingLanes(data, checkpoint.x, checkpoint.y);
             candidateSets.push_back(expandToNearbyDrivingLanes(
                 data, checkpoint.x, checkpoint.y, containing));
+            // 대회 중간 checkpoint는 교차로 진입/진출의 대략 좌표다.
+            // 주변에 일반 approach/exit road가 존재하면 특정 회전 하나를
+            // 뜻하는 junction connectingRoad에 직접 고정하지 않는다.
+            if (checkpointIndex > 0 &&
+                checkpointIndex + 1 < data.checkpoints.size()) {
+                auto& candidates = candidateSets.back();
+                const bool hasOrdinaryRoad = std::any_of(
+                    candidates.begin(), candidates.end(),
+                    [&](const LaneMatch& match) {
+                        const auto road = data.roads.find(match.roadId);
+                        return road != data.roads.end() &&
+                               road->second.junction < 0;
+                    });
+                if (hasOrdinaryRoad) {
+                    candidates.erase(std::remove_if(
+                        candidates.begin(), candidates.end(),
+                        [&](const LaneMatch& match) {
+                            const auto road = data.roads.find(match.roadId);
+                            return road != data.roads.end() &&
+                                   road->second.junction >= 0;
+                        }), candidates.end());
+                }
+            }
             if (candidateSets.back().empty()) {
                 const LaneMatch nearest =
                     worldToLane(data, checkpoint.x, checkpoint.y);
@@ -551,6 +587,9 @@ std::vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
                                           infinity);
             previous[checkpointIndex].resize(
                 candidateSets[checkpointIndex].size(), -1);
+            std::size_t routeMissingCount = 0;
+            std::size_t routeAssemblyFailureCount = 0;
+            std::unordered_map<std::string, std::size_t> invalidPathReasons;
 
             for (std::size_t currentIndex = 0;
                  currentIndex < candidateSets[checkpointIndex].size();
@@ -576,7 +615,10 @@ std::vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
 
                     const std::vector<LaneKey> route =
                         connectLanes(data, priorKey, currentKey);
-                    if (route.empty()) continue;
+                    if (route.empty()) {
+                        ++routeMissingCount;
+                        continue;
+                    }
                     int lateralTransitions = 0;
                     for (std::size_t routeIndex = 1;
                          routeIndex < route.size(); ++routeIndex) {
@@ -592,13 +634,17 @@ std::vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
                     std::vector<Waypoint> candidatePath;
                     if (!appendRoute(data, route, prior, current,
                                      candidatePath)) {
+                        ++routeAssemblyFailureCount;
                         continue;
                     }
                     removeDuplicates(candidatePath);
                     updateYawAndS(candidatePath);
+                    smoothAlternatingSamplingSpikes(candidatePath);
+                    smoothSameRoadHeadingSteps(candidatePath);
                     std::string invalidReason;
                     if (!validateGeneratedPath(candidatePath,
                                                &invalidReason)) {
+                        ++invalidPathReasons[invalidReason];
                         continue;
                     }
                     const double routeDistance = candidatePath.back().s;
@@ -630,7 +676,20 @@ std::vector<LaneMatch> matchCheckpointsToLanes(const PathGeneratorData& data) {
                      << checkpoint.sequence << " (" << checkpoint.x << ", "
                      << checkpoint.y << "), nearest road=" << nearest.roadId
                      << " lane=" << nearest.laneId
-                     << " distance=" << nearest.distance << "m\n";
+                     << " distance=" << nearest.distance << "m"
+                     << "; missing_routes=" << routeMissingCount
+                     << " assembly_failures=" << routeAssemblyFailureCount;
+                if (!invalidPathReasons.empty()) {
+                    const auto mostCommon = std::max_element(
+                        invalidPathReasons.begin(), invalidPathReasons.end(),
+                        [](const auto& left, const auto& right) {
+                            return left.second < right.second;
+                        });
+                    std::cerr << "; most_common_invalid_path="
+                              << mostCommon->first << " ("
+                              << mostCommon->second << ')';
+                }
+                std::cerr << '\n';
                 return {};
             }
         }
@@ -699,6 +758,8 @@ std::vector<Waypoint> makePath(const PathGeneratorData& data) {
         }
         removeDuplicates(result);
         updateYawAndS(result);
+        smoothAlternatingSamplingSpikes(result);
+        smoothSameRoadHeadingSteps(result);
         std::string invalidReason;
         if (!validateGeneratedPath(result, &invalidReason)) {
             std::cerr << "[path] generated route rejected: "
@@ -1645,6 +1706,146 @@ void updateYawAndS(std::vector<Waypoint>& path) {
         }
         if (path.size() > 1) path.back().yaw = path[path.size() - 2].yaw;
     }
+
+// XODR laneSection 경계에서 수 cm의 샘플 위치 오차가 한 구간의 heading만
+// 튀게 만드는 경우를 보정한다. 연속 커브는 yaw 변화의 부호가 같으므로
+// 건드리지 않고, 같은 road/lane에서 서로 반대 방향으로 연달아 튀었다가
+// 즉시 원래 heading으로 돌아오는 짧은 지그재그만 직선 보간한다.
+bool smoothAlternatingSamplingSpikes(std::vector<Waypoint>& path) {
+    if (path.size() < 4) return false;
+    constexpr double kCurvatureLimit = 0.20;
+    constexpr double kMaximumNetHeadingChange = 0.08;
+    constexpr double kMaximumPointAdjustment = 0.25;
+    bool changed = false;
+    const std::vector<Waypoint> original = path;
+    for (std::size_t index = 0; index + 3 < original.size(); ++index) {
+        const Waypoint& p0 = original[index];
+        const Waypoint& p1 = original[index + 1];
+        const Waypoint& p2 = original[index + 2];
+        const Waypoint& p3 = original[index + 3];
+        if (p0.roadId != p1.roadId || p0.roadId != p2.roadId ||
+            p0.roadId != p3.roadId || p0.laneId != p1.laneId ||
+            p0.laneId != p2.laneId || p0.laneId != p3.laneId) {
+            continue;
+        }
+        const double ds0 = std::hypot(p1.x - p0.x, p1.y - p0.y);
+        const double ds1 = std::hypot(p2.x - p1.x, p2.y - p1.y);
+        const double ds2 = std::hypot(p3.x - p2.x, p3.y - p2.y);
+        if (ds0 <= kEpsilon || ds1 <= kEpsilon || ds2 <= kEpsilon) {
+            continue;
+        }
+        const double heading0 = std::atan2(p1.y - p0.y, p1.x - p0.x);
+        const double heading1 = std::atan2(p2.y - p1.y, p2.x - p1.x);
+        const double heading2 = std::atan2(p3.y - p2.y, p3.x - p2.x);
+        const double firstTurn = normalizeAngle(heading1 - heading0);
+        const double secondTurn = normalizeAngle(heading2 - heading1);
+        if (std::abs(firstTurn) / ds0 <= kCurvatureLimit ||
+            std::abs(secondTurn) / ds1 <= kCurvatureLimit ||
+            firstTurn * secondTurn >= 0.0 ||
+            std::abs(normalizeAngle(heading2 - heading0)) >
+                kMaximumNetHeadingChange) {
+            continue;
+        }
+
+        const double total = ds0 + ds1 + ds2;
+        const double firstRatio = ds0 / total;
+        const double secondRatio = (ds0 + ds1) / total;
+        const double firstX = p0.x + (p3.x - p0.x) * firstRatio;
+        const double firstY = p0.y + (p3.y - p0.y) * firstRatio;
+        const double secondX = p0.x + (p3.x - p0.x) * secondRatio;
+        const double secondY = p0.y + (p3.y - p0.y) * secondRatio;
+        if (std::hypot(firstX - p1.x, firstY - p1.y) >
+                kMaximumPointAdjustment ||
+            std::hypot(secondX - p2.x, secondY - p2.y) >
+                kMaximumPointAdjustment) {
+            continue;
+        }
+        path[index + 1].x = firstX;
+        path[index + 1].y = firstY;
+        path[index + 2].x = secondX;
+        path[index + 2].y = secondY;
+        changed = true;
+    }
+    if (changed) updateYawAndS(path);
+    return changed;
+}
+
+// 동일 road의 laneSection/lane-id hand-off에서 중심선의 접선이 한 샘플에
+// 불연속적으로 바뀌는 경우, 그 주변만 작은 이동평균으로 분산한다. 실제
+// 연속 급커브는 여러 점에서 같은 곡률을 가지므로 이 보정 후에도 제한을
+// 넘고, 아래 최종 검증에서 그대로 거부된다.
+bool smoothSameRoadHeadingSteps(std::vector<Waypoint>& path) {
+    if (path.size() < 5) return false;
+    constexpr double kCurvatureLimit = 0.20;
+    constexpr std::size_t kRadius = 4;
+    constexpr double kMaximumPointAdjustment = 0.25;
+    bool changed = false;
+    for (int pass = 0; pass < 2; ++pass) {
+        updateYawAndS(path);
+        std::vector<bool> affected(path.size(), false);
+        bool found = false;
+        for (std::size_t index = 0; index + 1 < path.size(); ++index) {
+            const double spacing = std::hypot(
+                path[index + 1].x - path[index].x,
+                path[index + 1].y - path[index].y);
+            if (spacing <= kEpsilon ||
+                path[index].roadId != path[index + 1].roadId) {
+                continue;
+            }
+            const double curvature = std::abs(normalizeAngle(
+                path[index + 1].yaw - path[index].yaw)) / spacing;
+            if (curvature <= kCurvatureLimit) continue;
+            found = true;
+            const std::size_t begin = index > kRadius
+                ? index - kRadius : 1;
+            const std::size_t end = std::min(
+                path.size() - 2, index + kRadius + 1);
+            for (std::size_t sample = begin; sample <= end; ++sample) {
+                affected[sample] = true;
+            }
+        }
+        if (!found) break;
+
+        const std::vector<Waypoint> original = path;
+        bool passChanged = false;
+        for (std::size_t index = 1; index + 1 < original.size(); ++index) {
+            if (!affected[index]) continue;
+            const int roadId = original[index].roadId;
+            const std::size_t begin = index > kRadius
+                ? index - kRadius : 0;
+            const std::size_t end = std::min(
+                original.size() - 1, index + kRadius);
+            double weightedX = 0.0;
+            double weightedY = 0.0;
+            double totalWeight = 0.0;
+            for (std::size_t sample = begin; sample <= end; ++sample) {
+                if (original[sample].roadId != roadId) continue;
+                const std::size_t separation = sample > index
+                    ? sample - index : index - sample;
+                const double weight =
+                    static_cast<double>(kRadius + 1 - separation);
+                weightedX += original[sample].x * weight;
+                weightedY += original[sample].y * weight;
+                totalWeight += weight;
+            }
+            if (totalWeight <= kEpsilon) continue;
+            const double candidateX = weightedX / totalWeight;
+            const double candidateY = weightedY / totalWeight;
+            if (std::hypot(candidateX - original[index].x,
+                           candidateY - original[index].y) >
+                kMaximumPointAdjustment) {
+                continue;
+            }
+            path[index].x = candidateX;
+            path[index].y = candidateY;
+            passChanged = true;
+        }
+        if (!passChanged) break;
+        changed = true;
+    }
+    if (changed) updateYawAndS(path);
+    return changed;
+}
 
 bool validateGeneratedPath(const std::vector<Waypoint>& path,
                            std::string* reason) {

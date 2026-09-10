@@ -8,6 +8,13 @@
 // BEV 기준 2D OBB의 네 꼭짓점을 계산
 Obb2D makeObjectObb(const ObjectState& object);
 
+// Shared point projection. Ego-only callers need not copy/project every
+// object in a WorldState when they only consume pathS/pathD.
+void worldToRoute(double pointX, double pointY, bool& pathValid,
+                  double& pathS, double& pathD, const std::vector<Waypoint>& path,
+                  std::optional<double> expectedS = std::nullopt,
+                  std::optional<double> heading = std::nullopt);
+
 // Raw Object GT에 OBB + Road/Lane 정보 붙이기
 WorldObjectState makeWorldObjectState(
     const ObjectState& object,

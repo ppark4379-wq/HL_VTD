@@ -32,7 +32,10 @@ struct LaneChangeConfig {
     double localFallbackHorizon{60.0};
     double localFallbackRetryInterval{0.5};
     double localFallbackSearchBudgetMs{80.0};
+    double localReentrySearchBudgetMs{240.0};
     double localFallbackSpeed{5.0 / 3.6};
+    // Optional open-passage cap; legacy configs retain their fallback cap.
+    double localFallbackOpenSpeed{5.0 / 3.6};
     double stoppedDynamicConfirmationTime{0.75};
     // 현재 차선이 다음 road로 연결되지 않을 때만 도로 끝에서
     // 이 거리 이내에 들어오면 연결 차선으로 정렬한다.

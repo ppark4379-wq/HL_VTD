@@ -30,7 +30,8 @@ struct Scene {
     int laneCount;
     double maximumForegroundMs{};
 
-    explicit Scene(int lanes = 3, bool solid = false, bool oneWayEscape = false)
+    explicit Scene(int lanes = 3, bool solid = false, bool oneWayEscape = false,
+                   double sampleStep = .5)
         : laneCount(lanes) {
         PrecomputedLaneNetwork network;
         for (int roadId = 1; roadId <= 2; ++roadId) {
@@ -56,18 +57,20 @@ struct Scene {
                 raw.topologyStatus = "connected";
                 LaneSegment segment;
                 segment.key = raw.key;
-                for (int index = 0; index <= 200; ++index) {
+                const int lastIndex = static_cast<int>(std::ceil(100. / sampleStep));
+                for (int index = 0; index <= lastIndex; ++index) {
                     PrecomputedLanePoint p;
                     p.id = static_cast<std::int64_t>(network.points.size());
                     p.pointIndex = index;
                     p.width = 3.5;
                     p.usable = true;
-                    p.pose.x = geometry.x + index * .5;
+                    const double station = std::min(100., index * sampleStep);
+                    p.pose.x = geometry.x + station;
                     p.pose.y = (laneId + .5) * 3.5;
-                    p.pose.s = p.pose.roadS = index * .5;
+                    p.pose.s = p.pose.roadS = station;
                     p.pose.roadId = roadId;
                     p.pose.laneId = laneId;
-                    if (index < 200) p.nextPoint = p.id + 1;
+                    if (index < lastIndex) p.nextPoint = p.id + 1;
                     raw.pointIds.push_back(p.id);
                     segment.points.push_back(p.pose);
                     network.points.push_back(p);
@@ -263,11 +266,139 @@ void earlyBlockedRouteProducesSafeBypass() {
     require(scene.await(result), "blocked global route did not trigger a safe local bypass before 15m");
     scene.requireSafe(result);
     require(result.path.back().x > 44., "local path stopped short of passing its first blocker");
+    require(std::any_of(scene.trace.frameEvents.begin(),scene.trace.frameEvents.end(),
+                [](const auto& event){return event.find("sampling=lane_centres")!=std::string::npos;}),
+            "open bypass did not prefer the complete lane-centre solution");
+    // The transition itself is allowed to leave the centre; its settled tail
+    // must actually reach it, not cruise indefinitely on the dashed marking.
+    for(const auto& p:result.path) if(p.s>=result.path.back().s-7.)
+        require(std::abs(p.y+5.25)<.02 || std::abs(p.y+8.75)<.02,
+                "open bypass selected an unnecessary between-lane offset");
     require(runtime.committedGlobalPath.empty() && runtime.globalRouteSearchFailed &&
                 runtime.gatewayNext == gatewayPolicy && runtime.allowed == allowed &&
                 scene.mission.legs[0].targetLanes == targets && scene.mission.activeLegIndex == 0,
             "local recovery altered global planning policy or advanced the mission");
     std::cout << "early local bypass foreground maximum " << scene.maximumForegroundMs << "ms\n";
+}
+
+void clearRollingTailSettlesWithoutChangingLane() {
+    Scene scene;
+    // A completed avoidance leaves Ego 41cm off centre. The rolling horizon
+    // must not invent another lane change just because it requests 54m ahead.
+    scene.world.ego.y += .41;
+    scene.world.egoObb = makeObb2D(11.3725, scene.world.ego.y, 0., 4.855, 1.88);
+    scene.addObject(1, -8., -1.75); // the old blocker is now behind
+    scene.addObject(2, 35., 3.);   // roadside object, not a blocked carriageway
+    scene.map.corridorRuntime->localFallbackContinuationRequested = true;
+    LaneChangeData result;
+    require(scene.await(result), "clear rolling tail did not produce a continuation");
+    scene.requireSafe(result);
+    require(result.obstacleId == -1, "off-road or passed object became a forward blocker");
+    require(std::any_of(scene.trace.frameEvents.begin(),scene.trace.frameEvents.end(),
+                [](const auto& event){return event.find("settled_tail_preference=1")!=std::string::npos ||
+                                            event.find("committed_return_extended")!=std::string::npos;}),
+            "clear continuation did not use the settled-tail preference");
+    for (const auto& p : result.path) {
+        require(p.laneId == -1, "clear continuation made an unnecessary lane change");
+        if (p.x >= scene.world.ego.x + 12.)
+            require(std::abs(p.y + 1.75) < .02,
+                    "clear continuation retained a lateral offset after settling");
+    }
+}
+
+void sampledReturnEndpointMayExceedNominalTwelveMetres() {
+    // Real lane samples do not land on exact integer metres. The nominal
+    // 12m C2 edge is 12.0384m here; shorter 6/8m returns from this measured
+    // offset and heading exceed the unchanged curvature limit.
+    Scene scene(2, false, false, .5016);
+    scene.world.ego.x = 10.032F;
+    scene.world.ego.y = -2.8055F;
+    scene.world.ego.heading = -.168485F;
+    scene.world.egoRoadS = scene.world.egoPathS = scene.world.ego.x;
+    scene.reference.erase(std::remove_if(scene.reference.begin(), scene.reference.end(),
+        [](const Waypoint& point) { return point.x > 16.; }), scene.reference.end());
+    scene.world.egoObb = makeObb2D(
+        scene.world.ego.x + 1.3725 * std::cos(scene.world.ego.heading),
+        scene.world.ego.y + 1.3725 * std::sin(scene.world.ego.heading),
+        scene.world.ego.heading, 4.855, 1.88);
+    scene.mission.legs.front().targetLanes = {{2, 0, -2}};
+    scene.mission.legs.front().targetRoadS.clear();
+    scene.mission.legs.front().targetRoadS[{2, 0, -2}] = 80.;
+    auto& runtime = *scene.map.corridorRuntime;
+    runtime.activeLeg = static_cast<std::size_t>(-1);
+    runtime.curvature = -.0108;
+    runtime.localFallbackContinuationRequested = true;
+    LaneChangeData result;
+    const bool ready=scene.await(result);
+    if(!ready) for(const auto& event:scene.trace.frameEvents) std::cerr<<event<<'\n';
+    require(ready, "fractionally sampled return did not produce a continuation");
+    scene.requireSafe(result);
+    require(std::any_of(scene.trace.frameEvents.begin(), scene.trace.frameEvents.end(),
+                [](const auto& event) {
+                    return event.find("sampling=lane_centres") != std::string::npos &&
+                           event.find("settled_tail_preference=1") != std::string::npos;
+                }),
+            "nominal 12m return lost the preferred centre path to sample quantization");
+    for (const auto& p : result.path) {
+        if (p.x < scene.world.ego.x + 12.75) continue;
+        require(std::abs(p.y + 1.75) < .02 || std::abs(p.y + 5.25) < .02,
+                "fractionally sampled return retained a post-avoidance lane-edge bias");
+    }
+    require(scene.mission.activeLegIndex == 0 &&
+                scene.mission.legs.front().targetLanes == std::set<LaneKey>{{2, 0, -2}},
+            "sample tolerance changed the required gateway lane");
+}
+
+void rollingHorizonPreservesSafeReturnAndRejectsBlockedExtension() {
+    for(const bool blocked : {false, true}) {
+        Scene scene;
+        scene.config.localFallbackHorizon = 90.;
+        scene.world.ego.y -= .41F;
+        scene.world.egoObb = makeObb2D(11.3725, scene.world.ego.y, 0., 4.855, 1.88);
+        scene.reference.clear();
+        double station = 10.;
+        for(int index=0; index<=80; ++index) {
+            const double u=index/80.;
+            const double smooth=u*u*u*(10.-15.*u+6.*u*u);
+            const double slope=.41*30.*u*u*(1.-u)*(1.-u)/20.;
+            Waypoint p;
+            p.x=10.+20.*u;
+            p.y=-1.75-.41*(1.-smooth);
+            p.yaw=std::atan(slope);
+            p.roadId=1;p.laneId=-1;p.roadS=p.x;
+            if(!scene.reference.empty()) {
+                const auto& previous=scene.reference.back();
+                station+=std::hypot(p.x-previous.x,p.y-previous.y);
+            }
+            p.s=station;
+            scene.reference.push_back(p);
+        }
+        // Outside the activation window and beyond the committed endpoint,
+        // but inside the requested extension: extension safety must see it.
+        if(blocked) scene.addObject(1,55.,-1.75);
+        scene.map.corridorRuntime->localFallbackContinuationRequested=true;
+        LaneChangeData result;
+        require(scene.await(result), "rolling return did not produce a checked continuation");
+        scene.requireSafe(result);
+        const bool extended=std::any_of(scene.trace.frameEvents.begin(),scene.trace.frameEvents.end(),
+            [](const auto& event){return event.find("committed_return_extended")!=std::string::npos;});
+        require(extended!=blocked, "committed return extension ignored its live obstacle certificate");
+        require(result.path.back().x>60., "rolling continuation did not extend beyond the old endpoint");
+        if(!blocked) {
+            for(const auto& old : scene.reference) {
+                const auto closest=std::min_element(result.path.begin(),result.path.end(),
+                    [&](const Waypoint& a,const Waypoint& b) {
+                        return std::hypot(a.x-old.x,a.y-old.y)<std::hypot(b.x-old.x,b.y-old.y);
+                    });
+                require(closest!=result.path.end() && std::hypot(closest->x-old.x,closest->y-old.y)<1e-5,
+                        "horizon renewal redrew the safe in-progress return");
+            }
+            for(const auto& p:result.path) require(p.laneId==-1,
+                "longitudinal extension introduced an unnecessary lane change");
+        }
+        require(scene.mission.activeLegIndex==0 && scene.mission.legs.front().targetLanes.size()==3,
+                "rolling return extension changed gateway authority");
+    }
 }
 
 void approvalFlagCannotHideActualBlocker() {
@@ -342,6 +473,9 @@ void denseTightPassageDoesNotForceEarlyRecenter() {
                 std::cerr << event << '\n';
     }
     require(ready, "dense two-stage narrow passage produced no local trajectory");
+    require(std::any_of(scene.trace.frameEvents.begin(),scene.trace.frameEvents.end(),
+                [](const auto& event){return event.find("sampling=full_offsets")!=std::string::npos;}),
+            "centre preference removed the full-offset narrow-gap fallback");
     scene.requireSafe(result);
     require(result.validatedObstacleClearance < .1,
             "tight-only physical opening was not certified with its actual clearance");
@@ -436,6 +570,9 @@ int main(int argc, char** argv) {
         const std::string selected = argc > 1 ? argv[1] : "all";
         if (selected == "all" || selected == "inactive") noActivationOnClearOrDistantRoad();
         if (selected == "all" || selected == "early") earlyBlockedRouteProducesSafeBypass();
+        if (selected == "all" || selected == "settled") clearRollingTailSettlesWithoutChangingLane();
+        if (selected == "all" || selected == "sampled-settled") sampledReturnEndpointMayExceedNominalTwelveMetres();
+        if (selected == "all" || selected == "return-extension") rollingHorizonPreservesSafeReturnAndRejectsBlockedExtension();
         if (selected == "all" || selected == "activation") {
             approvalFlagCannotHideActualBlocker();
             safeReferenceIgnoresStaleBlockedGlobal();

@@ -83,6 +83,18 @@ class SchoolZones:
         for zone in data['school_zones']:
             self._add_zone(zone)
 
+    @staticmethod
+    def _path_budget(first,last):
+        """Maximum lane-link path length accepted for one captured zone.
+
+        The same bound also gives a conservative world-space uncertainty
+        envelope when both boundary observations are valid but their lane-link
+        path is ambiguous: every point on any admissible path must have a sum
+        of Euclidean distances to the two boundaries no greater than this
+        budget.
+        """
+        return math.hypot(first['x']-last['x'],first['y']-last['y'])*1.5+20
+
     def _validate_boundary(self,point):
         road_id=int(point['track_id'])
         lane_id=int(point['lane_id'])
@@ -147,7 +159,38 @@ class SchoolZones:
             )
             self.accepted.append(dict(id=identifier,method=method,segments=len(ranges)))
         except (ValueError,KeyError,TypeError) as error:
-            self.pending.append(dict(id=identifier,reason=str(error)))
+            pending=dict(id=identifier,reason=str(error),uncertainty_scope='global')
+            first,last=zone.get('point_1'),zone.get('point_2')
+            try:
+                if first is None or last is None:
+                    raise ValueError('both boundaries are required for bounded uncertainty')
+                # Boundary validation is intentionally independent from path
+                # resolution.  A bad/missing observation remains global
+                # unknown; two trusted observations allow the ambiguity to be
+                # bounded without guessing which lane-link path is correct.
+                self._validate_boundary(first)
+                self._validate_boundary(last)
+                budget=self._path_budget(first,last)
+                coordinates=[
+                    {'x':float(first['x']),'y':float(first['y'])},
+                    {'x':float(last['x']),'y':float(last['y'])},
+                ]
+                if not all(
+                    math.isfinite(value)
+                    for point in coordinates for value in point.values()
+                ) or not math.isfinite(budget):
+                    raise ValueError('non-finite boundary uncertainty')
+                pending.update(
+                    uncertainty_scope='bounded_path_budget',
+                    boundary_points=coordinates,
+                    path_budget_m=budget,
+                )
+            except (ValueError,KeyError,TypeError):
+                # Do not weaken an unverified boundary into a guessed local
+                # region.  It must continue to make all negative samples
+                # unavailable until the source is corrected.
+                pass
+            self.pending.append(pending)
 
     def _index(self,rid,s):
         return max(i for i,sec in enumerate(self.sections[rid]) if float(sec.get('s'))<=s)
@@ -186,7 +229,7 @@ class SchoolZones:
         rid,lid,s=int(first['track_id']),int(first['lane_id']),float(first['s'])
         target=(int(last['track_id']),self._index(int(last['track_id']),float(last['s'])),int(last['lane_id']))
         # A boundary pair must describe a local continuous strip, not a detour.
-        budget=math.hypot(first['x']-last['x'],first['y']-last['y'])*1.5+20
+        budget=self._path_budget(first,last)
         stack=[((rid,self._index(rid,s),lid,direction),s,[],0,set()) for direction in (-1,1)]
         found=[]
         visits=0
@@ -228,8 +271,23 @@ class SchoolZones:
             return None,[]
         rear_lanes=[lid for lid,lane in lanes['lanes'].items() if min(lane['inner'],lane['outer'])<=t<=max(lane['inner'],lane['outer'])]
         ids=sorted({r['id'] for r in self.ranges if r['road']==road['road'] and r['lane'] in rear_lanes and r['s_min']<=s<=r['s_max']})
-        # Incomplete coverage cannot prove that an unlisted position is outside.
-        return (True if ids else None if self.pending else False),ids
+        if ids:
+            return True,ids
+        # A pending zone with unverified boundaries is still global unknown.
+        # For two verified boundaries, any path admitted by ``_paths`` lies in
+        # this prolate-ellipse superset.  Outside it, a negative membership is
+        # therefore provable even though the exact lane-link chain is pending.
+        for pending in self.pending:
+            if pending.get('uncertainty_scope') != 'bounded_path_budget':
+                return None,[]
+            first,last=pending['boundary_points']
+            distance=(
+                math.hypot(rear[0]-first['x'],rear[1]-first['y'])
+                + math.hypot(rear[0]-last['x'],rear[1]-last['y'])
+            )
+            if distance <= pending['path_budget_m']+1e-6:
+                return None,[]
+        return False,[]
 
     def report(self):
         return dict(accepted=self.accepted,pending=self.pending,corrections=self.corrections,

@@ -1,4 +1,6 @@
 #include "planning/planning_process.hpp"
+#include "planning/local/recovery_selection.hpp"
+#include "planning/local/local_fallback_speed.hpp"
 
 #include "data/gt/gt_processor.hpp"
 #include "logger/decision_trace.hpp"
@@ -14,9 +16,22 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <sstream>
 
 namespace {
+
+double localManeuverSpeedLimit(const LaneChangeData& maneuver,
+                              const LaneChangeConfig& config,
+                              const PathPlannerConfig& planner,const GtFrame& gt) {
+    if(maneuver.path.size()<2) return config.localFallbackSpeed;
+    // Match this frame's tracking projection, not last frame's index: passing
+    // the last sharp sample must not unlock 15 after predicting only at 5.
+    const auto nearest=findNearestWaypoint(maneuver.path,gt,maneuver.nearestIndex);
+    return localFallbackSpeedLimit(config,maneuver.validatedObstacleClearance,
+        findMaxCurvature(maneuver.path,nearest,planner.curvatureCheckDistance),
+        planner.maximumLateralAcceleration);
+}
 
 bool longitudinallyAdjacent(const PathGeneratorData& map,
                             const LaneKey& first,
@@ -855,7 +870,307 @@ bool updateSpeedConstraints(PlanningProcessData& data,
     return crosswalkControlActive;
 }
 
+bool recoveryProtectedObject(const WorldObjectState& object,
+                             const std::vector<int>& confirmedStationaryObjectIds) {
+    const bool vulnerable = object.raw.length <= 2.5 && object.raw.width <= 1.5 &&
+        object.raw.height >= 1.;
+    return vulnerable || std::find(confirmedStationaryObjectIds.begin(),
+        confirmedStationaryObjectIds.end(), static_cast<int>(object.raw.id)) ==
+        confirmedStationaryObjectIds.end();
+}
+
+// A separate veto on simulation recovery. The ordinary cut-in/lead EBS
+// calculations below are unchanged. Include recently stopped actors until
+// the existing motion-history confirmation classifies them as stationary.
+bool recoveryHasDynamicRisk(const WorldState& world, const LocalPathData& path,
+                            const PathGeneratorData& map,
+                            const PlanningBehaviorConfig& config,
+                            const std::vector<int>& confirmedStationaryObjectIds,
+                            int& riskObjectId) {
+    // Most static-obstacle recovery frames have no protected actor. Avoid
+    // copying the whole object vector just to erase every element from it.
+    if (std::none_of(world.objects.begin(), world.objects.end(), [&](const auto& object) {
+            return recoveryProtectedObject(object, confirmedStationaryObjectIds);
+        })) return false;
+    WorldState protectedWorld = world;
+    protectedWorld.objects.erase(std::remove_if(protectedWorld.objects.begin(),
+        protectedWorld.objects.end(), [&](const auto& object) {
+            return !recoveryProtectedObject(object, confirmedStationaryObjectIds);
+        }), protectedWorld.objects.end());
+    if (protectedWorld.objects.empty()) return false;
+    PathSafetyResult safety;
+    resetPathSafety(safety);
+    checkCurrentCollisions(safety, world.egoObb, protectedWorld.objects, -1, &world, &map);
+    updateMinimumTTC(safety, protectedWorld.objects, false, -1, &path, &map);
+    checkPredictedCollisions(safety, protectedWorld, path,
+        config.collisionPredictionHorizon, config.collisionPredictionStep, true, &map);
+    const double threshold = std::max(config.emergencyTTC,
+        config.emergencyReactionTime + config.collisionPredictionStep +
+        std::max(0., world.egoSpeed) / config.emergencyBrakingDeceleration);
+    if (requiresEmergencyBrake(safety, threshold)) {
+        riskObjectId = safety.riskObjectId;
+        return true;
+    }
+    return crossingObjectRequiresEmergency(protectedWorld, path.points, config, riskObjectId) ||
+        leadObjectRequiresEmergency(protectedWorld, path, config, riskObjectId, true);
+}
+
+bool applySimulationProgressRecovery(
+    PlanningProcessData& data, const GtFrame& gt, const WorldState& sensedWorld,
+    WorldState& world, const PathGeneratorData& map, PathPlan& tracking,
+    bool& emergency, bool stationaryPathStop, int stationaryBlocker, bool goalReached,
+    const std::vector<int>& confirmedStationaryObjectIds,
+    double dt, DecisionTraceData* trace) {
+    auto& state = data.progressRecovery;
+    if (data.config.simulationProgressRecovery != 1. || goalReached ||
+        sensedWorld.respawnDetected || !sensedWorld.inputValid ||
+        !std::isfinite(sensedWorld.ego.x) || !std::isfinite(sensedWorld.ego.y) ||
+        !std::isfinite(sensedWorld.ego.heading) || !std::isfinite(sensedWorld.egoSpeed) ||
+        !map.corridorRuntime || !activeMissionLeg(data.missionCorridor)) {
+        state = {};
+        return false;
+    }
+    if (state.missionLeg != data.missionCorridor.activeLegIndex) {
+        state = {};
+        state.missionLeg = data.missionCorridor.activeLegIndex;
+    }
+    int dynamicRiskObject = -1;
+    const bool unconfirmedBlocker = stationaryPathStop && std::any_of(
+        world.objects.begin(), world.objects.end(), [&](const auto& object) {
+            return static_cast<int>(object.raw.id) == stationaryBlocker &&
+                recoveryProtectedObject(object, confirmedStationaryObjectIds);
+        });
+    if (unconfirmedBlocker || recoveryHasDynamicRisk(world, data.frame.localPath,
+            map, data.config, confirmedStationaryObjectIds, dynamicRiskObject)) {
+        if (state.active || state.blockedTime > 0.)
+            traceDecision(trace, "progress_recovery", "waiting_for_dynamic_risk",
+                "object=" + std::to_string(unconfirmedBlocker ? stationaryBlocker : dynamicRiskObject) +
+                " recovery_timer_reset=1 stationary_confirmation_required=1");
+        state = {};
+        return false;
+    }
+    // A paused simulator or one delayed frame must not expire the timer.
+    const double elapsed = std::clamp(dt, 0., .1);
+    const bool stopped = std::abs(sensedWorld.egoSpeed) <= data.config.stoppedSpeedThreshold;
+    const bool blocked = stationaryPathStop || emergency || !tracking.valid ||
+        (!data.frame.stop.valid && data.frame.behavior.targetSpeed <= .05) || data.frame.pathSafety.collision;
+    if (!state.anchorValid || std::hypot(sensedWorld.ego.x - state.anchorX,
+                                        sensedWorld.ego.y - state.anchorY) >= .5) {
+        state.anchorX = sensedWorld.ego.x; state.anchorY = sensedWorld.ego.y;
+        state.anchorValid = true; state.noMotionTime = 0.; state.blockedTime = 0.;
+    } else {
+        state.noMotionTime += elapsed;
+    }
+    if (stopped && blocked) state.blockedTime += elapsed;
+    else if (!stopped) state.blockedTime = 0.;
+
+    // Regulatory command authority is unchanged: never move on a light or
+    // pedestrian stop. But that wait must not erase independent static-path
+    // blockage and restart another three-second wait after every green light.
+    // A traffic stop alone cannot arm recovery; dynamic risk above still
+    // cancels both the history and any stored recovery geometry.
+    if (data.frame.stop.valid) {
+        if (state.active)
+            traceDecision(trace, "progress_recovery", "suspended_for_traffic_stop",
+                          "commands_blocked=1 static_blockage_history_preserved=1");
+        recovery_selection::suspendForTrafficStop(state,sensedWorld.ego.x,sensedWorld.ego.y,blocked);
+        return false;
+    }
+
+    if (!state.active) {
+        if (state.blockedTime < data.config.progressRecoveryStopTimeout) return false;
+        state.active = true;
+        state.startX = sensedWorld.ego.x; state.startY = sensedWorld.ego.y;
+        state.retryRemaining = 0.;
+        traceDecision(trace, "progress_recovery", "activated",
+            "blocked_seconds=" + std::to_string(state.blockedTime) +
+            " emergency=" + std::to_string(emergency));
+    }
+
+    // Hand back only to an attached, collision-free ordinary trajectory.
+    // A raw EBS bit momentarily disappearing must not end the escape while
+    // the same body still blocks the route.
+    const bool madeProgress = std::hypot(sensedWorld.ego.x - state.startX,
+                                         sensedWorld.ego.y - state.startY) >= 2.;
+    bool ordinaryReady = tracking.valid && data.frame.localPath.valid && (madeProgress || state.contactExpected) &&
+        !emergency && data.frame.behavior.targetSpeed > .05 &&
+        !data.frame.pathSafety.collision && !data.frame.pathSafety.predictedCollision;
+    if (ordinaryReady) {
+        const auto& path = data.frame.localPath.points;
+        // Same ego projection as projectWorldToActivePath; object projections
+        // and a WorldState copy were discarded immediately in this branch.
+        bool projected = false;
+        double ordinaryS = 0., ordinaryD = 0.;
+        worldToRoute(sensedWorld.ego.x, sensedWorld.ego.y, projected, ordinaryS, ordinaryD,
+                     path, std::nullopt, sensedWorld.ego.heading);
+        ordinaryReady = projected && std::abs(ordinaryD) <= .3;
+        if (ordinaryReady) {
+            const auto near = std::lower_bound(path.begin(), path.end(), ordinaryS,
+                [](const auto& p, double s) { return p.s < s; });
+            ordinaryReady = near != path.end() && path.back().s - ordinaryS >= 8. &&
+                std::abs(normalizeAngle(near->yaw - sensedWorld.ego.heading)) <= .2 &&
+                corridorTrackingPathIsSafe(path, sensedWorld,
+                    data.laneChangeConfig.latticeTightObstacleClearance, nullptr, &data.config, &map);
+        }
+    }
+    state.clearTime = ordinaryReady ? state.clearTime + elapsed : 0.;
+    if ((ordinaryReady && state.contactExpected) || state.clearTime >= 1.) {
+        traceDecision(trace, "progress_recovery", "released",
+                      "attached_collision_free_ordinary_path=1");
+        state = {};
+        return false;
+    }
+
+    WorldState recoveryWorld = sensedWorld;
+    const auto attachmentUsable = [&]() {
+        if (state.planner.waypoints.size() < 3 ||
+            std::abs(recoveryWorld.egoPathD) > .75) return false;
+        const auto near = std::lower_bound(state.planner.waypoints.begin(),
+            state.planner.waypoints.end(), recoveryWorld.egoPathS,
+            [](const auto& p, double s) { return p.s < s; });
+        return near != state.planner.waypoints.end() &&
+            std::abs(normalizeAngle(near->yaw - sensedWorld.ego.heading)) <= .6 &&
+            state.planner.waypoints.back().s - recoveryWorld.egoPathS > 5.;
+    };
+    bool usable = state.planner.waypoints.size() >= 3 &&
+        projectWorldToActivePath(recoveryWorld, state.planner.waypoints,
+                                 sensedWorld.frontBumperOffset) && attachmentUsable();
+    const bool stalled = state.noMotionTime >= data.config.progressRecoveryStopTimeout;
+    const bool shortTail = usable &&
+        state.planner.waypoints.back().s - recoveryWorld.egoPathS < 12.;
+    state.retryRemaining = std::max(0., state.retryRemaining - elapsed);
+    // Contact motion is not successful escape. Continue the balanced search
+    // every retry interval even while the body is making longitudinal progress.
+    const bool contactRecheck = state.contactExpected || data.frame.pathSafety.collision;
+    if (state.retryRemaining <= 0. && (!usable || stalled || shortTail || contactRecheck)) {
+        double failedHeading = std::numeric_limits<double>::quiet_NaN();
+        if (usable && stalled) {
+            const auto preview = std::lower_bound(state.planner.waypoints.begin(),
+                state.planner.waypoints.end(), recoveryWorld.egoPathS + 3.,
+                [](const auto& p, double s) { return p.s < s; });
+            if (preview != state.planner.waypoints.end())
+                failedHeading = normalizeAngle(preview->yaw - sensedWorld.ego.heading);
+        }
+        PathPlannerData replacement;
+        replacement.config = data.pathPlanner.config;
+        // The 3 m ordinary lookahead smooths away a near-standstill escape.
+        // Use a shorter preview only for this low-speed recovery controller.
+        replacement.config.minLookahead = std::min(2., replacement.config.minLookahead);
+        bool contact = false;
+        bool retainedReference = false;
+        const auto& reference = usable ? state.planner.waypoints : data.frame.localPath.points;
+        if (prepareCorridorProgressRecovery(replacement, contact, state.searchCursor,
+                sensedWorld, map, data.missionCorridor, data.laneChangeConfig,
+                data.config, reference, confirmedStationaryObjectIds, trace, failedHeading,
+                &retainedReference)) {
+            WorldState candidateWorld = sensedWorld;
+            if (projectWorldToActivePath(candidateWorld, replacement.waypoints,
+                                         sensedWorld.frontBumperOffset)) {
+                state.planner = std::move(replacement);
+                state.contactExpected = contact;
+                // Rechecking the same path must not postpone the stalled-path
+                // timer forever. Only a replacement starts a new escape trial.
+                if (!retainedReference) {
+                    state.noMotionTime = 0.;
+                    state.anchorX = sensedWorld.ego.x; state.anchorY = sensedWorld.ego.y;
+                }
+                recoveryWorld = std::move(candidateWorld);
+                usable = attachmentUsable();
+            }
+        }
+        state.retryRemaining = data.config.progressRecoveryRetryInterval;
+    }
+    if (!usable) return false;
+    auto recoveryTracking = runPurePursuit(state.planner, gt, sensedWorld.egoSpeed);
+    if (!recoveryTracking.valid || recoveryTracking.goalReached ||
+        !std::isfinite(recoveryTracking.steering)) return false;
+
+    // Check the trajectory actually about to be commanded, including a
+    // retained escape if its blocker starts moving again. Its risk can differ
+    // from that of the ordinary path evaluated earlier in this frame.
+    LocalPathData recoveryPath;
+    generateLocalPath(recoveryPath, state.planner, recoveryTracking.nearestIndex,
+                      data.config.localPathHorizon);
+    WorldState movingRecoveryWorld = recoveryWorld;
+    movingRecoveryWorld.egoSpeed = std::max(std::abs(recoveryWorld.egoSpeed),
+                                           data.config.progressRecoverySpeed);
+    if (recoveryHasDynamicRisk(movingRecoveryWorld, recoveryPath, map, data.config,
+            confirmedStationaryObjectIds, dynamicRiskObject)) {
+        traceDecision(trace, "progress_recovery", "cancelled_for_dynamic_risk",
+            "object=" + std::to_string(dynamicRiskObject) + " recovery_timer_reset=1");
+        state = {};
+        emergency = true;
+        data.emergencyBrakeHoldRemaining = data.config.emergencyMinimumHoldTime;
+        return false;
+    }
+
+    data.result.progressRecoveryEmergencyOverridden = emergency;
+    data.result.progressRecoveryOverriddenStop = stationaryPathStop
+        ? StopReason::StationaryPathBlocked : StopReason::None;
+    // This final arbitration happens after all stationary caps and EBS
+    // requests. Otherwise those same requests reapply zero in the next tick.
+    world = std::move(recoveryWorld);
+    tracking = recoveryTracking;
+    tracking.goalReached = false;
+    data.frame.behavior.targetSpeed = std::min(
+        data.config.progressRecoverySpeed, recoveryTracking.targetSpeed);
+    data.frame.behavior.longitudinal = LonMode::Cruise;
+    data.frame.behavior.health = SystemHealth::Ok;
+    const auto& signalPoint = state.planner.waypoints[recoveryTracking.targetIndex];
+    const double lateral = -(signalPoint.x - sensedWorld.ego.x) * std::sin(sensedWorld.ego.heading) +
+                            (signalPoint.y - sensedWorld.ego.y) * std::cos(sensedWorld.ego.heading);
+    data.frame.behavior.turnSignal = std::abs(lateral) < .2 ? 0U : lateral > 0. ? 1U : 2U;
+    data.frame.localPath = std::move(recoveryPath);
+    // Do not hide contacts from RViz or scoring when commanding progress.
+    resetPathSafety(data.frame.pathSafety);
+    checkCurrentCollisions(data.frame.pathSafety, world.egoObb, world.objects, -1, &world, &map);
+    updateMinimumTTC(data.frame.pathSafety, world.objects, false, -1, &data.frame.localPath, &map);
+    WorldState predictionWorld = std::move(movingRecoveryWorld);
+    predictionWorld.egoSpeed = data.frame.behavior.targetSpeed;
+    checkPredictedCollisions(data.frame.pathSafety, predictionWorld, data.frame.localPath,
+        data.config.collisionPredictionHorizon, data.config.collisionPredictionStep, false, &map);
+    emergency = false;
+    data.emergencyBrakeHoldRemaining = 0.;
+    data.result.progressRecoveryActive = true;
+    data.result.progressRecoveryContactExpected = state.contactExpected ||
+        data.frame.pathSafety.collision || data.frame.pathSafety.predictedCollision;
+    traceDecision(trace, "progress_recovery", "command_override",
+        "speed=" + std::to_string(data.frame.behavior.targetSpeed) +
+        " emergency_overridden=" + std::to_string(data.result.progressRecoveryEmergencyOverridden) +
+        " stop_overridden=" + std::to_string(static_cast<std::uint32_t>(data.result.progressRecoveryOverriddenStop)) +
+        " contact_expected=" + std::to_string(data.result.progressRecoveryContactExpected));
+    return true;
+}
+
 }  // namespace
+
+bool canCancelClearedPreparedAvoidance(
+    const LaneChangeData& maneuver, const WorldState& world,
+    const std::vector<Waypoint>& successor, bool successorPathSafe) {
+    if (maneuver.phase != LaneChangePhase::Prepare ||
+        maneuver.roadConnectionManeuver || maneuver.localCorridorAvoidance ||
+        maneuver.obstacleId < 0 || !successorPathSafe || successor.size() < 2) {
+        return false;
+    }
+    WorldState projected = world;
+    if (!projectWorldToActivePath(projected, successor, world.frontBumperOffset) ||
+        std::abs(projected.egoPathD) > 0.2) return false;
+    const auto nearest = std::lower_bound(successor.begin(), successor.end(),
+        projected.egoPathS,
+        [](const Waypoint& point, double s) { return point.s < s; });
+    const Waypoint& pose = nearest == successor.end() ? successor.back() : *nearest;
+    if (std::abs(normalizeAngle(pose.yaw - world.ego.heading)) > 0.15) return false;
+
+    const auto blocker = std::find_if(projected.objects.begin(), projected.objects.end(),
+        [&](const WorldObjectState& object) {
+            return static_cast<int>(object.raw.id) == maneuver.obstacleId;
+        });
+    // Do not infer clearance merely from motion: a moving lead/cut-in can
+    // still occupy the successor. Live predictive safety is a separate
+    // prerequisite above. An unprojectable actor is conservatively retained.
+    return blocker == projected.objects.end() ||
+        (blocker->pathValid && (!blocker->isAhead || !blocker->isOnEgoPath));
+}
 
 bool initializePlanning(PlanningProcessData& data,
                         const PathPlannerConfig& plannerConfig,
@@ -1420,7 +1735,12 @@ void runPlanningProcess(PlanningProcessData& data,
             data.laneChange.localCorridorAvoidance &&
             !data.laneChange.path.empty() &&
             data.laneChange.path.back().s-world.egoPathS <
-                std::max(data.laneChangeConfig.localFallbackActivationDistance,
+                // Obstacle activation (50 m) is not a path-renewal distance:
+                // renewing a 54 m local path with 50 m left repeatedly replaces
+                // its already checked return before the vehicle can follow it.
+                // Retain five seconds of planning headroom, at least 20 m;
+                // new hazards still invalidate the incumbent independently.
+                std::max(20.0,
                          std::abs(world.egoSpeed)*
                     data.laneChangeConfig.localFallbackTimeHeadway+8.0);
         LaneChangeData localReplacement;
@@ -1437,7 +1757,8 @@ void runPlanningProcess(PlanningProcessData& data,
             retainSafeLocal = evaluateLaneChangeCandidate(
                 localSafety, data.laneChange, world, data.config,
                 std::max(std::abs(world.egoSpeed),
-                         data.laneChangeConfig.localFallbackSpeed), map);
+                         localManeuverSpeedLimit(data.laneChange,data.laneChangeConfig,
+                                                 data.pathPlanner.config,gt)), map);
             const double localClearance = data.laneChange.validatedObstacleClearance >= 0.
                 ? data.laneChange.validatedObstacleClearance
                 : data.laneChangeConfig.latticeObstacleClearance;
@@ -1468,7 +1789,8 @@ void runPlanningProcess(PlanningProcessData& data,
         PathSafetyResult risk;
         localPathUnsafe = !evaluateLaneChangeCandidate(risk, data.laneChange, world, data.config,
                 std::max(std::abs(world.egoSpeed),
-                         data.laneChangeConfig.localFallbackSpeed), map);
+                         localManeuverSpeedLimit(data.laneChange,data.laneChangeConfig,
+                                                 data.pathPlanner.config,gt)), map);
         const double clearance = data.laneChange.validatedObstacleClearance >= 0.
             ? data.laneChange.validatedObstacleClearance
             : data.laneChangeConfig.latticeObstacleClearance;
@@ -1824,7 +2146,8 @@ void runPlanningProcess(PlanningProcessData& data,
             maneuverSpeedSafety, data.laneChange, world, data.config,
             data.laneChange.localCorridorAvoidance
                 ? std::max(std::abs(world.egoSpeed),
-                           data.laneChangeConfig.localFallbackSpeed)
+                           localManeuverSpeedLimit(data.laneChange,data.laneChangeConfig,
+                                                   data.pathPlanner.config,gt))
                 : data.laneChangeConfig.maximumLaneChangeSpeed,map);
     if (data.laneChange.phase != LaneChangePhase::None && trace != nullptr &&
         trace->enabled) {
@@ -1840,15 +2163,10 @@ void runPlanningProcess(PlanningProcessData& data,
                       detail.str());
     }
 
-    const bool maneuverObstacleStillConfirmed =
-        data.laneChange.phase == LaneChangePhase::None ||
-        data.laneChange.roadConnectionManeuver ||
-        data.laneChange.localCorridorAvoidance ||
-        std::any_of(world.objects.begin(), world.objects.end(),
-                    [&](const WorldObjectState& object) {
-                        return static_cast<int>(object.raw.id) ==
-                                   data.laneChange.obstacleId;
-                    });
+    const auto& successorPath = corridorTrackingPathValid
+        ? data.roadLanePlanner.waypoints : data.pathPlanner.waypoints;
+    const bool maneuverObstacleStillConfirmed = !canCancelClearedPreparedAvoidance(
+        data.laneChange, sensedWorld, successorPath, successorPathReady);
     const bool finishingAvoidance = data.laneChange.phase != LaneChangePhase::None &&
         !data.laneChange.roadConnectionManeuver &&
         !data.laneChange.gatewayReplanRequestedAfterShift;
@@ -2088,15 +2406,19 @@ void runPlanningProcess(PlanningProcessData& data,
         }
     }
 
-    // No pending-search or sticky post-manoeuvre speed latch. Slow only
-    // while actually executing the new local detour or its certified tight tail.
+    // Only certified, gentle local detours get the open-passage cap. Tight
+    // tails retain the old low speed, including after manoeuvre handoff.
     if ((data.laneChange.localCorridorAvoidance &&
          data.laneChange.phase != LaneChangePhase::None) ||
         (selectedPathClearance >= 0.0 && selectedPathClearance + 1e-6 <
              data.laneChangeConfig.latticeObstacleClearance)) {
         data.frame.behavior.targetSpeed = std::min(
             data.frame.behavior.targetSpeed,
-            data.laneChangeConfig.localFallbackSpeed);
+            localFallbackSpeedLimit(data.laneChangeConfig,
+                data.laneChange.localCorridorAvoidance &&
+                data.laneChange.phase!=LaneChangePhase::None &&
+                data.laneChange.validatedObstacleClearance<0. ? -1. : selectedPathClearance,
+                tracking.maxCurvature,data.pathPlanner.config.maximumLateralAcceleration));
     }
 
     // A stored trajectory may remain useful for replanning even when a new
@@ -2222,8 +2544,18 @@ void runPlanningProcess(PlanningProcessData& data,
         data.emergencyBrakeHoldRemaining = std::max(
             0.0, data.emergencyBrakeHoldRemaining - std::max(0.0, dt));
     }
-    const bool emergency = rawEmergency ||
+    bool emergency = rawEmergency ||
         data.emergencyBrakeHoldRemaining > 0.0;
+    const bool missionComplete = data.missionCorridor.valid &&
+        activeMissionLeg(data.missionCorridor) == nullptr;
+    const bool finalGoalReached = missionComplete ||
+        (!data.missionCorridor.topologyAuthority && crossedFinishLine(
+            data, sensedWorld, map.staticZones,
+            !data.missionCorridor.valid && globalTracking.goalReached));
+    const bool progressOverride = applySimulationProgressRecovery(
+        data, gt, sensedWorld, world, map, tracking, emergency,
+        stationaryPathStop, stationaryBlocker, finalGoalReached,
+        confirmedStationaryObjectIds, dt, trace);
     if (trace != nullptr && trace->enabled) {
         std::ostringstream detail;
         detail << "ego_road=" << world.egoRoadId
@@ -2258,6 +2590,7 @@ void runPlanningProcess(PlanningProcessData& data,
                << " emergency_ttc_threshold=" << speedAwareEmergencyTTC
                << " physical_risk_object=" << physicalRiskObjectId
                << " dense_static_hold=" << data.behaviorState.denseStaticHoldRemaining
+               << " progress_recovery=" << progressOverride
                << " target_speed=" << data.frame.behavior.targetSpeed;
         traceDecision(trace, "planning", "frame_result", detail.str());
     }
@@ -2265,19 +2598,15 @@ void runPlanningProcess(PlanningProcessData& data,
     if (emergency) data.frame.behavior.targetSpeed = 0.0;
 
     tracking.targetSpeed = data.frame.behavior.targetSpeed;
-    const bool missionComplete = data.missionCorridor.valid &&
-        activeMissionLeg(data.missionCorridor) == nullptr;
-    tracking.goalReached = missionComplete ||
-        (!data.missionCorridor.topologyAuthority && crossedFinishLine(
-            data, sensedWorld, map.staticZones,
-            !data.missionCorridor.valid && globalTracking.goalReached));
+    tracking.goalReached = finalGoalReached;
     data.pathPlanner.latestPlan = tracking;
 
     data.result.valid = tracking.valid && world.inputValid;
     data.result.goalReached = tracking.goalReached;
     data.result.targetSpeed = tracking.targetSpeed;
-    data.result.stopReason = !data.frame.stop.valid && stationaryPathStop
-        ?StopReason::StationaryPathBlocked:data.frame.stop.reason;
+    data.result.stopReason = progressOverride ? StopReason::None :
+        !data.frame.stop.valid && stationaryPathStop
+            ? StopReason::StationaryPathBlocked : data.frame.stop.reason;
     data.result.longitudinal = data.frame.behavior.longitudinal;
     data.result.health = data.frame.behavior.health;
     data.result.trackingPlan = tracking;
@@ -2287,9 +2616,9 @@ void runPlanningProcess(PlanningProcessData& data,
     data.result.turnSignal = data.frame.behavior.turnSignal;
     data.result.currentSpeedLimit = data.frame.constraints.speedLimit;
     data.result.schoolZoneActive = schoolZoneActive;
-    data.result.stopDistanceValid = data.frame.stop.valid;
+    data.result.stopDistanceValid = data.frame.stop.valid && !progressOverride;
     data.result.stopDistance = data.frame.stop.distanceToStop;
     data.result.crosswalkActive = crosswalkControlActive;
     data.result.laneChangeActive =
-        data.laneChange.phase != LaneChangePhase::None;
+        progressOverride || data.laneChange.phase != LaneChangePhase::None;
 }

@@ -112,6 +112,14 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.behavior.emergencyBrakingDeceleration > 0.0 &&
            config.behavior.emergencyReactionTime >= 0.0 &&
            config.behavior.emergencyMinimumHoldTime >= 0.0 &&
+           (config.behavior.simulationProgressRecovery == 0.0 ||
+            config.behavior.simulationProgressRecovery == 1.0) &&
+           positiveFinite(config.behavior.progressRecoveryStopTimeout) &&
+           positiveFinite(config.behavior.progressRecoverySpeed) &&
+           config.behavior.progressRecoverySpeed <= 5.0 / 3.6 &&
+           positiveFinite(config.behavior.progressRecoveryRetryInterval) &&
+           positiveFinite(config.behavior.progressRecoverySearchBudgetMs) &&
+           config.behavior.progressRecoverySearchBudgetMs <= 40.0 &&
            config.behavior.collisionPredictionStep > 0.0 &&
            config.behavior.collisionPredictionHorizon >=
                config.behavior.collisionPredictionStep &&
@@ -126,7 +134,11 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            positiveFinite(config.laneChange.localFallbackHorizon) &&
            positiveFinite(config.laneChange.localFallbackRetryInterval) &&
            positiveFinite(config.laneChange.localFallbackSearchBudgetMs) &&
+           positiveFinite(config.laneChange.localReentrySearchBudgetMs) &&
+           config.laneChange.localReentrySearchBudgetMs <=
+               1000.0 &&
            positiveFinite(config.laneChange.localFallbackSpeed) &&
+           positiveFinite(config.laneChange.localFallbackOpenSpeed) &&
            config.laneChange.localFallbackActivationDistance <=
                config.laneChange.localFallbackHorizon &&
            config.laneChange.localFallbackSearchBudgetMs <=
@@ -280,6 +292,17 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.signalStopSearchDistance) &&
         setOptionalConfigValue(values, "planning.local_fallback_activation_distance",
                        config.laneChange.localFallbackActivationDistance) &&
+        setOptionalConfigValue(values, "planning.simulation_progress_recovery",
+                       config.behavior.simulationProgressRecovery) &&
+        setOptionalConfigValue(values, "planning.progress_recovery_stop_timeout",
+                       config.behavior.progressRecoveryStopTimeout) &&
+        (values.count("planning.progress_recovery_speed_kph") == 0 ||
+         setSpeedConfigValue(values, "planning.progress_recovery_speed_kph",
+                       config.behavior.progressRecoverySpeed)) &&
+        setOptionalConfigValue(values, "planning.progress_recovery_retry_interval",
+                       config.behavior.progressRecoveryRetryInterval) &&
+        setOptionalConfigValue(values, "planning.progress_recovery_search_budget_ms",
+                       config.behavior.progressRecoverySearchBudgetMs) &&
         setOptionalConfigValue(values, "planning.local_fallback_time_headway",
                        config.laneChange.localFallbackTimeHeadway) &&
         setOptionalConfigValue(values, "planning.local_fallback_horizon",
@@ -288,9 +311,15 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.laneChange.localFallbackRetryInterval) &&
         setOptionalConfigValue(values, "planning.local_fallback_search_budget_ms",
                        config.laneChange.localFallbackSearchBudgetMs) &&
+        setOptionalConfigValue(values, "planning.local_reentry_search_budget_ms",
+                       config.laneChange.localReentrySearchBudgetMs) &&
         (values.count("planning.local_fallback_speed_kph") == 0 ||
          setSpeedConfigValue(values, "planning.local_fallback_speed_kph",
                        config.laneChange.localFallbackSpeed)) &&
+        (values.count("planning.local_fallback_open_speed_kph") == 0
+            ? (config.laneChange.localFallbackOpenSpeed = config.laneChange.localFallbackSpeed, true)
+            : setSpeedConfigValue(values, "planning.local_fallback_open_speed_kph",
+                       config.laneChange.localFallbackOpenSpeed)) &&
         setConfigValue(values, "lane_change.obstacle_trigger_minimum_distance",
                        config.laneChange.obstacleTriggerMinimumDistance) &&
         setConfigValue(values, "lane_change.obstacle_trigger_maximum_distance",

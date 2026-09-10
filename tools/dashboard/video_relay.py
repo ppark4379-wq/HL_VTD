@@ -7,8 +7,10 @@ import time
 
 
 class VideoRelay:
-    def __init__(self, command_factory):
+    def __init__(self, command_factory, recording=None, view=None):
         self.command_factory = command_factory
+        self.recording = recording
+        self.view = view
         self.condition = threading.Condition()
         self.stop_event = threading.Event()
         self.frame = None
@@ -16,6 +18,7 @@ class VideoRelay:
         self.last_frame_at = None
         self.source = None
         self.error = None
+        self.recording_error = None
         self.proc = None
         self.started_at = None
         self.watchdog = threading.Thread(target=self.watch, daemon=True, name='vtd-video-watchdog')
@@ -39,7 +42,21 @@ class VideoRelay:
     def status(self):
         with self.condition:
             live = self.last_frame_at is not None and time.monotonic()-self.last_frame_at < 3
-            return dict(found=live,source=self.source,error=self.error,frame_count=self.sequence)
+            status = dict(found=live,error=self.error,frame_count=self.sequence)
+            if isinstance(self.source,dict):
+                status.update(self.source)
+            else:
+                status['source']=self.source
+            if self.recording is not None and self.view is not None:
+                try:
+                    status['recording']=self.recording.status(self.view)
+                except Exception as error:
+                    status['recording']={
+                        'status':'ERROR', 'active':False, 'error':str(error),
+                    }
+                if self.recording_error:
+                    status['recording']['relay_error']=self.recording_error
+            return status
 
     def wait_frame(self, sequence, timeout=2):
         with self.condition:
@@ -54,13 +71,23 @@ class VideoRelay:
             self.proc.kill()
         with self.condition:
             self.condition.notify_all()
-        self.thread.join(timeout=3)
-        self.watchdog.join(timeout=2)
+        if self.thread.is_alive():
+            self.thread.join(timeout=3)
+        if self.watchdog.is_alive():
+            self.watchdog.join(timeout=2)
 
     def run(self):
         while not self.stop_event.is_set():
             command,source,error = self.command_factory()
-            self.source,self.error = source,error
+            with self.condition:
+                self.source,self.error = source,error
+                # A source label must only describe frames produced by this
+                # capture attempt.  Otherwise a fast window/RTSP failover can
+                # expose the previous source's JPEG as ``found: true`` under a
+                # new title/window ID for up to the health timeout.
+                self.frame=None
+                self.last_frame_at=None
+                self.condition.notify_all()
             if command is None:
                 self.stop_event.wait(2)
                 continue
@@ -87,16 +114,38 @@ class VideoRelay:
                                 break
                             jpeg=buffer[start:end+2]
                             buffer=buffer[end+2:]
+                            wall_time_ns=time.time_ns()
+                            monotonic_ns=time.monotonic_ns()
                             with self.condition:
                                 self.frame=jpeg
                                 self.sequence+=1
-                                self.last_frame_at=time.monotonic()
+                                sequence=self.sequence
+                                self.last_frame_at=monotonic_ns/1_000_000_000
                                 self.error=None
                                 self.condition.notify_all()
+                            if self.recording is not None and self.view is not None:
+                                try:
+                                    recorded=self.recording.record_frame(
+                                        self.view,
+                                        sequence,
+                                        jpeg,
+                                        source,
+                                        wall_time_ns=wall_time_ns,
+                                        monotonic_ns=monotonic_ns,
+                                    )
+                                    if recorded:
+                                        self.recording_error=None
+                                except Exception as error:
+                                    # Recording is an evidence sidecar; never
+                                    # sacrifice the live browser stream for it.
+                                    self.recording_error=str(error)
                     errors.seek(0)
-                    self.error=errors.read(2048).decode('utf-8','replace').strip() or 'VTD video ended; reconnecting'
+                    capture_error=errors.read(2048).decode('utf-8','replace').strip() or 'VTD video ended; reconnecting'
+                    with self.condition:
+                        self.error=capture_error
             except (OSError,ValueError) as error:
-                self.error=str(error)
+                with self.condition:
+                    self.error=str(error)
             finally:
                 if self.proc:
                     if self.proc.poll() is None:
@@ -105,4 +154,10 @@ class VideoRelay:
                     if self.proc.stdout:
                         self.proc.stdout.close()
                     self.proc=None
+                with self.condition:
+                    # Do not serve a recently produced but now disconnected
+                    # frame while waiting for the next discovery attempt.
+                    self.frame=None
+                    self.last_frame_at=None
+                    self.condition.notify_all()
             self.stop_event.wait(2)

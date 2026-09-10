@@ -75,6 +75,69 @@ class WholeMissionTests(unittest.TestCase):
         d=Network(geo,[((1,0,-1),(2,0,-1))]).build(mission([(1,0),(19,0)]))
         self.assertEqual(d['witness_route'],[(1,0,-1),(2,0,-1)])
         self.assertEqual(d['legs'][0]['status'],'same_corridor')
+        self.assertEqual(d['checkpoint_matches'][-1]['association'],'road_surface')
+
+    def test_finish_inside_junction_ends_on_exact_connector(self):
+        source=lane(1,0,10);connector=lane(100,10,20,junction=1);exit_=lane(2,20,30)
+        geo=dict([source,connector,exit_]);edges=[(source[0],connector[0]),(connector[0],exit_[0])]
+        d=Network(geo,edges).build(mission([(1,0),(15,0)]))
+        self.assertTrue(d['initialized_ok'])
+        self.assertEqual(d['checkpoint_matches'][-1]['association'],'junction_terminal')
+        self.assertEqual(d['checkpoint_matches'][-1]['nearest_lane'],connector[0])
+        self.assertAlmostEqual(d['checkpoint_matches'][-1]['road_s'],5.)
+        self.assertEqual(d['witness_route'],[source[0],connector[0]])
+        self.assertNotIn(exit_[0],d['corridor_groups'][-1]['lanes'])
+        self.assertIn(connector[0],d['corridor_groups'][-1]['lanes'])
+        clip=next(c for c in d['surface_clips'] if tuple(c['key'])==connector[0])
+        self.assertAlmostEqual(clip['road_s_max'],5.)
+
+    def test_finish_inside_coincident_connector_aliases_keeps_all_targets(self):
+        source=lane(1,0,10)
+        connector_a=lane(100,10,20,junction=1)
+        connector_b=lane(101,10,20,junction=1)
+        exit_a=lane(2,20,30)
+        exit_b=lane(3,20,30)
+        geometry=dict([source,connector_a,connector_b,exit_a,exit_b])
+        edges=[(source[0],connector_a[0]),(source[0],connector_b[0]),
+               (connector_a[0],exit_a[0]),(connector_b[0],exit_b[0])]
+        d=Network(geometry,edges).build(mission([(1,0),(15,0)]))
+        self.assertTrue(d['initialized_ok'])
+        self.assertEqual(set(map(tuple,d['terminal_alias_lanes'])),
+                         {connector_a[0],connector_b[0]})
+        self.assertTrue({connector_a[0],connector_b[0]}.issubset(
+            set(map(tuple,d['corridor_groups'][-1]['lanes']))))
+        clipped={tuple(c['key']) for c in d['surface_clips']}
+        self.assertTrue({connector_a[0],connector_b[0]}.issubset(clipped))
+
+    def test_finish_overlap_uses_authored_heading_to_select_connector(self):
+        source=lane(1,0,10)
+        straight=lane(100,10,20,junction=1)
+        turning=lane(101,10,20,junction=1,y1=5)
+        exit_straight=lane(2,20,30)
+        exit_turn=lane(3,20,30,y=5)
+        geometry=dict([source,straight,turning,exit_straight,exit_turn])
+        edges=[(source[0],straight[0]),(source[0],turning[0]),
+               (straight[0],exit_straight[0]),(turning[0],exit_turn[0])]
+        d=Network(geometry,edges).build(mission([(1,0),(12,0)]))
+        self.assertTrue(d['initialized_ok'])
+        self.assertEqual(d['checkpoint_matches'][-1]['nearest_lane'],straight[0])
+        self.assertEqual(d['terminal_alias_lanes'],[straight[0]])
+
+    def test_spawn_inside_overlapping_connectors_keeps_all_safe_aliases(self):
+        connector_a=lane(100,0,10,junction=1)
+        connector_b=lane(101,0,10,junction=1)
+        exit_=lane(2,10,30)
+        geometry=dict([connector_a,connector_b,exit_])
+        edges=[(connector_a[0],exit_[0]),(connector_b[0],exit_[0])]
+        d=Network(geometry,edges).build(mission([(5,0),(29,0)]))
+        self.assertTrue(d['initialized_ok'])
+        self.assertEqual(d['checkpoint_matches'][0]['association'],'junction_start')
+        self.assertIn(connector_a[0],d['corridor_groups'][0]['lanes'])
+        self.assertIn(connector_b[0],d['corridor_groups'][0]['lanes'])
+        self.assertEqual(d['witness_route'][0],connector_a[0])
+        clips={tuple(c['key']):c for c in d['surface_clips']}
+        self.assertAlmostEqual(clips[connector_a[0]]['road_s_min'],5.)
+        self.assertAlmostEqual(clips[connector_b[0]]['road_s_min'],5.)
 
     def test_invalid_pair_count_is_not_competition_valid(self):
         geo,edges=self.parallel()

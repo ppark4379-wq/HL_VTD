@@ -131,15 +131,41 @@
   },
   {
     "scenario": "M15",
-    "checkpoints": 11,
-    "corridors": 10,
-    "gateways": 0,
-    "xodr_connector_groups": 9,
+    "checkpoints": 10,
+    "corridors": 5,
+    "gateways": 4,
+    "xodr_connector_groups": 7,
     "ordered_connected": true,
     "gate_connected": true,
     "geometry_gaps": 0,
     "centerline_steps": 0,
-    "pairing_valid": false,
+    "pairing_valid": true,
     "unreachable_lane_sections": 1
+  },
+  {
+    "scenario": "M16",
+    "checkpoints": 8,
+    "corridors": 4,
+    "gateways": 3,
+    "xodr_connector_groups": 5,
+    "ordered_connected": true,
+    "gate_connected": true,
+    "geometry_gaps": 0,
+    "centerline_steps": 0,
+    "pairing_valid": true,
+    "unreachable_lane_sections": 0
+  },
+  {
+    "scenario": "M17",
+    "checkpoints": 6,
+    "corridors": 3,
+    "gateways": 2,
+    "xodr_connector_groups": 5,
+    "ordered_connected": true,
+    "gate_connected": true,
+    "geometry_gaps": 0,
+    "centerline_steps": 0,
+    "pairing_valid": true,
+    "unreachable_lane_sections": 0
   }
 ]

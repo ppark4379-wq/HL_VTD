@@ -4,10 +4,15 @@
 #include <memory>
 #include <chrono>
 #include <array>
+#include <limits>
 
 struct DecisionTraceData;
 struct CorridorGlobalRouteWorker;
 struct CorridorLocalRouteWorker;
+struct CorridorReentryScope {
+    std::vector<bool> allowed, surface, preview;
+    bool outsideCorridor{};
+};
 struct CorridorEdge {
     std::int64_t to{-1};
     double distance{};
@@ -26,6 +31,8 @@ struct CorridorRuntime {
     // the next intersection and never advances actual mission progress.
     std::vector<bool> globalSearchAllowed,globalSearchGoal;
     bool globalExitPreviewActive{};
+    int localFallbackSearchTier{};
+    int localFallbackSearchBlocker{-1};
     std::vector<double> gatewayCost;
     // Deterministic shortest-path policy to the active gateway.  This is the
     // corridor-wide global route: it is computed once when the mission leg is
@@ -64,6 +71,8 @@ struct CorridorRuntime {
     // True when this bridge ends on a caller-supplied map-derived mission
     // reference, rather than merely on the nearest physical driving lane.
     bool recoveryTrackingPathReachesReference{};
+    bool recoveryTrackingPathRelocalized{};
+    bool trackingPathRelocalized{};
     // A failed measured-pose -> mission-reference bridge is expensive and
     // its geometry does not change every control tick. Retry after meaningful
     // motion or a short simulation-time cooldown while physical lane tracking
@@ -98,6 +107,9 @@ struct CorridorRuntime {
     bool localFallbackPending{};
     bool localFallbackEngaged{};
     bool localFallbackContinuationRequested{};
+    // Independent of obstacle/continuation triggers: recover an unattached or
+    // exhausted mission trajectory from the measured, map-valid pose.
+    bool localFallbackRelocalizationRequested{};
     std::size_t localFallbackLeg{static_cast<std::size_t>(-1)};
     std::uint64_t localFallbackEpoch{}, localFallbackSignature{};
     std::chrono::steady_clock::time_point localFallbackRetryAt;
@@ -152,6 +164,24 @@ void beginCorridorSearchFrame(CorridorRuntime& runtime);
 // Keep the usable trajectory until a replacement from the measured pose is
 // ready. Used after avoidance has reached its target lane.
 void requestCorridorGlobalReplan(CorridorRuntime& runtime);
+// Route/return proof only; callers must also validate swept surface and actors.
+bool corridorReentryPreservesMission(const std::vector<Waypoint>& path,
+    const CorridorRuntime& runtime,const MissionCorridorData& mission,
+    const WorldState& world,const CorridorReentryScope& scope);
+
+// Simulation-only escape: retain road/curvature feasibility, but score body
+// confirmed-static contact instead of rejecting it. Dynamic/unconfirmed
+// actors and pedestrian-sized objects retain collision rejection.
+// The ordinary collision-approved planner and caches are not modified.
+bool prepareCorridorProgressRecovery(
+    PathPlannerData& output, bool& contactExpected, std::size_t& searchCursor,
+    const WorldState& world, const PathGeneratorData& map,
+    const MissionCorridorData& mission, const LaneChangeConfig& laneConfig,
+    const PlanningBehaviorConfig& behavior,
+    const std::vector<Waypoint>& reference,
+    const std::vector<int>& confirmedStationaryObjectIds, DecisionTraceData* trace,
+    double failedHeadingChange = std::numeric_limits<double>::quiet_NaN(),
+    bool* retainedReference = nullptr);
 
 // Returns only a currently attached, fully checked local replacement. False
 // never clears the active trajectory; Pending/Engaged report worker state.

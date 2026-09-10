@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "session_id": "20260909T130957.744242Z-2164985-8acbd323",
+  "directory": "/home/autonav/바탕화면/HL_VTD/output/video_evidence/M15_20260909_220957",
+  "status": "CLOSED",
+  "active": false,
+  "error": null,
+  "created_wall_time_utc": "2026-09-09T13:09:57.744263+00:00",
+  "created_wall_time_ns": 1788959397744263390,
+  "created_monotonic_ns": 431681943249434,
+  "stopped_wall_time_utc": "2026-09-09T13:15:01.823949+00:00",
+  "stopped_wall_time_ns": 1788959701823949273,
+  "stopped_monotonic_ns": 431986022937596,
+  "disk_guard": {
+    "min_free_bytes": 1073741824,
+    "last_free_bytes": 17827454976,
+    "estimated_free_bytes": 17827389709,
+    "check_interval_s": 0.0,
+    "per_write_reserve_bytes": 4194304
+  },
+  "views": {
+    "mainrs": {
+      "view": "mainrs",
+      "data_file": "mainrs.mjpeg",
+      "index_file": "mainrs.frames.jsonl",
+      "format": "concatenated_jpeg_with_jsonl_index",
+      "frame_count": 7206,
+      "data_bytes": 433081789,
+      "index_bytes": 2907052,
+      "indexed_data_bytes": 433081789,
+      "orphan_tail_bytes": 0,
+      "index_authoritative": true,
+      "first_sequence": 1,
+      "last_sequence": 7206,
+      "first_wall_time_ns": 1788959461356732049,
+      "last_wall_time_ns": 1788959701728801483,
+      "first_monotonic_ns": 431745555722122,
+      "last_monotonic_ns": 431985927787905,
+      "last_source": {
+        "source": "window",
+        "view": "mainrs",
+        "title": "mainRS",
+        "matched_title": "mainRS",
+        "window_id": 136314883,
+        "geometry": {
+          "x": 780,
+          "y": 137,
+          "width": 960,
+          "height": 540
+        }
+      },
+      "source_segments": [
+        {
+          "source": {
+            "source": "window",
+            "view": "mainrs",
+            "title": "mainRS",
+            "matched_title": "mainRS",
+            "window_id": 136314883,
+            "geometry": {
+              "x": 780,
+              "y": 137,
+              "width": 960,
+              "height": 540
+            }
+          },
+          "first_sequence": 1,
+          "last_sequence": 7206,
+          "first_wall_time_ns": 1788959461356732049,
+          "last_wall_time_ns": 1788959701728801483,
+          "first_monotonic_ns": 431745555722122,
+          "last_monotonic_ns": 431985927787905,
+          "frame_count": 7206
+        }
+      ]
+    },
+    "birdrs": {
+      "view": "birdrs",
+      "data_file": "birdrs.mjpeg",
+      "index_file": "birdrs.frames.jsonl",
+      "format": "concatenated_jpeg_with_jsonl_index",
+      "frame_count": 2404,
+      "data_bytes": 54408070,
+      "index_bytes": 966845,
+      "indexed_data_bytes": 54408070,
+      "orphan_tail_bytes": 0,
+      "index_authoritative": true,
+      "first_sequence": 1,
+      "last_sequence": 2404,
+      "first_wall_time_ns": 1788959461635405883,
+      "last_wall_time_ns": 1788959701717491216,
+      "first_monotonic_ns": 431745834393272,
+      "last_monotonic_ns": 431985916477807,
+      "last_source": {
+        "source": "window",
+        "view": "birdrs",
+        "title": "birdRS",
+        "matched_title": "birdRS",
+        "window_id": 144703491,
+        "geometry": {
+          "x": 100,
+          "y": 137,
+          "width": 640,
+          "height": 360
+        }
+      },
+      "source_segments": [
+        {
+          "source": {
+            "source": "window",
+            "view": "birdrs",
+            "title": "birdRS",
+            "matched_title": "birdRS",
+            "window_id": 144703491,
+            "geometry": {
+              "x": 100,
+              "y": 137,
+              "width": 640,
+              "height": 360
+            }
+          },
+          "first_sequence": 1,
+          "last_sequence": 2404,
+          "first_wall_time_ns": 1788959461635405883,
+          "last_wall_time_ns": 1788959701717491216,
+          "first_monotonic_ns": 431745834393272,
+          "last_monotonic_ns": 431985916477807,
+          "frame_count": 2404
+        }
+      ]
+    }
+  }
+}

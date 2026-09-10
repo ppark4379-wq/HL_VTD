@@ -47,6 +47,7 @@
           <span class="vehicle-name">VTD EGO</span>
           <span id="stationFrame" class="frame-id">#0</span>
           <span id="liveBadge" class="run-state badge-idle"><i></i> READY</span>
+          <span id="dataSourceBadge" class="data-source-badge source-live">VTD 실시간</span>
         </div>
         <div class="station-selectors">
           <label>
@@ -61,6 +62,7 @@
         <div class="station-actions">
           <button id="liveSourceBtn" class="ghost-button" type="button">VTD 실시간</button>
           <button id="liveToggle" class="action-button live-toggle" type="button"><span aria-hidden="true">Ⅱ</span> 실시간 갱신</button>
+          <button id="finalizeBtn" class="ghost-button finalize-button hidden" type="button" title="완주가 아닌 미완료 종료로 결과를 보존합니다">평가 종료</button>
           <button id="reportBtn" class="action-button report-button" type="button"><span aria-hidden="true">▤</span> 결과 상세</button>
           <a class="ghost-button" href="/api/criteria.md" download="HL_VTD_자동채점_최종평가기준.md">평가 기준 받기</a>
         </div>
@@ -97,9 +99,9 @@
         <span class="metric-caption">ELAPSED</span>
       </article>
       <article class="metric-card metric-limit">
-        <p>제한 시간</p>
+        <p>남은 시간</p>
         <strong id="statLimit">900<small>s</small></strong>
-        <span class="metric-caption">15분 기준 잔여 시간</span>
+        <span class="metric-caption">15분 제한 기준</span>
       </article>
       <article class="metric-card metric-signal">
         <p>신호 정보</p>
@@ -142,23 +144,39 @@
           <div class="heading-title">실시간 영상</div>
           <div class="viewer-tools">
             <div class="view-tabs" aria-label="화면 선택">
-              <button id="tabMainrs" class="view-tab active" type="button">VTD LIVE</button>
+              <button id="tabMainrs" class="view-tab active" type="button">mainRS</button>
+              <button id="tabBirdrs" class="view-tab" type="button">birdRS</button>
+              <button id="tabSplit" class="view-tab" type="button">동시</button>
               <button id="tabMap" class="view-tab" type="button">주행 궤적</button>
             </div>
             <span id="frameReadout" class="frame-readout">0 frames</span>
           </div>
         </header>
         <div class="viewer-canvas-wrap">
-          <img id="mainrsImg" alt="VTD mainRS 실시간 화면">
-          <div id="mainrsFallback" class="mainrs-fallback hidden">
-            <div class="fallback-icon" aria-hidden="true"><span></span></div>
-            <div class="mainrs-fallback-title">VTD 실시간 영상을 기다리는 중입니다</div>
-            <div class="mainrs-fallback-sub">VTD에서 시나리오 Play를 누르면 mainRS 화면이 자동으로 연결됩니다.</div>
+          <div id="videoGrid" class="video-grid mode-mainrs">
+            <div id="mainrsPane" class="video-pane mainrs-pane">
+              <img id="mainrsImg" alt="VTD mainRS 실시간 화면" draggable="false">
+              <div id="mainrsFallback" class="mainrs-fallback hidden">
+                <div class="fallback-icon" aria-hidden="true"><span></span></div>
+                <div class="mainrs-fallback-title">mainRS 영상을 기다리는 중입니다</div>
+                <div id="mainrsFallbackSub" class="mainrs-fallback-sub">mainRS 창을 열고 VTD Play 상태를 확인하세요.</div>
+              </div>
+              <span id="mainrsSourceLabel" class="video-source-label">mainRS · 탐색 중</span>
+            </div>
+            <div id="birdrsPane" class="video-pane birdrs-pane">
+              <img id="birdrsImg" alt="VTD birdRS 실시간 화면" draggable="false">
+              <div id="birdrsFallback" class="mainrs-fallback hidden">
+                <div class="fallback-icon" aria-hidden="true"><span></span></div>
+                <div class="mainrs-fallback-title">birdRS 영상을 기다리는 중입니다</div>
+                <div id="birdrsFallbackSub" class="mainrs-fallback-sub">별도의 birdRS 창을 열어 두세요.</div>
+              </div>
+              <span id="birdrsSourceLabel" class="video-source-label">birdRS · 탐색 중</span>
+            </div>
           </div>
           <canvas id="mapCanvas" class="hidden" aria-label="주행 궤적 지도"></canvas>
           <div class="viewer-overlay-top">
             <span id="streamBadge" class="stream-badge waiting"><i></i> STANDBY</span>
-            <span class="stream-meta"><b id="overlayFrame">0 frames</b><span>VTD mainRS</span></span>
+            <span class="stream-meta"><b id="overlayFrame">RDB #0</b><span id="overlayVideoSource">mainRS 탐색 중</span></span>
           </div>
           <div class="viewer-overlay-bottom">
             <span id="overlayTime">00:00.0</span>

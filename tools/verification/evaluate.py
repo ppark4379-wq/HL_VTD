@@ -22,16 +22,16 @@ OFFICIAL_ITEMS = {
     2: "school_zone_speed",
     4: "centerline_right_hand_traffic",
     5: "sidewalk_intrusion",
-    6: "solid_line_change",
-    7: "red_light_stop",
-    8: "green_light_pass",
-    9: "flashing_red_stop",
-    10: "pedestrian_response",
-    11: "obstacle_response",
+    6: "respawn",
+    7: "lane_change_turn_signal",
+    8: "solid_line_change",
+    9: "red_light_stop",
+    10: "green_light_pass",
+    11: "flashing_red_stop",
     12: "crosswalk_no_stop",
-    13: "lane_change_turn_signal",
-    14: "road_user_collision",
-    15: "respawn",
+    13: "static_obstacle_collision",
+    14: "pedestrian_response",
+    15: "road_user_collision",
 }
 
 
@@ -73,7 +73,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--speed-limit-kmh", type=non_negative_float,
-        help="로그에 current_speed_limit_kmh가 없을 때 적용할 제한속도",
+        help="posted_speed_limit_kmh가 없을 때 적용할 법정 제한속도",
     )
     parser.add_argument(
         "--school-zone-limit-kmh", type=non_negative_float,
@@ -87,7 +87,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def parse_float(row: dict[str, str], field: str) -> float | None:
-    raw = row.get(field, "").strip()
+    raw_value = row.get(field, "")
+    raw = "" if raw_value is None else str(raw_value).strip()
     if not raw:
         return None
     try:
@@ -98,7 +99,8 @@ def parse_float(row: dict[str, str], field: str) -> float | None:
 
 
 def parse_bool(row: dict[str, str], field: str) -> bool | None:
-    raw = row.get(field, "").strip().lower()
+    raw_value = row.get(field, "")
+    raw = "" if raw_value is None else str(raw_value).strip().lower()
     if not raw:
         return None
     if raw in {"1", "true", "yes"}:
@@ -116,6 +118,17 @@ def load_rows(path: Path) -> list[dict[str, str]]:
         if missing:
             raise ValueError("필수 열이 없습니다: " + ", ".join(missing))
         rows = list(reader)
+    incomplete = [
+        index for index, row in enumerate(rows)
+        if None in row or any(value is None for value in row.values())
+    ]
+    if incomplete == [len(rows)-1]:
+        # The dashboard may read while the C++ CSV logger is between writes.
+        # A single incomplete physical tail is not evidence and must neither
+        # crash the request nor become a synthetic all-empty assessment row.
+        rows.pop()
+    elif incomplete:
+        raise ValueError("CSV 중간에 잘린 데이터 행이 있습니다")
     if not rows:
         raise ValueError("로그에 데이터 행이 없습니다")
     return rows
@@ -126,7 +139,8 @@ def finite_values(rows: list[dict[str, str]], field: str) -> list[float]:
 
 
 def section_key(row: dict[str, str]) -> str:
-    return row.get("evaluation_section_id", "").strip() or "unsegmented"
+    value = row.get("evaluation_section_id", "")
+    return ("" if value is None else str(value).strip()) or "unsegmented"
 
 
 def group_by_section(rows: list[dict[str, str]]) -> dict[str, list[dict[str, str]]]:
@@ -154,7 +168,19 @@ def evaluate_speed_limit(
     maximum_overspeed = 0.0
     for row in rows:
         speed = parse_float(row, "ego_speed")
-        limit = parse_float(row, "current_speed_limit_kmh")
+        # The controller's historical ``current_speed_limit_kmh`` column is a
+        # behavioural planner cap.  It also contains curve, gateway and
+        # crosswalk approach speeds, so treating it as a posted road limit can
+        # manufacture an overspeed violation while the car is legally below
+        # the road limit.  Only consume it when the producer explicitly marks
+        # the value as regulatory; new evidence should prefer the unambiguous
+        # posted_speed_limit_kmh column.
+        limit = parse_float(row, "posted_speed_limit_kmh")
+        source = row.get("speed_limit_source", "").strip().lower()
+        if limit is None and source in {
+            "assessment_rule", "map_regulatory", "posted", "regulatory"
+        }:
+            limit = parse_float(row, "current_speed_limit_kmh")
         if limit is None:
             limit = fallback_limit
         if speed is None or limit is None:
@@ -245,15 +271,29 @@ def evaluate_event_count(rows: list[dict[str, str]], number: int, field: str) ->
 
 
 def evaluate_crosswalk_stop(rows: list[dict[str, str]]) -> OfficialItemResult:
-    if not any(row.get("crosswalk_active", "").strip() for row in rows):
-        return OfficialItemResult(12, "UNAVAILABLE", detail="crosswalk_active unavailable")
+    accepted_sources = {
+        "map_polygon_rear_axle",
+        "scenario_metadata_rear_axle",
+        "rdb_rear_axle_polygon",
+    }
+    if not any(
+        row.get("crosswalk_active", "").strip()
+        and row.get("crosswalk_source", "").strip().lower() in accepted_sources
+        for row in rows
+    ):
+        return OfficialItemResult(
+            12,
+            "UNAVAILABLE",
+            detail="rear-axle crosswalk occupancy unavailable",
+        )
     severity: dict[str, int] = {}
     duration = 0.0
     previous_active = False
     for row, dt in timed_rows(rows):
         key = section_key(row)
         speed = parse_float(row, "ego_speed")
-        active = parse_bool(row, "crosswalk_active") is True and speed is not None and speed * 3.6 <= 1.0
+        trusted = row.get("crosswalk_source", "").strip().lower() in accepted_sources
+        active = trusted and parse_bool(row, "crosswalk_active") is True and speed is not None and abs(speed) * 3.6 <= 1.0
         if active:
             duration = duration + dt if previous_active and dt > 0 else 0.0
             if duration + 1e-9 >= 3.0:
@@ -266,27 +306,27 @@ def evaluate_crosswalk_stop(rows: list[dict[str, str]]) -> OfficialItemResult:
 
 def evaluate_collision(rows: list[dict[str, str]], scenario_id: str) -> list[OfficialItemResult]:
     if any("road_user_collision" in row or "static_collision" in row for row in rows):
-        return [evaluate_boolean(rows, 11, "static_collision", 1),
-                evaluate_boolean(rows, 14, "road_user_collision", 2)]
+        return [evaluate_boolean(rows, 13, "static_collision", 1),
+                evaluate_boolean(rows, 15, "road_user_collision", 2)]
     edges = count_rising_edges(rows, "collision")
-    obstacle = OfficialItemResult(11, "UNAVAILABLE", detail="collision unavailable")
-    road_user = OfficialItemResult(14, "UNAVAILABLE", detail="collision unavailable")
+    obstacle = OfficialItemResult(13, "UNAVAILABLE", detail="collision unavailable")
+    road_user = OfficialItemResult(15, "UNAVAILABLE", detail="collision unavailable")
     if edges is None:
         return [obstacle, road_user]
     event_sections = {key: count for key, count in edges.items() if count}
     if any(parse_bool(row, "collision") is True for row in rows):
         # Scenario names do not identify the object involved in a collision.
-        return [OfficialItemResult(11, "UNAVAILABLE", detail="collision object type missing"),
-                OfficialItemResult(14, "UNAVAILABLE", detail="collision object type missing")]
+        return [OfficialItemResult(13, "UNAVAILABLE", detail="collision object type missing"),
+                OfficialItemResult(15, "UNAVAILABLE", detail="collision object type missing")]
     if scenario_id.startswith("O"):
-        obstacle = severity_result(11, {key: 1 for key in event_sections}, "obstacle collision")
-        road_user = OfficialItemResult(14, "NOT_APPLICABLE", detail="obstacle scenario")
+        obstacle = severity_result(13, {key: 1 for key in event_sections}, "obstacle collision")
+        road_user = OfficialItemResult(15, "NOT_APPLICABLE", detail="obstacle scenario")
     elif scenario_id.startswith(("V", "P")):
-        obstacle = OfficialItemResult(11, "NOT_APPLICABLE", detail="non-obstacle scenario")
-        road_user = severity_result(14, {key: 2 for key in event_sections}, "road-user collision")
+        obstacle = OfficialItemResult(13, "NOT_APPLICABLE", detail="non-obstacle scenario")
+        road_user = severity_result(15, {key: 2 for key in event_sections}, "road-user collision")
     else:
-        obstacle = OfficialItemResult(11, "NOT_APPLICABLE")
-        road_user = OfficialItemResult(14, "NOT_APPLICABLE")
+        obstacle = OfficialItemResult(13, "NOT_APPLICABLE")
+        road_user = OfficialItemResult(15, "NOT_APPLICABLE")
     return [obstacle, road_user]
 
 
@@ -294,14 +334,14 @@ def evaluate_respawn(rows: list[dict[str, str]]) -> OfficialItemResult:
     values = [(section_key(row), parse_float(row, "respawn_count")) for row in rows]
     available = [(key, value) for key, value in values if value is not None]
     if not available:
-        return OfficialItemResult(15, "UNAVAILABLE", detail="respawn_count unavailable")
+        return OfficialItemResult(6, "UNAVAILABLE", detail="confirmed respawn event unavailable")
     maximum: dict[str, int] = defaultdict(int)
     for key, value in available:
         maximum[key] = max(maximum[key], int(value))
     excess = {key: count - 1 for key, count in maximum.items() if count > 1}
     penalty = -6 * sum(excess.values())
     return OfficialItemResult(
-        15, "MAJOR" if excess else "PASS", penalty,
+        6, "MAJOR" if excess else "PASS", penalty,
         "excess_respawns=" + str(sum(excess.values())),
         {key: 2 for key in excess},
         {key: count * 6 for key, count in excess.items()},
@@ -334,8 +374,8 @@ def evaluate_boolean(rows, number, field, level):
 
 
 def evaluate_signals(rows):
-    severities = {7: {}, 8: {}, 9: {}}
-    available = {7: False, 8: False, 9: False}
+    severities = {9: {}, 10: {}, 11: {}}
+    available = {9: False, 10: False, 11: False}
     stop_duration = green_duration = 0.0
     stopped_before = green_before = False
     previous_id = previous_distance = None
@@ -356,7 +396,7 @@ def evaluate_signals(rows):
             stopped_before = green_before = False
             flashing_stop_quality = 0
             previous_distance = None
-        available[7] = available[9] = True
+        available[9] = available[11] = True
         stopped = abs(speed) <= (parse_float(row, "stop_speed_kmh") or 0.0) / 3.6
         in_approach = 0 <= distance <= 30
         stopped_here = stopped and distance >= 0
@@ -370,27 +410,27 @@ def evaluate_signals(rows):
         crossed = previous_distance is not None and previous_distance >= 0 and distance < 0
         if signal == "RED":
             if crossed:
-                severities[7][key] = 2
+                severities[9][key] = 2
             elif distance >= 2 and stop_duration + 1e-9 >= 0.5:
-                severities[7][key] = max(severities[7].get(key, 0), 1)
+                severities[9][key] = max(severities[9].get(key, 0), 1)
         if signal == "FLASHING_RED" and crossed:
             if flashing_stop_quality == 0:
-                severities[9][key] = 2
+                severities[11][key] = 2
             elif flashing_stop_quality == 1:
-                severities[9][key] = max(severities[9].get(key, 0), 1)
+                severities[11][key] = max(severities[11].get(key, 0), 1)
         justified = parse_bool(row, "justified_stop")
         if justified is not None:
-            available[8] = True
+            available[10] = True
         green_now = signal == "GREEN" and stopped and in_approach and justified is False
         green_duration = green_duration + dt if green_now and green_before else 0.0
         if green_duration + 1e-9 >= 5:
             level = 2 if green_duration + 1e-9 >= 10 else 1
-            severities[8][key] = max(severities[8].get(key, 0), level)
+            severities[10][key] = max(severities[10].get(key, 0), level)
         stopped_before, green_before = stopped_here, green_now
         previous_id, previous_distance = signal_id, distance
     return tuple(severity_result(n, severities[n], "front bumper / simulation time")
                  if available[n] else OfficialItemResult(n, "UNAVAILABLE", detail="signal mapping or stop reason unavailable")
-                 for n in (7, 8, 9))
+                 for n in (9, 10, 11))
 
 
 def evaluate_official_for(
@@ -409,15 +449,15 @@ def evaluate_official(rows: list[dict[str, str]], args: argparse.Namespace) -> l
     results[2] = evaluate_school_zone(rows, args.school_zone_limit_kmh)
     results[4] = evaluate_sustained_intrusion(rows, 4, "centerline_intrusion_m", 0.6, 0.6)
     results[5] = evaluate_sustained_intrusion(rows, 5, "sidewalk_intrusion_m", 0.5, 0.3)
-    results[6] = evaluate_event_count(rows, 6, "solid_line_crossing")
-    results[7], results[8], results[9] = evaluate_signals(rows)
-    results[10] = evaluate_boolean(rows, 10, "pedestrian_violation", 2)
-    results[13] = evaluate_boolean(rows, 13, "turn_signal_violation", 1)
+    results[6] = evaluate_respawn(rows)
+    results[7] = evaluate_boolean(rows, 7, "turn_signal_violation", 1)
+    results[8] = evaluate_event_count(rows, 8, "solid_line_crossing")
+    results[9], results[10], results[11] = evaluate_signals(rows)
     results[12] = evaluate_crosswalk_stop(rows)
+    results[14] = evaluate_boolean(rows, 14, "pedestrian_violation", 2)
     obstacle, road_user = evaluate_collision(rows, rows[0]["scenario_id"])
-    results[11] = obstacle
-    results[14] = road_user
-    results[15] = evaluate_respawn(rows)
+    results[13] = obstacle
+    results[15] = road_user
     return [results[number] for number in sorted(results)]
 
 
@@ -468,14 +508,22 @@ def summarize(rows: list[dict[str, str]], args: argparse.Namespace) -> dict[str,
         unavailable = [OFFICIAL_ITEMS[item.number] for item in official if item.status == "UNAVAILABLE"]
         violations = [f"{item.number}:{item.status}" for item in official if item.status in {"MINOR", "MAJOR"}]
         has_section_ids = all(row.get("evaluation_section_id", "").strip() for row in rows)
-        penalty = sum(item.penalty for item in available)
+        penalty = -sum(
+            points
+            for item in available
+            for section, points in item.penalty_by_section.items()
+            if section != "unsegmented"
+        )
+        complete = not unavailable and has_section_ids
         summary.update({
-            "official_evaluation": "PARTIAL" if unavailable or not has_section_ids else "COMPLETE",
-            "major_count": str(sum(points//6 if item.number==15 else int(item.severity_by_section.get(section)==2)
-                                   for item in official for section,points in item.penalty_by_section.items())),
+            "official_evaluation": "COMPLETE" if complete else "PARTIAL",
+            "major_count": str(sum(points//6 if item.number==6 else int(item.severity_by_section.get(section)==2)
+                                   for item in official for section,points in item.penalty_by_section.items()
+                                   if section != "unsegmented")),
             "official_base_score": "500",
             "official_penalty": str(penalty),
-            "official_score": str(500 + penalty),
+            "official_score": str(500 + penalty) if complete else None,
+            "evidence_only_score": str(500 + sum(item.penalty for item in available)),
             "official_violations": ";".join(violations),
             "official_unavailable_items": ";".join(unavailable),
             "official_item_status": ";".join(

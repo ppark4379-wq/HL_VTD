@@ -101,6 +101,69 @@ class OpenDriveMap:
             if best is None or distance<best[0]: best=(distance,s0+alpha*(s1-s0),t)
         return None if best is None else best[1:]
 
+    def reference_pose(self, road_id, s):
+        """Return an interpolated world reference-line pose at road ``s``."""
+        points = self.reference(road_id)
+        if not points:
+            return None
+        if s <= points[0][0]:
+            index = 0
+            alpha = 0.0
+        elif s >= points[-1][0]:
+            index = len(points) - 2
+            alpha = 1.0
+        else:
+            ss = [point[0] for point in points]
+            index = max(0, min(len(points) - 2, bisect.bisect_right(ss, s) - 1))
+            span = points[index + 1][0] - points[index][0]
+            alpha = 0.0 if span <= 1e-12 else (s - points[index][0]) / span
+        _, x0, y0 = points[index]
+        _, x1, y1 = points[index + 1]
+        return (
+            x0 + alpha * (x1 - x0),
+            y0 + alpha * (y1 - y0),
+            math.atan2(y1 - y0, x1 - x0),
+        )
+
+    def lane_center_world(self, road_id, s, lane_id):
+        """Return the selected OpenDRIVE lane centre in world coordinates."""
+        pose = self.reference_pose(road_id, s)
+        data = self.lanes_at(road_id, s) if road_id in self.roads else None
+        lane = data and data['lanes'].get(lane_id)
+        if pose is None or lane is None:
+            return None
+        x, y, heading = pose
+        lateral = (lane['inner'] + lane['outer']) / 2
+        return (
+            x - math.sin(heading) * lateral,
+            y + math.cos(heading) * lateral,
+        )
+
+    def lane_change_direction(self, road_id, s, old_lane, new_lane, ego_heading):
+        """Resolve LEFT/RIGHT in the vehicle's travel frame, with audit evidence.
+
+        RDB ``leftLaneId``/``rightLaneId`` and the OpenDRIVE lane-id sign are
+        road-reference concepts.  They reverse when a vehicle travels against
+        the OpenDRIVE reference direction.  Comparing the two physical lane
+        centres against Ego's world heading avoids that inversion.
+        """
+        old_center = self.lane_center_world(road_id, s, old_lane)
+        new_center = self.lane_center_world(road_id, s, new_lane)
+        if old_center is None or new_center is None:
+            return None, None
+        dx = new_center[0] - old_center[0]
+        dy = new_center[1] - old_center[1]
+        signed_lateral = math.cos(ego_heading) * dy - math.sin(ego_heading) * dx
+        evidence = {
+            'source': 'xodr_lane_centres_in_ego_travel_frame',
+            'old_lane_center': list(old_center),
+            'new_lane_center': list(new_center),
+            'signed_lateral_m': signed_lateral,
+        }
+        if abs(signed_lateral) < 0.25:
+            return None, evidence
+        return ('LEFT' if signed_lateral > 0 else 'RIGHT'), evidence
+
     def lanes_at(self,road_id,s):
         road=self.roads[road_id]
         sec=active(road.findall('lanes/laneSection'),s,'s')

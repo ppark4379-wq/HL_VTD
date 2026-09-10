@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 import sys
 import time
 from pathlib import Path
@@ -26,17 +27,29 @@ OFFICIAL_ITEM_LABELS = {
     2: '보호구역 속도 준수',
     4: '중앙선 침범(우측통행)',
     5: '보도 침범',
-    6: '실선 구간 차로변경',
-    7: '적색 신호 정지',
-    8: '녹색 신호 통과',
-    9: '적색 점멸 일시정지',
-    10: '보행자 대응',
-    11: '장애물 대응',
+    6: '리스폰(재출현)',
+    7: '차선변경 방향지시등',
+    8: '실선 구간 차로변경',
+    9: '적색 신호 정지',
+    10: '녹색 신호 통과',
+    11: '적색 점멸 일시정지',
     12: '횡단보도 정차',
-    13: '차선변경 방향지시등',
-    14: '도로사용자 충돌',
-    15: '리스폰(재출현)',
+    13: '정적 장애물 충돌',
+    14: '보행자 대응',
+    15: '도로사용자 충돌',
 }
+
+SAFE_PATH_COMPONENT = re.compile(r'^[A-Za-z0-9._-]+$')
+
+
+def safe_path_component(value: str, label: str) -> str:
+    if (
+        not value
+        or value in {'.', '..'}
+        or SAFE_PATH_COMPONENT.fullmatch(value) is None
+    ):
+        raise ValueError(f'invalid {label}')
+    return value
 
 
 def load_catalog() -> List[Dict[str, str]]:
@@ -49,6 +62,9 @@ def catalog_by_id() -> Dict[str, Dict[str, str]]:
 
 
 def list_runs(scenario_id: str) -> List[dict]:
+    if not scenario_id:
+        return []
+    scenario_id = safe_path_component(scenario_id, 'scenario_id')
     base = VERIFICATION_DIR / scenario_id
     if not base.is_dir():
         return []
@@ -70,6 +86,8 @@ def list_runs(scenario_id: str) -> List[dict]:
 
 
 def read_run_rows(scenario_id: str, run_id: str) -> List[Dict[str, str]]:
+    scenario_id = safe_path_component(scenario_id, 'scenario_id')
+    run_id = safe_path_component(run_id, 'run_id')
     path = VERIFICATION_DIR / scenario_id / run_id / 'run.csv'
     return evaluate.load_rows(path)
 

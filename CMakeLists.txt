@@ -8,6 +8,11 @@ link_libraries(Threads::Threads)
 
 enable_testing()
 
+add_executable(corridor_surface_query_tests tests/corridor_surface_query_tests.cpp)
+target_compile_features(corridor_surface_query_tests PRIVATE cxx_std_17)
+target_include_directories(corridor_surface_query_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+add_test(NAME corridor_surface_query_tests COMMAND corridor_surface_query_tests)
+
 add_executable(vehicle_footprint_tests tests/vehicle_footprint_tests.cpp
     src/utils/geometry.cpp)
 target_compile_features(vehicle_footprint_tests PRIVATE cxx_std_17)
@@ -55,6 +60,12 @@ add_executable(corridor_lattice_tests tests/corridor_lattice_tests.cpp ${CORRIDO
 target_compile_features(corridor_lattice_tests PRIVATE cxx_std_17)
 target_include_directories(corridor_lattice_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_test(NAME corridor_lattice_tests COMMAND corridor_lattice_tests)
+add_test(NAME progress_recovery_selection COMMAND corridor_lattice_tests --progress-recovery-selection)
+add_test(NAME bounded_corridor_reentry COMMAND corridor_lattice_tests --bounded-reentry)
+add_test(NAME lost_corridor_recovery COMMAND corridor_lattice_tests --lost-corridor-recovery)
+add_test(NAME no_cosmetic_replan COMMAND corridor_lattice_tests --no-cosmetic-replan)
+set_tests_properties(lost_corridor_recovery PROPERTIES TIMEOUT 10)
+set_tests_properties(bounded_corridor_reentry PROPERTIES TIMEOUT 15)
 add_executable(global_route_obstacle_tests tests/global_route_obstacle_tests.cpp ${CORRIDOR_SOURCES}
     src/planning/global/mission_corridor.cpp src/planning/global/reference_path_generator.cpp
     src/planning/local/path_planner.cpp
@@ -102,6 +113,7 @@ foreach(corridor_regression IN ITEMS
         m09-compact-obstacle-replay
         m11-transition-commitment
         m14-guide-recovery
+        m15-exact-gateway-target
         observed-global-replan
         all-scenario-handoff-audit)
     string(REPLACE "-" "_" corridor_test_name "${corridor_regression}")

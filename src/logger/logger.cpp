@@ -24,8 +24,8 @@ constexpr const char* kCsvHeader =
     "nearest_object_heading,nearest_object_length,nearest_object_width,"
     "nearest_object_longitudinal_m,nearest_object_lateral_m,"
     "nearest_object_relative_speed_mps,nearest_object_ttc_s,"
-    "evaluation_section_id,current_speed_limit_kmh,school_zone_active,"
-    "stop_line_distance_m,crosswalk_active,lane_change_active,"
+    "evaluation_section_id,current_speed_limit_kmh,speed_limit_source,school_zone_active,"
+    "stop_line_distance_m,crosswalk_active,crosswalk_source,lane_change_active,"
     "solid_line_crossing,centerline_intrusion_m,sidewalk_intrusion_m,"
     "pedestrian_crossing_complete,collision,respawn_count\n";
 
@@ -254,13 +254,21 @@ void writeCsvRecord(CsvLoggerData& logger,
     if (std::isfinite(record.currentSpeedLimit)) {
         logger.output << record.currentSpeedLimit * 3.6;
     }
+    // This is the planner's selected behaviour cap, not necessarily the
+    // posted road limit: it may include curve/gateway/crosswalk approach
+    // constraints.  The provenance column prevents offline official scoring
+    // from interpreting it as a regulatory speed limit.
     logger.output
-        << ',' << static_cast<int>(record.schoolZoneActive) << ',';
+        << ",planner_behavior_cap,"
+        << static_cast<int>(record.schoolZoneActive) << ',';
     if (record.stopDistanceValid && std::isfinite(record.stopDistance)) {
         logger.output << record.stopDistance;
     }
     logger.output
         << ',' << static_cast<int>(record.crosswalkActive)
+        // crosswalkActive means approach/clearance speed control, not that the
+        // rear axle physically occupies the painted crosswalk polygon.
+        << ",planner_behavior_control"
         << ',' << static_cast<int>(record.laneChangeActive)
         // solid_line_crossing, centerline_intrusion_m,
         // sidewalk_intrusion_m, pedestrian_crossing_complete

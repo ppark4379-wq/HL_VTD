@@ -509,7 +509,10 @@ void writeVisualizationFrame(
         }
     }
     output << "],\"selected_lane\":[";
-    if (planning.laneChange.shiftCompletedLaneValid) {
+    if (planning.result.progressRecoveryActive && !planning.progressRecovery.planner.waypoints.empty()) {
+        const auto& target = planning.progressRecovery.planner.waypoints.back();
+        output << target.roadId << ',' << target.sectionIndex << ',' << target.laneId;
+    } else if (planning.laneChange.shiftCompletedLaneValid) {
         const auto& lane = planning.laneChange.shiftCompletedLane;
         output << lane.roadId << ',' << lane.sectionIndex << ',' << lane.laneId;
     } else {
@@ -521,7 +524,8 @@ void writeVisualizationFrame(
     output << "],\"tracked_path\":";
     writePointArray(output, planning.result.localPath.points, 0.42, 2);
     output << ",\"maneuver_path\":";
-    writePointArray(output, planning.laneChange.path, 0.38, 2);
+    writePointArray(output, planning.result.progressRecoveryActive
+        ? planning.progressRecovery.planner.waypoints : planning.laneChange.path, 0.38, 2);
     // Metadata only: no repeated full global geometry or extra frame history I/O.
     if (const auto runtime = data.corridorRuntime.lock()) {
         output << ",\"global_route\":{\"revision\":" << runtime->routeRevision
@@ -551,12 +555,24 @@ void writeVisualizationFrame(
            << stopReasonText(planning.result.stopReason) << "\""
            << ",\"health\":\"" << healthName(planning.result.health)
            << "\",\"lane_change_phase\":\""
-           << phaseName(planning.laneChange.phase)
-           << "\",\"target_lane\":" << planning.laneChange.targetLaneId
+           << (planning.result.progressRecoveryActive ? "progress_recovery" : phaseName(planning.laneChange.phase))
+           << "\",\"target_lane\":" << (planning.result.progressRecoveryActive &&
+                !planning.progressRecovery.planner.waypoints.empty()
+                    ? planning.progressRecovery.planner.waypoints.back().laneId
+                    : planning.laneChange.targetLaneId)
            << ",\"road_connection\":"
            << (planning.laneChange.roadConnectionManeuver ? "true" : "false")
            << ",\"best_progress_fallback\":"
            << (planning.laneChange.bestProgressFallback ? "true" : "false")
+           << ",\"progress_recovery_active\":"
+           << (planning.result.progressRecoveryActive ? "true" : "false")
+           << ",\"progress_recovery_contact_expected\":"
+           << (planning.result.progressRecoveryContactExpected ? "true" : "false")
+           << ",\"progress_recovery_emergency_overridden\":"
+           << (planning.result.progressRecoveryEmergencyOverridden ? "true" : "false")
+           << ",\"progress_recovery_overridden_stop\":\""
+           << stopReasonText(planning.result.progressRecoveryOverriddenStop) << "\""
+           << ",\"progress_recovery_blocked_seconds\":" << planning.progressRecovery.blockedTime
            << ",\"active_leg\":" << planning.missionCorridor.activeLegIndex
            << "},\"traffic_light\":{\"id\":"
            << world.trafficLight.id << ",\"state\":"

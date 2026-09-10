@@ -62,6 +62,7 @@ class EgoRoute:
 class EgoAbsolutePosition:
     x: float
     y: float
+    heading: float | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ class RouteSyncOptions:
     path_shape_lane_snap: bool = False
     trim_route_to_ego_start: bool = False
     trim_max_distance_m: float = 5.0
+    bridge_distant_ego_start: bool = False
 
 
 @dataclass(frozen=True)
@@ -212,8 +214,12 @@ def find_ego_absolute(root: ET.Element) -> EgoAbsolutePosition | None:
         if position is None:
             return None
         try:
-            return EgoAbsolutePosition(float(position.attrib["X"]),
-                                       float(position.attrib["Y"]))
+            heading = position.get("Direction")
+            return EgoAbsolutePosition(
+                float(position.attrib["X"]),
+                float(position.attrib["Y"]),
+                float(heading) if heading is not None else None,
+            )
         except (KeyError, ValueError) as error:
             raise SyncError("Ego PosAbsolute X/Y가 올바르지 않습니다") from error
     return None
@@ -351,6 +357,9 @@ def read_route_sync_options(package: Path) -> RouteSyncOptions:
             or not math.isfinite(float(trim_max_distance))
             or trim_max_distance <= 0.0):
         raise SyncError("route.trim_max_distance_m는 유한한 양수여야 합니다")
+    bridge_distant_start = route.get("bridge_distant_ego_start", False)
+    if not isinstance(bridge_distant_start, bool):
+        raise SyncError("route.bridge_distant_ego_start는 bool이어야 합니다")
 
     segments = []
     for value in raw_segments:
@@ -394,6 +403,7 @@ def read_route_sync_options(package: Path) -> RouteSyncOptions:
         path_shape_lane_snap=path_shape_lane_snap,
         trim_route_to_ego_start=trim_route_to_ego_start,
         trim_max_distance_m=float(trim_max_distance),
+        bridge_distant_ego_start=bridge_distant_start,
     )
 
 
@@ -481,6 +491,7 @@ def trim_route_to_ego_start(
     ego: EgoAbsolutePosition,
     maximum_distance_m: float = 5.0,
     checkpoints_path: Path | None = None,
+    bridge_distant_start: bool = False,
 ) -> int:
     fieldnames, rows = read_xy_rows(route_path)
     nearest_index = min(
@@ -492,12 +503,74 @@ def trim_route_to_ego_start(
     )
     nearest_x, nearest_y = xy(rows[nearest_index])
     distance = math.hypot(nearest_x - ego.x, nearest_y - ego.y)
-    if distance > maximum_distance_m:
+    join_index = nearest_index
+    if distance > maximum_distance_m and not bridge_distant_start:
         raise SyncError(
             "Ego 중간 시작 위치가 경로에서 너무 멉니다: "
             f"distance={distance:.3f}m"
         )
-    trimmed = rows[nearest_index:]
+    if distance > maximum_distance_m:
+        if ego.heading is None or not math.isfinite(ego.heading):
+            raise SyncError(
+                "차선 밖 Ego 시작 연결에는 PosAbsolute Direction이 필요합니다"
+            )
+        # Some authored VTD scenarios start on a staging apron rather than a
+        # driving lane. Search only forward on the validated mission route and
+        # connect the exact XML pose with a curvature-limited cubic curve.
+        best: tuple[float, int, list[dict[str, str]], float] | None = None
+        search_end = min(len(rows) - 1, nearest_index + 700)
+        for candidate_index in range(nearest_index, search_end):
+            candidate_x, candidate_y = xy(rows[candidate_index])
+            delta_x = candidate_x - ego.x
+            delta_y = candidate_y - ego.y
+            chord = math.hypot(delta_x, delta_y)
+            if chord < maximum_distance_m or chord > 250.0:
+                continue
+            forward = (
+                delta_x * math.cos(ego.heading)
+                + delta_y * math.sin(ego.heading)
+            )
+            if forward <= 0.0:
+                continue
+            start = dict(rows[candidate_index])
+            start.update({
+                "x": f"{ego.x:.8f}",
+                "y": f"{ego.y:.8f}",
+                "yaw": f"{ego.heading:.8f}",
+                "s": "0",
+                "road_id": "0",
+                "lane_id": "0",
+                "road_s": "0",
+            })
+            for handle_fraction in (0.20, 0.30, 0.40, 0.50, 0.60):
+                handle = min(100.0, chord * handle_fraction)
+                bridge = bezier_bridge_rows(
+                    start, rows[candidate_index], handle
+                )
+                candidate = [dict(start), *bridge]
+                candidate.extend(dict(row) for row in rows[candidate_index:])
+                update_route_yaw_and_s(candidate)
+                try:
+                    validate_smoothed_route(candidate)
+                except SyncError:
+                    continue
+                score = chord + 0.01 * (candidate_index - nearest_index)
+                if best is None or score < best[0]:
+                    best = (score, candidate_index, candidate, chord)
+        if best is None:
+            raise SyncError(
+                "XML Ego 좌표에서 전역경로로 연결되는 곡률 안전 경로를 "
+                "만들 수 없습니다"
+            )
+        _, join_index, trimmed, bridge_distance = best
+        print(
+            "[sync] XML Ego off-lane bridge: "
+            f"raw_distance={distance:.3f}m join_distance={bridge_distance:.3f}m "
+            f"join_index={join_index}",
+            flush=True,
+        )
+    else:
+        trimmed = [dict(row) for row in rows[nearest_index:]]
     if len(trimmed) < 2:
         raise SyncError("Ego 중간 시작 위치 뒤에 남은 경로점이 부족합니다")
     # Find the active mission before rebasing route s. Anchors are checkpoint
@@ -520,7 +593,7 @@ def trim_route_to_ego_start(
                     + (xy(rows[index])[1] - checkpoint_y) ** 2
                 ),
             )
-            if cursor <= nearest_index:
+            if cursor <= join_index:
                 start_leg = min(leg_index, len(anchors) - 2)
     update_route_yaw_and_s(trimmed)
     with route_path.open("w", newline="", encoding="utf-8") as stream:
@@ -528,7 +601,7 @@ def trim_route_to_ego_start(
         writer.writeheader()
         writer.writerows(trimmed)
     print(
-        f"[sync] route trimmed to Ego start: removed={nearest_index} "
+        f"[sync] route trimmed to Ego start: removed={join_index} "
         f"distance={distance:.3f}m remaining={len(trimmed)} "
         f"mission_start_leg={start_leg}",
         flush=True,
@@ -1117,6 +1190,7 @@ def sync_one(source: Path, config: SyncConfig, require_route: bool) -> None:
                 start_leg = trim_route_to_ego_start(
                     staged_route, ego_absolute,
                     route_options.trim_max_distance_m, staged_checkpoints,
+                    route_options.bridge_distant_ego_start,
                 )
             run_checked(
                 [

@@ -196,9 +196,16 @@ VTD와 같은 Linux PC에서 실행합니다. 별도 제어기 PC의 CSV가 없�
 ```bash
 python3 tools/dashboard/check_environment.py --probe-rdb
 python3 tools/dashboard/server.py --host 127.0.0.1 --port 8765 --video-source window
+
+# M15을 실시간 채점할 때는 M15 전용 경로 프로필을 반드시 지정합니다.
+python3 tools/dashboard/server.py --host 127.0.0.1 --port 8765 \
+  --rdb-host 127.0.0.1 --rdb-port 48190 --video-source window \
+  --assessment-config tools/dashboard/assessment_rules_m15.yaml
 ```
 
-브라우저: `http://127.0.0.1:8765/`. Python/PyYAML과 영상용 FFmpeg/X11 환경이 필요합니다. 서버가 출력하는 `control_monitor.py` 명령을 VTD PC의 다른 터미널에서 실행해야 첫 제어값 수신부터 채점됩니다(0 제어값 포함, Play/움직임만으로 시작하지 않음). 웹 서버에는 sudo를 사용하지 않습니다. [assessment_rules.yaml](tools/dashboard/assessment_rules.yaml)의 경로/신호 매핑과 실제 객체 송출을 확인하세요. 종료는 마지막 체크포인트 도달(현재 구현 허용거리 1.5m)이며 종료 정지선 지정은 필요 없습니다. 보호구역 43개 적용·15/28번 보류([연결 보완 근거](docs/living_lab_school_zone_review.md)), 횡단보도 197개 추출 상태이며 실제 VTD 종단 간 검증은 별도입니다.
+브라우저: `http://127.0.0.1:8765/`. Python/PyYAML과 영상용 FFmpeg/X11 환경이 필요합니다. **서버가 출력하는 `control_monitor.py` 명령을 VTD PC의 다른 터미널에서 먼저 실행한 다음 제어기를 켜세요.** 감지기가 TCP SYN을 봐야 9바이트 명령 경계를 안전하게 확정할 수 있습니다. 이 순서를 지키면 첫 제어값 수신부터 채점됩니다(0 제어값 포함, Play/움직임만으로 시작하지 않음). 웹 서버에는 sudo를 사용하지 않습니다. [assessment_rules.yaml](tools/dashboard/assessment_rules.yaml)의 경로/신호 매핑과 실제 객체 송출을 확인하세요. 종료는 마지막 체크포인트 도달(현재 구현 허용거리 1.5m)이며 종료 정지선 지정은 필요 없습니다. 보호구역 43개 적용·15/28번 보류([연결 보완 근거](docs/living_lab_school_zone_review.md)), 횡단보도 197개 추출 상태이며 실제 VTD 종단 간 검증은 별도입니다.
+
+서버가 출력하는 감지기 명령에는 `--log output/control_evidence/<고유이름>.jsonl`이 포함됩니다. 감지기는 기존 파일을 덮어쓰지 않으며, 모든 복호화 제어 명령의 wall/monotonic ns 시각과 controller IP·steer·accel·indicator, 1초 주기 decoder 상태, 최종 통계를 JSONL로 즉시 flush합니다.
 
 ## 네트워크
 

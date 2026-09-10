@@ -7,6 +7,7 @@ incomplete final row. No scenario IDs or tuning affect planning.
 """
 import argparse
 import csv
+import gzip
 import json
 import math
 from pathlib import Path
@@ -69,9 +70,15 @@ def analyze(directory):
         result["logged_collision_frames"] = sum(row["collision"] == "1" for row in rows)
     episodes, active, first_seen = [], {}, {}
     history = directory / "rviz" / "frames.jsonl"
+    compressed_history = directory / "rviz" / "frames.jsonl.gz"
     last_frame = None
-    if history.exists():
-        with history.open() as stream:
+    if history.exists() or compressed_history.exists():
+        stream_context = (
+            history.open()
+            if history.exists()
+            else gzip.open(compressed_history, "rt", encoding="utf-8")
+        )
+        with stream_context as stream:
             for line in stream:
                 try:
                     frame = json.loads(line)

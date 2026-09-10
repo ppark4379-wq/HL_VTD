@@ -19,8 +19,8 @@ const OFFICIAL_ITEM_LABELS = [
   "도로이용자 충돌",
 ];
 
-const BACKEND_ITEM_ORDER = [1, 2, 4, 5, 15, 13, 6, 7, 8, 9, 12, 11, 10, 14];
 const DISPLAY_ITEM_NUMBERS = [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+const VIDEO_VIEWS = ["mainrs", "birdrs"];
 
 const state = {
   scenarioId: null,
@@ -38,7 +38,9 @@ const state = {
   runIsLive: false,
   playTimer: null,
   viewTab: "mainrs",
-  mainrsRetryTimer: null,
+  videoRetryTimers: { mainrs: null, birdrs: null },
+  videoConnected: { mainrs: false, birdrs: false },
+  videoStatus: { mainrs: null, birdrs: null },
   source: "live",
   liveStatus: "WAITING",
   livePayload: null,
@@ -162,6 +164,7 @@ async function onScenarioChange() {
 
 async function onRunChange() {
   state.source = "history";
+  updateDataSourceIndicator();
   state.runId = el("runSelect").value;
   state.track = [];
   state.cursor = 0;
@@ -188,7 +191,10 @@ function resetRunView() {
 async function refreshRun(fullReload = false) {
   if (!state.scenarioId || !state.runId) return;
 
-  const since = fullReload || !state.track.length ? -1 : state.track[state.track.length - 1].frame;
+  const localLastFrame = state.track.length
+    ? state.track[state.track.length - 1].frame
+    : null;
+  const since = fullReload || localLastFrame === null ? -1 : localLastFrame;
   let payload;
 
   try {
@@ -197,6 +203,21 @@ async function refreshRun(fullReload = false) {
     );
   } catch (error) {
     console.error(error);
+    return;
+  }
+
+  const remoteLastFrame = Number(payload.latest?.frame);
+  const runRestarted = !fullReload && state.track.length > 0 && (
+    (Number.isFinite(remoteLastFrame) && remoteLastFrame < localLastFrame)
+    || Number(payload.frame_count) < state.track.length
+  );
+  if (runRestarted) {
+    // An explicit run id may be reused.  The logger truncates run.csv and
+    // starts again at frame zero, so an incremental request using the old
+    // final frame can never return data from the new run.
+    state.track = [];
+    state.cursor = 0;
+    await refreshRun(true);
     return;
   }
 
@@ -228,6 +249,7 @@ async function refreshRun(fullReload = false) {
 }
 
 function updateLiveBadge() {
+  updateDataSourceIndicator();
   const badge = el("liveBadge");
 
   if (!state.runId) {
@@ -240,6 +262,22 @@ function updateLiveBadge() {
     badge.innerHTML = "<i></i> COMPLETED";
     badge.className = "run-state badge-done";
   }
+}
+
+function updateDataSourceIndicator() {
+  const live = state.source === "live";
+  const badge = el("dataSourceBadge");
+  badge.textContent = live ? "VTD 실시간" : "저장 기록 조회";
+  badge.classList.toggle("source-live", live);
+  el("liveSourceBtn").classList.toggle("source-active", live);
+  el("liveSourceBtn").textContent = live ? "● VTD 실시간" : "VTD 실시간으로 전환";
+  updateFinalizeButton();
+}
+
+function updateFinalizeButton() {
+  const canFinalize = state.source === "live"
+    && ["RUNNING", "NO_DATA"].includes(state.liveStatus);
+  el("finalizeBtn").classList.toggle("hidden", !canFinalize);
 }
 
 function currentPoint() {
@@ -291,8 +329,8 @@ function renderStats(point) {
     el("statDistance").innerHTML = "0.0<small>m</small>";
     el("statLimit").innerHTML = `${COMPETITION_LIMIT_SECONDS}<small>s</small>`;
     el("stationFrame").textContent = "#0";
-    el("frameReadout").textContent = "0 frames";
-    el("overlayFrame").textContent = "0 frames";
+    el("frameReadout").textContent = "RDB 0 frames";
+    el("overlayFrame").textContent = "RDB #0";
     el("overlayTime").textContent = "00:00.0";
     updateSignal("");
     return;
@@ -308,8 +346,8 @@ function renderStats(point) {
   el("statDistance").innerHTML = `${fmt(cumulativeDistance(state.cursor), 1)}<small>m</small>`;
   el("statLimit").innerHTML = `${Math.ceil(remaining)}<small>s</small>`;
   el("stationFrame").textContent = `#${point.frame}`;
-  el("frameReadout").textContent = `${point.frame} / ${finalFrame} frames`;
-  el("overlayFrame").textContent = `${point.frame} frames`;
+  el("frameReadout").textContent = `RDB ${point.frame} / ${finalFrame} frames`;
+  el("overlayFrame").textContent = `RDB #${point.frame}`;
   el("overlayTime").textContent = formatClock(elapsed);
   updateSignal(point.signal);
 }
@@ -362,7 +400,7 @@ function renderChecklist() {
   body.innerHTML = "";
 
   OFFICIAL_ITEM_LABELS.forEach((label, index) => {
-    const item = byNumber.get(BACKEND_ITEM_ORDER[index]);
+    const item = byNumber.get(DISPLAY_ITEM_NUMBERS[index]);
     const row = document.createElement("tr");
     const name = document.createElement("td");
     name.className = "col-item";
@@ -420,8 +458,17 @@ function renderScoreBar() {
 
   if (!state.runId) {
     el("scoreStatus").textContent = "평가 대기";
+  } else if (summary.official_evaluation === "CONFIG_MISMATCH") {
+    el("scoreStatus").textContent = "평가 경로 불일치 · 점수 보류";
   } else if (summary.official_evaluation === "PARTIAL") {
-    el("scoreStatus").textContent = "일부 항목 미평가";
+    const reasons = new Set(summary.score_withheld_reasons || []);
+    el("scoreStatus").textContent = (
+      reasons.has("route_not_yet_projected") || reasons.has("unsegmented_frames")
+        ? "구간 미설정 · 점수 보류"
+        : reasons.has("route_projection_gaps")
+          ? "경로 투영 누락 · 점수 보류"
+          : "일부 항목 미평가 · 점수 보류"
+    );
   } else {
     el("scoreStatus").textContent = state.runIsLive ? "실시간 채점 중" : "평가 완료";
   }
@@ -570,83 +617,159 @@ function drawCanvas() {
 
 window.addEventListener("resize", drawCanvas);
 
-/* ---------- mainRS live view ---------- */
+/* ---------- mainRS / birdRS live views ---------- */
 
-function setStreamState(connected) {
+function activeVideoViews() {
+  if (state.viewTab === "split") return VIDEO_VIEWS;
+  return VIDEO_VIEWS.includes(state.viewTab) ? [state.viewTab] : [];
+}
+
+function videoViewIsActive(view) {
+  return activeVideoViews().includes(view);
+}
+
+function formatVideoSource(view, status) {
+  const label = view === "mainrs" ? "mainRS" : "birdRS";
+  if (!status) return `${label} · 탐색 중`;
+  if (status.source === "window") {
+    const geometry = status.geometry || {};
+    const size = geometry.width && geometry.height
+      ? ` · ${geometry.width}×${geometry.height}`
+      : "";
+    const xid = Number.isFinite(Number(status.window_id))
+      ? ` · 0x${Number(status.window_id).toString(16)}`
+      : "";
+    return `${label} · ${status.title || "X11 window"}${xid}${size}`;
+  }
+  if (status.source === "rtsp") return `${label} · RTSP`;
+  return `${label} · ${status.error || "소스 없음"}`;
+}
+
+function updateVideoOverlay() {
+  const selected = activeVideoViews();
+  if (!selected.length) {
+    el("overlayVideoSource").textContent = "주행 궤적 · 영상과 별도";
+    return;
+  }
+  el("overlayVideoSource").textContent = selected
+    .map((view) => formatVideoSource(view, state.videoStatus[view]))
+    .join(" / ");
+}
+
+function setStreamState() {
   const badge = el("streamBadge");
   const wrap = document.querySelector(".viewer-canvas-wrap");
-  badge.classList.toggle("waiting", !connected);
-  badge.innerHTML = connected ? "<i></i> LIVE" : "<i></i> STANDBY";
-  wrap.classList.toggle("stream-connected", connected);
+  const selected = activeVideoViews();
+  const connected = selected.filter((view) => (
+    state.videoConnected[view] && state.videoStatus[view]?.found !== false
+  )).length;
+  const complete = selected.length > 0 && connected === selected.length;
+  badge.classList.toggle("waiting", !complete);
+  if (!selected.length) badge.innerHTML = "<i></i> PATH";
+  else if (complete) badge.innerHTML = `<i></i> LIVE ${connected}/${selected.length}`;
+  else if (connected) badge.innerHTML = `<i></i> LIVE ${connected}/${selected.length}`;
+  else badge.innerHTML = "<i></i> STANDBY";
+  wrap.classList.toggle("stream-connected", complete);
+  updateVideoOverlay();
+}
+
+function scheduleVideoRetry(view) {
+  if (state.videoRetryTimers[view] || !videoViewIsActive(view)) return;
+  state.videoRetryTimers[view] = setTimeout(() => {
+    state.videoRetryTimers[view] = null;
+    if (videoViewIsActive(view)) connectVideoStream(view);
+  }, 3000);
+}
+
+function connectVideoStream(view) {
+  if (state.videoRetryTimers[view]) {
+    clearTimeout(state.videoRetryTimers[view]);
+    state.videoRetryTimers[view] = null;
+  }
+  const image = el(`${view}Img`);
+  image.classList.add("hidden");
+  el(`${view}Fallback`).classList.add("hidden");
+  state.videoConnected[view] = false;
+  image.src = `/api/video/${view}/stream?_=${Date.now()}`;
+  setStreamState();
+}
+
+function disconnectVideoStream(view) {
+  if (state.videoRetryTimers[view]) {
+    clearTimeout(state.videoRetryTimers[view]);
+    state.videoRetryTimers[view] = null;
+  }
+  el(`${view}Img`).src = "";
+  el(`${view}Img`).classList.add("hidden");
+  state.videoConnected[view] = false;
+}
+
+function showVideoUnavailable(view, message) {
+  if (!videoViewIsActive(view)) return;
+  el(`${view}Img`).classList.add("hidden");
+  const fallback = el(`${view}Fallback`);
+  fallback.classList.remove("hidden");
+  fallback.title = message || "VTD 영상 대기";
+  el(`${view}FallbackSub`).textContent = message || (
+    view === "mainrs" ? "mainRS 창을 열고 VTD Play 상태를 확인하세요." : "별도의 birdRS 창을 열어 두세요."
+  );
+  state.videoConnected[view] = false;
+  scheduleVideoRetry(view);
+  setStreamState();
+}
+
+function updateVideoStatus(view, status) {
+  state.videoStatus[view] = status;
+  el(`${view}SourceLabel`).textContent = formatVideoSource(view, status);
+  if (videoViewIsActive(view) && status && !status.found) {
+    showVideoUnavailable(view, status.error);
+  } else if (videoViewIsActive(view) && status?.found && !el(`${view}Img`).getAttribute("src")) {
+    connectVideoStream(view);
+  }
+  setStreamState();
 }
 
 function setViewTab(tab) {
+  if (!["mainrs", "birdrs", "split", "map"].includes(tab)) return;
   state.viewTab = tab;
   el("tabMainrs").classList.toggle("active", tab === "mainrs");
+  el("tabBirdrs").classList.toggle("active", tab === "birdrs");
+  el("tabSplit").classList.toggle("active", tab === "split");
   el("tabMap").classList.toggle("active", tab === "map");
-  el("mainrsImg").classList.add("hidden");
-  el("mainrsFallback").classList.toggle(
-    "hidden",
-    tab !== "mainrs" || !el("mainrsFallback").dataset.show
-  );
+  const grid = el("videoGrid");
+  grid.className = `video-grid mode-${tab}`;
+  grid.classList.toggle("hidden", tab === "map");
   el("mapCanvas").classList.toggle("hidden", tab !== "map");
   el("playbackControls").classList.toggle("hidden", tab !== "map");
 
-  if (tab === "mainrs") {
-    connectMainrsStream();
-  } else {
-    disconnectMainrsStream();
-    setStreamState(false);
-    drawCanvas();
+  for (const view of VIDEO_VIEWS) {
+    if (videoViewIsActive(view)) connectVideoStream(view);
+    else disconnectVideoStream(view);
   }
+  setStreamState();
+  if (tab === "map") drawCanvas();
 }
 
-function connectMainrsStream() {
-  if (state.mainrsRetryTimer) {
-    clearTimeout(state.mainrsRetryTimer);
-    state.mainrsRetryTimer = null;
-  }
-
-  const image = el("mainrsImg");
-  el("mainrsFallback").dataset.show = "";
-  el("mainrsFallback").classList.add("hidden");
-  setStreamState(false);
-  image.src = `/api/mainrs_stream?_=${Date.now()}`;
+for (const view of VIDEO_VIEWS) {
+  el(`${view}Img`).addEventListener("error", () => {
+    showVideoUnavailable(view, state.videoStatus[view]?.error);
+  });
+  el(`${view}Img`).addEventListener("load", () => {
+    if (!videoViewIsActive(view)) return;
+    if (state.videoRetryTimers[view]) {
+      clearTimeout(state.videoRetryTimers[view]);
+      state.videoRetryTimers[view] = null;
+    }
+    el(`${view}Img`).classList.remove("hidden");
+    el(`${view}Fallback`).classList.add("hidden");
+    state.videoConnected[view] = true;
+    setStreamState();
+  });
 }
-
-function disconnectMainrsStream() {
-  if (state.mainrsRetryTimer) {
-    clearTimeout(state.mainrsRetryTimer);
-    state.mainrsRetryTimer = null;
-  }
-  el("mainrsImg").src = "";
-}
-
-el("mainrsImg").addEventListener("error", () => {
-  if (state.viewTab !== "mainrs") return;
-
-  el("mainrsImg").classList.add("hidden");
-  el("mainrsFallback").dataset.show = "1";
-  el("mainrsFallback").classList.remove("hidden");
-  setStreamState(false);
-
-  if (!state.mainrsRetryTimer) {
-    state.mainrsRetryTimer = setTimeout(() => {
-      state.mainrsRetryTimer = null;
-      if (state.viewTab === "mainrs") connectMainrsStream();
-    }, 3000);
-  }
-});
-
-el("mainrsImg").addEventListener("load", () => {
-  if (state.viewTab !== "mainrs") return;
-  el("mainrsImg").classList.remove("hidden");
-  el("mainrsFallback").dataset.show = "";
-  el("mainrsFallback").classList.add("hidden");
-  setStreamState(true);
-});
 
 el("tabMainrs").addEventListener("click", () => setViewTab("mainrs"));
+el("tabBirdrs").addEventListener("click", () => setViewTab("birdrs"));
+el("tabSplit").addEventListener("click", () => setViewTab("split"));
 el("tabMap").addEventListener("click", () => setViewTab("map"));
 
 /* ---------- map playback ---------- */
@@ -701,8 +824,16 @@ el("jumpLiveBtn").addEventListener("click", () => {
 
 /* ---------- controls + polling ---------- */
 
-el("scenarioSelect").addEventListener("change", () => { state.source = "history"; onScenarioChange(); });
-el("liveSourceBtn").addEventListener("click", () => { state.source = "live"; refreshLive(); });
+el("scenarioSelect").addEventListener("change", () => {
+  state.source = "history";
+  updateDataSourceIndicator();
+  onScenarioChange();
+});
+el("liveSourceBtn").addEventListener("click", () => {
+  state.source = "live";
+  updateDataSourceIndicator();
+  refreshLive();
+});
 el("runSelect").addEventListener("change", onRunChange);
 el("reloadRun").addEventListener("click", async () => {
   runsCache.loadedAt = 0;
@@ -719,16 +850,33 @@ el("liveToggle").addEventListener("click", () => {
   button.classList.toggle("off", !state.livePolling);
 });
 
+el("finalizeBtn").addEventListener("click", async () => {
+  if (!["RUNNING", "NO_DATA"].includes(state.liveStatus)) return;
+  if (!window.confirm("현재 평가를 미완료(ABORTED)로 종료하고 결과를 저장할까요?")) return;
+  const button = el("finalizeBtn");
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/live/finalize", {
+      method: "POST",
+      headers: { "X-HL-VTD-Action": "finalize" },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    await refreshLive();
+  } catch (error) {
+    window.alert(`평가 종료에 실패했습니다: ${error.message}`);
+  } finally {
+    button.disabled = false;
+    updateFinalizeButton();
+  }
+});
+
 async function pollLoop() {
   try {
-    const video = await getJSON("/api/mainrs_status").catch(() => null);
-    if (state.viewTab === "mainrs" && video && !video.found) {
-      setStreamState(false);
-      el("mainrsImg").classList.add("hidden");
-      el("mainrsFallback").classList.remove("hidden");
-      el("mainrsFallback").title = video.error || "VTD 영상 대기";
-      if (!state.mainrsRetryTimer) state.mainrsRetryTimer = setTimeout(connectMainrsStream, 3000);
-    }
+    const videoStatuses = await Promise.all(VIDEO_VIEWS.map((view) => (
+      getJSON(`/api/video/${view}/status`).catch(() => null)
+    )));
+    VIDEO_VIEWS.forEach((view, index) => updateVideoStatus(view, videoStatuses[index]));
     if (state.livePolling && state.source === "live") await refreshLive();
     else if (state.livePolling && state.runId) await refreshRun(false);
     else if (state.livePolling && state.scenarioId) await onScenarioChange();
@@ -751,6 +899,7 @@ async function refreshLive() {
     return;
   }
   if (state.source !== "live") return;
+  updateDataSourceIndicator();
   if (state.runId !== payload.session_id) {
     state.track = [];
     state.cursor = 0;
@@ -758,6 +907,7 @@ async function refreshLive() {
   state.runId = payload.session_id;
   state.livePayload = payload;
   state.liveStatus = payload.status;
+  updateFinalizeButton();
   state.runIsLive = payload.status === "RUNNING" && payload.receiver.connected;
   state.summary = payload.summary;
   state.officialGrid = payload.official_grid;
@@ -784,24 +934,38 @@ async function refreshLive() {
   badge.className = `run-state ${state.runIsLive ? "badge-live" : "badge-idle"}`;
   el("scenarioMeta").textContent = `${r?.scenario_id || "VTD"} · ${payload.missing_metadata.length ? "평가 경계 설정 필요" : "실시간 상태 수신"}`;
   el("scenarioMeta").title = payload.receiver.error || payload.missing_metadata.join(", ");
+  const controlStatus = payload.control_receiver || {};
+  const decoderStatus = controlStatus.decoder || {};
+  const unframedBytes = Number(decoderStatus.unframed_bytes || 0);
+  const decodedCommands = Number(decoderStatus.decoded_commands || 0);
+  const controlCheck = !controlStatus.connected
+    ? "제어 수신 감지기 미연결 · 서버 터미널에 출력된 감지기 실행 명령을 확인하세요"
+    : unframedBytes > 0
+      ? `감지기 실행됨 · TCP SYN 없이 관측된 ${unframedBytes}바이트 폐기 · 감지기를 켠 상태에서 제어기를 다시 연결하세요`
+      : decodedCommands > 0
+        ? `제어 수신 감지기 정상 · 명령 ${decodedCommands}개 해석`
+        : "제어 수신 감지기 실행됨 · 제어기 연결 대기";
   const checks = [
     payload.receiver.connected ? "VTD 상태 연결됨" : `VTD 상태 연결 대기: ${payload.receiver.error || "RDB 출력 확인"}`,
-    payload.control_receiver?.connected ? "제어 수신 감지기 연결됨 · 첫 제어값부터 채점" : "제어 수신 감지기 미연결 · 서버 터미널에 출력된 감지기 실행 명령을 확인하세요",
+    controlCheck,
+    payload.assessment_profile?.route_csv
+      ? `평가 경로: ${payload.assessment_profile.scenario_id || "VTD"} · ${payload.assessment_profile.source === "run_scenario" ? "현재 실행 시나리오 자동 연결" : "기본 평가 설정"} · 투영 ${payload.assessment_profile.route_projection_count || 0}/${(payload.assessment_profile.route_projection_count || 0) + (payload.assessment_profile.route_projection_miss_count || 0)} 프레임`
+      : "평가 경로 미설정",
     payload.completion?.mode === "final_checkpoint"
       ? `종료: 마지막 체크포인트 도달 · 허용거리 ${payload.completion.tolerance_m}m · 정지선 지정 불필요`
       : payload.finish_line ? `종료선 설정됨: ${payload.finish_line.id || "사용자 지정"} · 후륜축 정방향 통과` : "종료 정지선 미확정 (이전 종료선 방식)",
     ...(payload.warnings || []),
-    "시나리오 선택 메뉴는 기록 조회용입니다. 실제 평가 경로는 서버의 설정 파일을 사용합니다.",
+    "시나리오 선택 메뉴는 기록 조회용입니다. 실시간 평가는 run_scenario의 현재 경로를 우선하고, 없을 때만 서버 기본 경로를 사용합니다.",
   ];
   el("healthSummary").textContent = `연결·평가 상태: ${payload.summary.official_evaluation === "COMPLETE" ? "입력 충족 (현장 검증 별도)" : "확인 필요"} · 횡단보도 ${payload.feature_counts?.crosswalks || 0}개`;
   el("healthDetails").replaceChildren(...checks.map(text => { const li = document.createElement("li"); li.textContent = text; return li; }));
-  if (state.summary.official_score === null && state.runId) el("scoreStatus").textContent = "구간 미설정 · 감점만 집계";
   drawCanvas();
 }
 
 renderChecklist();
 renderStats(null);
 renderScoreBar();
+updateDataSourceIndicator();
 setViewTab("mainrs");
 loadScenarios()
   .catch((error) => {

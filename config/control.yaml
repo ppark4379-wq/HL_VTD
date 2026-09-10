@@ -22,10 +22,10 @@ pure_pursuit:
 # 초과 1 km/h까지만 허용되므로 목표는 상한보다 3~4 km/h 낮게 잡는다.
 # 보호구역 등 구간 제한은 config/maps/living_lab.yaml의 speed_zones가 덮어쓴다.
 speed:
-  straight_target_kph: 45.0        # 50 km/h 제한 대비 4 km/h 여유
-  curve_target_kph: 30.0
+  straight_target_kph: 40.0        # 일반 주행 목표; 법정 제한과 별도의 제어 목표
+  curve_target_kph: 30.0           # 곡률 기반 물리 상한이 더 낮으면 그 값을 적용
   sharp_curve_target_kph: 6.0     # 반경 5m급 connector에서 조향 slew 시간 확보
-  school_zone_target_kph: 25.0     # 보호구역 진입 후 유지할 보수적 목표속도
+  school_zone_target_kph: 20.0     # 일반 목표보다 높이지 않음
 
 planning:
   comfortable_deceleration: 1.5   # [m/s^2] 정지 계획용 감속도
@@ -44,7 +44,7 @@ planning:
   nearby_object_lateral_distance: 7.0 # [m] 옆 차선에서 출발하는 끼어들기도 사전 감속
   # 같은 방향의 바로 옆 차선에 정차한 승용차급 객체는 갑작스러운 출발·끼어들기에
   # 대비해 가까운 구간에서만 미리 감속한다. 작은 콘과 큰 수목·구조물은 제외한다.
-  stationary_adjacent_vehicle_caution_kph: 20.0 # [km/h] 정차 차량 옆 통과 주의속도
+  stationary_adjacent_vehicle_caution_kph: 15.0 # [km/h] 정차 차량 옆 통과 주의속도
   stationary_adjacent_vehicle_maximum_distance: 25.0 # [m] 너무 먼 주차 차량은 무시
   # 교차 진행방향으로 대기 중인 차량은 speed=0이어도 갑자기 출발할 수 있다.
   # Ego 진행선과 객체 진행선의 교점이 아래 범위에 있으면 출발 전부터 감속한다.
@@ -86,12 +86,22 @@ planning:
   # 횡단보도 위 정지는 감점이다. 입구가 아니라 그 앞 정지선에 선다.
   crosswalk_stop_line_search: 15.0  # [m] 횡단보도 앞 정지선 탐색 거리
   # 전역 게이트웨이 회피경로를 기다리는 동안 사용하는 제한된 로컬 회피.
-  local_fallback_activation_distance: 35.0 # [m] 실제 선택 경로의 장애물까지 여유거리
+  local_fallback_activation_distance: 50.0 # [m] 실제 선택 경로의 장애물까지 여유거리
   local_fallback_time_headway: 5.0         # [s] 속도에 따른 조기 활성화 여유
-  local_fallback_horizon: 60.0             # [m] 로컬 회피 탐색 최대 길이
+  local_fallback_horizon: 90.0             # [m] 조기 탐색 + 장애물 통과/안착 여유
   local_fallback_retry_interval: 0.5       # [s] 동일 장면의 실패 재탐색 간격
   local_fallback_search_budget_ms: 80.0    # [ms] 비동기 로컬 탐색 시간 예산
-  local_fallback_speed_kph: 5.0            # [km/h] 로컬 fallback 회피 속도 상한
+  local_reentry_search_budget_ms: 240.0    # [ms] 일반 탐색 실패 후 확장 복귀 탐색; 비동기
+  local_fallback_speed_kph: 5.0            # [km/h] 좁은 틈·급회피·여유 미확인 경로 상한
+  local_fallback_open_speed_kph: 15.0      # [km/h] nominal 여유 + 완만한 로컬 회피 상한
+  # VTD 진행 우선 실험: 장시간 경로/확정 정적 장애물 정체 후 저속 탈출.
+  # 동적 위험/정적 전환 확인 중에는 기존 비상제동 유지, 복구 타이머 초기화.
+  # 신호·보행자·횡단보도 정지는 시간 제한 없이 유지한다. 0이면 비활성.
+  simulation_progress_recovery: 1
+  progress_recovery_stop_timeout: 3.0     # [s] 동적 위험 해소/정적 확정 이후 정체
+  progress_recovery_speed_kph: 3.0        # [km/h] 충돌 감수 탈출 속도
+  progress_recovery_retry_interval: 0.5   # [s] 실패/정체 및 접촉 진행 중 후보 재탐색
+  progress_recovery_search_budget_ms: 15.0 # [ms] 좌우·정면 후보 묶음 사이에서 확인하는 연성 예산
 
 lane_change:
   lattice_short_distance: 12.0   # [m] 제어 룩어헤드와 별개인 5차 후보 완료거리
@@ -118,7 +128,7 @@ lane_change:
   minimum_target_ahead_gap: 12.0          # [m] 목표 차선 전방 최소 간격
   minimum_target_behind_gap: 9.0         # [m] 목표 차선 후방 최소 간격
   minimum_target_ttc: 3.0                 # [s] 목표 차선 최소 TTC
-  maximum_lane_change_speed_kph: 20.0     # 일반 회피·게이트웨이 정렬 상한; 밀집 장애물은 planning.dense_static_speed_kph=10이 우선
+  maximum_lane_change_speed_kph: 15.0     # 일반 회피·게이트웨이 정렬 상한; 밀집 장애물은 planning.dense_static_speed_kph=10이 우선
   return_waiting_speed_kph: 15.0          # 복귀 경로가 잠시 막혔을 때 목표속도 상한
   # 장애물이 옆 차선을 이 값 이하로 침범했을 때만 중앙 밖 회피 후보를 만든다.
   maximum_obstacle_lane_intrusion: 1.55   # [m] 횡오프셋 허용 최대 침범량

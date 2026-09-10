@@ -1,0 +1,37 @@
+# M15 live-assessment profile.
+#
+# The generic assessment_rules.yaml follows the organizer Path01 route near
+# (442, -236).  M15 runs on a different packaged checkpoint route near
+# (1452, 624), so using the generic profile leaves every frame unsegmented.
+base_score: 500
+normal_speed_kmh: 50
+school_speed_kmh: 30
+school_zones_file: tools/dashboard/living_lab_school_zones.yaml
+school_zone_corrections_file: tools/dashboard/living_lab_school_zone_corrections.yaml
+vehicle_reference:
+  length_m: 4.848
+  width_m: 1.886
+  rear_axle_to_front_m: 3.808
+map:
+  xodr: src/data/map/HL_FMA_VTD_LivingLab.xodr
+  extract_crosswalks: true
+route:
+  csv: scenario/mixed/M15/route.csv
+  # Read start/target directly from the packaged CSV so regenerated routes do
+  # not silently retain an obsolete endpoint.
+  section_count: 5
+  max_projection_distance_m: 20
+completion:
+  mode: final_checkpoint
+  tolerance_m: 1.5
+green_start_exception:
+  forward_path_m: 30.0
+session:
+  start_trigger: controller_packet_arrival
+  max_sample_gap_s: 0.5
+  time_limit_s: 900
+  stop_speed_kmh: 0.0
+  respawn_jump_m: 5
+metadata:
+  scenario_id: M15
+schema_version: 1

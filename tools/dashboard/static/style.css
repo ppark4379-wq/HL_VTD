@@ -276,6 +276,7 @@ button {
   border-radius: 5px;
   cursor: pointer;
   font-size: 11px;
+  white-space: nowrap;
   transition: color 0.15s ease, border-color 0.15s ease;
 }
 
@@ -354,6 +355,29 @@ button {
   color: var(--blue);
 }
 
+.data-source-badge {
+  margin-left: auto;
+  padding: 3px 6px;
+  border: 1px solid #334149;
+  border-radius: 4px;
+  color: #99a6ac;
+  background: #11191d;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 0.25px;
+}
+
+.data-source-badge.source-live {
+  color: var(--green);
+  border-color: rgba(80, 224, 173, 0.38);
+}
+
+#liveSourceBtn.source-active {
+  color: var(--green);
+  border-color: rgba(80, 224, 173, 0.48);
+  background: rgba(80, 224, 173, 0.08);
+}
+
 .station-selectors {
   min-width: 0;
   display: grid;
@@ -396,6 +420,7 @@ select:focus {
   margin-top: auto;
   padding-top: 8px;
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
 }
 
@@ -413,6 +438,7 @@ select:focus {
   cursor: pointer;
   font-size: 10px;
   font-weight: 850;
+  white-space: nowrap;
   box-shadow: 0 5px 14px rgba(0, 0, 0, 0.18);
   transition: transform 0.15s ease, filter 0.15s ease;
 }
@@ -434,6 +460,17 @@ select:focus {
 
 .report-button {
   background: linear-gradient(135deg, #ff4261, #ef1945);
+}
+
+.finalize-button {
+  color: #ff8497;
+  border-color: rgba(255, 72, 101, 0.55);
+  background: rgba(255, 72, 101, 0.08);
+}
+
+.finalize-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .metric-card {
@@ -835,11 +872,69 @@ select:focus {
 }
 
 #mainrsImg,
+#birdrsImg,
 #mapCanvas {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: contain;
+}
+
+.video-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  min-width: 0;
+  min-height: 0;
+}
+
+.video-grid.mode-split {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.video-pane {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: none;
+  overflow: hidden;
+  background: #05080a;
+}
+
+.video-grid.mode-mainrs .mainrs-pane,
+.video-grid.mode-birdrs .birdrs-pane,
+.video-grid.mode-split .video-pane {
+  display: block;
+}
+
+.video-grid.mode-split .birdrs-pane {
+  border-left: 1px solid #26343b;
+}
+
+.video-pane > img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.video-source-label {
+  position: absolute;
+  left: 9px;
+  bottom: 30px;
+  z-index: 2;
+  max-width: calc(100% - 18px);
+  padding: 3px 6px;
+  overflow: hidden;
+  color: rgba(235, 243, 246, 0.82);
+  background: rgba(5, 10, 13, 0.72);
+  border: 1px solid rgba(126, 146, 155, 0.25);
+  border-radius: 3px;
+  font-family: Consolas, monospace;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hidden {
@@ -856,6 +951,7 @@ select:focus {
   flex-direction: column;
   text-align: center;
   color: #647178;
+  background: #070b0e;
 }
 
 .fallback-icon {

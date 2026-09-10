@@ -22,7 +22,11 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',type=Path,default=ROOT/'output/콜리더_게이트웨이')
     parser.add_argument('--reuse-geometry',action='store_true')
+    parser.add_argument('--first',type=int,default=5,help='첫 mixed 시나리오 번호 (기본: 5)')
+    parser.add_argument('--last',type=int,default=17,help='끝 mixed 시나리오 번호 (기본: 17)')
     args=parser.parse_args();dest=args.output.resolve();dest.mkdir(parents=True,exist_ok=True)
+    if args.first < 1 or args.last < args.first:
+        parser.error('--first/--last 범위가 올바르지 않습니다')
     if not args.reuse_geometry:
         subprocess.run([str(ROOT/'build/export_mission_corridors'),str(ROOT),str(dest),'--geometry-only'],check=True)
     geometry={tuple(g['key']):dict(g,points=np.asarray(g['points'])) for g in json.loads((dest/'lane_geometry.json').read_text())}
@@ -35,7 +39,8 @@ def main():
         shutil.copyfile(ROOT/'output/precomputed_lane_network/road_map.svg',background_path)
     background=load_background(background_path);summary=[];cards=[]
     legend='C1=P1→P2, C2=P3→P4 … 마지막 C=마지막 진출→종료. 노란 면: 그 사이 전체 동일 방향 도로 연결. G1=P2의 콜리더→P3의 콜리더 연결 차선(주황 윤곽), G2=P4→P5 … P는 도로 식별용 좌표이지 필수 통과점이 아닙니다. R은 road ID, 가는 남색 선은 road/section 경계입니다. 콜리더 내부의 작은 XODR junction 연결도 노란 면으로 포함합니다.'
-    for n in range(5,16):
+    scenario_numbers=range(args.first,args.last+1)
+    for n in scenario_numbers:
         name=f'M{n:02d}';package=ROOT/'scenario/mixed'/name;folder=dest/name
         with (package/'checkpoints.csv').open() as f:
             checkpoints=[dict(seq=int(r['seq']),x=float(r['x']),y=float(r['y'])) for r in csv.DictReader(f)]
@@ -79,10 +84,11 @@ def main():
     (dest/'audit.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
     with (dest/'audit.csv').open('w',newline='') as f:
         writer=csv.DictWriter(f,fieldnames=list(summary[0]),lineterminator='\n');writer.writeheader();writer.writerows(summary)
-    (dest/'index.html').write_text(f'<!doctype html><html lang="ko"><meta charset="utf-8"><title>전체 콜리더·게이트웨이 v2</title><style>{STYLE}</style><h1>M05–M15 전체 연결 — v2</h1><p>{legend}</p><p>원본 체크포인트 + XODR에서 생성. route.csv 및 기존 체크포인트 lane 매칭 미사용. 그림뿐 아니라 전체 순서 lane graph 연결을 검사합니다.</p><p><a href="README.md">원인·수정 로직·한계</a> · <a href="audit.csv">전체 검사 CSV</a> · <a href="audit.json">JSON</a></p><div class="grid">{"".join(cards)}</div></html>')
+    first_name=f'M{args.first:02d}';last_name=f'M{args.last:02d}'
+    (dest/'index.html').write_text(f'<!doctype html><html lang="ko"><meta charset="utf-8"><title>전체 콜리더·게이트웨이 v2</title><style>{STYLE}</style><h1>{first_name}–{last_name} 전체 연결 — v2</h1><p>{legend}</p><p>원본 체크포인트 + XODR에서 생성. route.csv 및 기존 체크포인트 lane 매칭 미사용. 그림뿐 아니라 전체 순서 lane graph 연결을 검사합니다.</p><p><a href="README.md">원인·수정 로직·한계</a> · <a href="audit.csv">전체 검사 CSV</a> · <a href="audit.json">JSON</a></p><div class="grid">{"".join(cards)}</div></html>')
     (dest/'README.md').write_text((ROOT/'tools/verification/complete_corridors_README.md').read_text())
     sources=['src/data/map/HL_FMA_VTD_LivingLab.xodr','tools/verification/whole_mission_corridors.py','tools/verification/generate_complete_corridors.py','tools/verification/export_mission_corridors.cpp','tools/verification/render_mission_corridors.py','tools/verification/complete_corridors_README.md']
-    sources += [f'scenario/mixed/M{i:02d}/checkpoints.csv' for i in range(5,16)]
+    sources += [f'scenario/mixed/M{i:02d}/checkpoints.csv' for i in scenario_numbers]
     hashes={s:hashlib.sha256((ROOT/s).read_bytes()).hexdigest() for s in sources}
     hashes['bundled:road_map.svg']=hashlib.sha256(background_path.read_bytes()).hexdigest()
     (dest/'provenance.json').write_text(json.dumps(hashes,indent=2)+'\n')

@@ -132,6 +132,13 @@ class RdbObserver:
                         if not data:
                             raise ConnectionError('VTD closed RDB connection')
                         for frame in decoder.feed(data):
+                            # Stamp the completed RDB frame immediately before
+                            # handing it to assessment. These clocks match the
+                            # video/control evidence indexes and allow the
+                            # three streams to be aligned without treating VTD
+                            # simulation time as a host timestamp.
+                            frame['received_wall_time_ns'] = time.time_ns()
+                            frame['received_monotonic_ns'] = time.monotonic_ns()
                             self.on_frame(frame)
                             self.status['last_frame_at'] = time.time()
             except (OSError, ValueError, struct.error) as error:

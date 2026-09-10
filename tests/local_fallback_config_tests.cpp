@@ -1,4 +1,5 @@
 #include "control/config/control_config.hpp"
+#include "planning/local/local_fallback_speed.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -74,6 +75,8 @@ void requireDefaults(const DrivingConfig& config) {
             lane.localFallbackHorizon == 60.0 &&
             lane.localFallbackRetryInterval == 0.5 &&
             lane.localFallbackSearchBudgetMs == 80.0 &&
+            lane.localReentrySearchBudgetMs == 240.0 &&
+            std::abs(lane.localFallbackOpenSpeed - 5.0 / 3.6) < 1e-12 &&
             std::abs(lane.localFallbackSpeed - 5.0 / 3.6) < 1e-12,
             "local fallback defaults or speed units disagree");
 }
@@ -88,7 +91,47 @@ int main() {
 
         DrivingConfig current;
         require(file.load(source, current), "repository config rejected");
-        requireDefaults(current);
+        const auto kph=[](double speed){return speed*3.6;};
+        const auto equal=[](double a,double b){return std::abs(a-b)<1e-9;};
+        require(equal(kph(current.planner.straightSpeed),40.) &&
+                equal(kph(current.planner.curveSpeed),30.) &&
+                equal(kph(current.planner.schoolZoneSpeed),20.) &&
+                equal(kph(current.planner.sharpCurveSpeed),6.),
+                "40/30 km/h cruise or preserved school-zone/sharp-curve speed changed");
+        require(equal(kph(current.laneChange.maximumLaneChangeSpeed),15.) &&
+                equal(kph(current.behavior.nearbyObjectCautionSpeed),15.) &&
+                equal(kph(current.behavior.stationaryAdjacentVehicleCautionSpeed),15.),
+                "ordinary avoidance/caution is not capped at 15 km/h");
+        const auto cap=[&](double clearance,double curvature) {
+            return kph(localFallbackSpeedLimit(current.laneChange,clearance,curvature,
+                                               current.planner.maximumLateralAcceleration));
+        };
+        require(equal(cap(.30,.02),15.) && equal(cap(.05,.02),5.) &&
+                equal(cap(.30,.10),5.) && equal(cap(-1.,0.),5.),
+                "open/tight/sharp/uncertified fallback speed classification changed");
+        require(equal(cap(.30,std::numeric_limits<double>::infinity()),5.) &&
+                equal(cap(std::numeric_limits<double>::quiet_NaN(),0.),5.),
+                "nonfinite path metadata must not unlock open speed");
+        const double curvatureBoundary=current.planner.maximumLateralAcceleration /
+            (current.laneChange.localFallbackOpenSpeed*current.laneChange.localFallbackOpenSpeed);
+        require(equal(cap(.30,curvatureBoundary*.999),15.) &&
+                equal(cap(.30,curvatureBoundary*1.001),5.),
+                "sharp avoidance lateral-acceleration boundary changed");
+        for(double existing:{0.,3.,10.,20.})
+            require(std::min(existing,cap(.30,.02))<=existing,
+                    "fallback cap raised a prior stop or caution request");
+        require(equal(current.controller.minAcceleration,-4.) &&
+                equal(current.behavior.emergencyBrakingDeceleration,4.) &&
+                equal(kph(current.behavior.crosswalkApproachSpeed),10.) &&
+                equal(kph(current.behavior.denseStaticSpeed),10.),
+                "preserved braking/crosswalk/dense-static settings changed");
+        require(current.laneChange.localFallbackActivationDistance == 50.0 &&
+                current.laneChange.localFallbackHorizon == 90.0,
+                "repository early-activation settings disagree");
+        require(current.behavior.simulationProgressRecovery == 1.0 &&
+                current.behavior.progressRecoveryStopTimeout == 3.0 &&
+                std::abs(current.behavior.progressRecoverySpeed - 3.0 / 3.6) < 1e-12,
+                "repository simulation recovery settings disagree");
         require(!LaneChangeData{}.localCorridorAvoidance,
                 "ordinary maneuvers defaulted to local fallback mode");
 
@@ -104,13 +147,16 @@ int main() {
         DrivingConfig partialConfig;
         require(file.load(partial, partialConfig) &&
                 std::abs(partialConfig.laneChange.localFallbackSpeed - 1.0) < 1e-12 &&
+                std::abs(partialConfig.laneChange.localFallbackOpenSpeed - 1.0) < 1e-12 &&
                 partialConfig.laneChange.localFallbackActivationDistance == 35.0,
                 "partial optional speed override changed units or other defaults");
 
         for (const std::string key : {
                  "local_fallback_activation_distance", "local_fallback_time_headway",
                  "local_fallback_horizon", "local_fallback_retry_interval",
-                 "local_fallback_search_budget_ms", "local_fallback_speed_kph"}) {
+                 "local_fallback_search_budget_ms", "local_fallback_speed_kph",
+                 "local_fallback_open_speed_kph",
+                 "local_reentry_search_budget_ms"}) {
             for (const std::string invalid : {"0", "-1", "nan", "inf", "-inf"}) {
                 DrivingConfig config;
                 require(!file.load(change(source, key, invalid), config),

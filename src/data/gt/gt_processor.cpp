@@ -40,8 +40,8 @@ void worldToRoute(
     double& pathS,
     double& pathD,
     const std::vector<Waypoint>& path,
-    std::optional<double> expectedS = std::nullopt,
-    std::optional<double> heading = std::nullopt) {
+    std::optional<double> expectedS,
+    std::optional<double> heading) {
 
     if (path.size() < 2) {
         pathValid = false;

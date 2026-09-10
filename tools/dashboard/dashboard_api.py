@@ -13,6 +13,8 @@ class DashboardRuntime:
     rdb_observer: Any = None
     control_events: Any = None
     video_relay: Any = None
+    video_relays: Any = None
+    video_recording: Any = None
 
 
 def scenarios_payload() -> List[dict]:
@@ -61,7 +63,28 @@ def run_payload(query: Dict[str, List[str]]) -> dict:
     )
 
 
-def video_status_payload(runtime: DashboardRuntime) -> dict:
-    if runtime.video_relay:
-        return runtime.video_relay.status()
-    return {'found': False, 'error': 'video relay not started'}
+def video_status_payload(runtime: DashboardRuntime, view: str = 'mainrs') -> dict:
+    relays = runtime.video_relays or {}
+    relay = relays.get(view)
+    if relay is None and view == 'mainrs':
+        relay = runtime.video_relay  # compatibility with the former single relay
+    if relay:
+        return relay.status()
+    return {
+        'found': False,
+        'view': view,
+        'source': None,
+        'error': f'{view} video relay not started',
+    }
+
+
+def video_recording_status_payload(runtime: DashboardRuntime) -> dict:
+    if runtime.video_recording is None:
+        return {
+            'enabled': False,
+            'status': 'DISABLED',
+            'active': False,
+        }
+    payload = runtime.video_recording.status()
+    payload['enabled'] = True
+    return payload

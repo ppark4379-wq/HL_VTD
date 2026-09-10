@@ -34,6 +34,15 @@ struct PathPlannerConfig {
 
 struct PlanningBehaviorConfig {
     bool ignoreTrafficLights{};
+    // VTD-only, explicitly enabled by the run configuration. Path/collision
+    // stops from confirmed static obstacles may be overridden after a
+    // sustained standstill. Dynamic EBS, traffic lights and pedestrian/
+    // crosswalk waits retain their ordinary authority.
+    double simulationProgressRecovery{};
+    double progressRecoveryStopTimeout{3.0};
+    double progressRecoverySpeed{3.0 / 3.6};
+    double progressRecoveryRetryInterval{0.5};
+    double progressRecoverySearchBudgetMs{15.0};
     double comfortableDeceleration{2.5};
     double stopSafetyMargin{1.0};
     double stopHoldTime{1.0};
@@ -171,6 +180,24 @@ struct PlanningResult {
     double stopDistance{};
     bool crosswalkActive{};
     bool laneChangeActive{};
+    bool progressRecoveryActive{};
+    bool progressRecoveryContactExpected{};
+    bool progressRecoveryEmergencyOverridden{};
+    StopReason progressRecoveryOverriddenStop{StopReason::None};
+};
+
+// Kept separate from ordinary, collision-approved lane-change trajectories.
+// A simulation escape must never enter a cache labelled "safe".
+struct ProgressRecoveryData {
+    PathPlannerData planner;
+    bool active{};
+    bool anchorValid{};
+    double anchorX{}, anchorY{};
+    double blockedTime{}, noMotionTime{}, retryRemaining{}, clearTime{};
+    double startX{}, startY{};
+    std::size_t missionLeg{static_cast<std::size_t>(-1)};
+    std::size_t searchCursor{};
+    bool contactExpected{};
 };
 
 struct StationaryObjectState {
@@ -218,6 +245,7 @@ struct PlanningProcessData {
     // Ego가 횡단보도를 완전히 통과할 때까지 clearance 속도를 적용한다.
     std::vector<CrosswalkOccupancyState> crosswalkStates;
     double emergencyBrakeHoldRemaining{};
+    ProgressRecoveryData progressRecovery;
     // 급커브가 최근점 뒤로 넘어가자마자 가속하지 않고,
     // 조향이 풀리고 출구 차선에 안착할 시간을 보장한다.
     double sharpCurveSpeedHoldRemaining{};

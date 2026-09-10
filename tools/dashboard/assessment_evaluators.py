@@ -78,21 +78,46 @@ def evaluate_school_zone(
         context.row['school_zone_active'] = any(
             contains(zone['polygon'], context.rear) for zone in metadata['school_zones']
         )
+        context.row['school_zone_coverage_complete'] = True
     elif school_zones:
         active, zone_ids = school_zones.measure(context.road, context.rear)
         context.row['school_zone_active'] = active
         context.row['school_zone_ids'] = ','.join(zone_ids)
-        context.row['school_zone_coverage_complete'] = not school_zones.pending
+        context.row['school_zone_coverage_complete'] = active is not None
         context.row['school_zone_source'] = 'user_boundary_file+OpenDRIVE_lane_links+rear_axle'
 
 
 def evaluate_crosswalk(context: AssessmentContext, metadata: Dict[str, Any]) -> None:
     """Write rear-axle occupancy of configured crosswalk polygons."""
     if context.rear is not None and 'crosswalks' in metadata:
-        context.row['crosswalk_active'] = any(
-            contains(crosswalk['polygon'], context.rear)
-            for crosswalk in metadata['crosswalks']
-        )
+        occupied = [
+            crosswalk for crosswalk in metadata['crosswalks']
+            if contains(crosswalk['polygon'], context.rear)
+        ]
+        # OpenDRIVE crosswalk polygons can overlap another road in world XY
+        # (for example at grade-separated roads).  If the rear axle is inside
+        # such a road/lane-constrained polygon but ROAD_POS is absent, neither
+        # active nor inactive is provable.  Leave the field unavailable instead
+        # of manufacturing a trusted negative sample.
+        unresolved = [
+            crosswalk for crosswalk in occupied
+            if (
+                'road_id' in crosswalk
+                and (not context.road or 'road' not in context.road)
+            ) or (
+                crosswalk.get('lane_ids')
+                and (not context.road or 'lane' not in context.road)
+            )
+        ]
+        matches = [
+            crosswalk for crosswalk in occupied
+            if relevant(crosswalk, context.road)
+        ]
+        if not matches and unresolved:
+            return
+        context.row['crosswalk_active'] = bool(matches)
+        context.row['crosswalk_ids'] = ','.join(str(crosswalk['id']) for crosswalk in matches)
+        context.row['crosswalk_source'] = 'map_polygon_rear_axle'
 
 
 def _evaluate_intrusion_field(
@@ -209,10 +234,28 @@ def collect_assessment_objects(context: AssessmentContext) -> List[EgoState]:
 
 
 def measure_nearest_object(context: AssessmentContext, objects: List[EgoState]) -> None:
-    """Write the nearest object center distance for dashboard telemetry."""
-    context.row['nearest_object_distance'] = min(
-        (math.hypot(item['x'] - context.ego['x'], item['y'] - context.ego['y']) for item in objects),
+    """Write the nearest object's identity and geometry for audit telemetry."""
+    nearest = min(
+        objects,
+        key=lambda item: math.hypot(item['x'] - context.ego['x'], item['y'] - context.ego['y']),
         default=None,
+    )
+    if nearest is None:
+        context.row['nearest_object_distance'] = None
+        return
+    context.row.update(
+        nearest_object_id=nearest['id'],
+        nearest_object_name=nearest.get('name', ''),
+        nearest_object_category=nearest['category'],
+        nearest_object_type=nearest['type'],
+        nearest_object_x=nearest['x'],
+        nearest_object_y=nearest['y'],
+        nearest_object_speed=nearest.get('speed'),
+        nearest_object_length=nearest['length'],
+        nearest_object_width=nearest['width'],
+        nearest_object_distance=math.hypot(
+            nearest['x'] - context.ego['x'], nearest['y'] - context.ego['y']
+        ),
     )
 
 
@@ -224,6 +267,9 @@ def evaluate_collisions(
     """Classify provisional OBB contacts into official collision fields."""
     context.row['road_user_collision'] = context.row['static_collision'] = False
     unknown_contact = False
+    road_user_contacts = []
+    static_contacts = []
+    unknown_contacts = []
     for item in objects:
         if abs((item['z'] + item['off_z']) - (context.ego['z'] + context.ego['off_z'])) > (
             item['height'] + context.ego['height']
@@ -233,10 +279,22 @@ def evaluate_collisions(
             continue
         if item['type'] in ROAD_USERS and item['category'] == 1:
             context.row['road_user_collision'] = True
+            road_user_contacts.append(item)
         elif item['type'] in STATIC_TYPES or metadata.get('object_roles', {}).get(item['name']) == 'static_obstacle':
             context.row['static_collision'] = True
+            static_contacts.append(item)
         else:
             unknown_contact = True
+            unknown_contacts.append(item)
+
+    for prefix, contacts in (
+        ('road_user_collision', road_user_contacts),
+        ('static_collision', static_contacts),
+        ('unknown_collision', unknown_contacts),
+    ):
+        context.row[f'{prefix}_ids'] = ','.join(str(item['id']) for item in contacts)
+        context.row[f'{prefix}_names'] = ','.join(item.get('name', '') for item in contacts)
+        context.row[f'{prefix}_types'] = ','.join(str(item['type']) for item in contacts)
 
     if unknown_contact:
         for field in ('road_user_collision', 'static_collision'):
@@ -342,7 +400,7 @@ def evaluate_pedestrian_response(
                 )
             )
         ]
-        stopped = context.ego['speed'] <= stop_speed_kmh / 3.6
+        stopped = abs(context.ego['speed']) <= stop_speed_kmh / 3.6
         identifier = str(crosswalk['id'])
         center_x = sum(point[0] for point in crosswalk['polygon']) / len(crosswalk['polygon'])
         center_y = sum(point[1] for point in crosswalk['polygon']) / len(crosswalk['polygon'])

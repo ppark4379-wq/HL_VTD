@@ -1,5 +1,6 @@
 """School-zone connection/repair evidence must never become guessed coverage."""
 import copy
+import csv
 import math
 from pathlib import Path
 import sys
@@ -40,6 +41,10 @@ class SchoolZoneReviewTests(unittest.TestCase):
         self.assertEqual({p['id'] for p in report['pending']},{'school_zone_15','school_zone_28'})
         self.assertFalse(report['complete'])
         self.assertLess(report['max_boundary_s_error_m'],.01)
+        for pending in report['pending']:
+            self.assertEqual(pending['uncertainty_scope'],'bounded_path_budget')
+            self.assertEqual(len(pending['boundary_points']),2)
+            self.assertGreater(pending['path_budget_m'],20)
 
     def test_reverse_junction_link_is_real_and_capture_order_independent(self):
         z=self.zones
@@ -79,6 +84,54 @@ class SchoolZoneReviewTests(unittest.TestCase):
             self.assertEqual(self.zones._paths(raw['point_1'],raw['point_2']),[])
             self.assertFalse(any(r['id']==raw['id'] for r in self.zones.ranges))
 
+    def test_pending_zone_is_unknown_only_inside_its_conservative_envelope(self):
+        raw=self.raw['school_zones'][14]
+        rear=self.rear_at(
+            raw['point_1']['track_id'],raw['point_1']['lane_id'],
+            raw['point_1']['s'],
+        )
+        self.assertEqual(
+            self.zones.measure(
+                dict(road=raw['point_1']['track_id'],s=raw['point_1']['s']),
+                rear,
+            ),
+            (None,[]),
+        )
+
+    def test_m15_route_is_provably_outside_all_pending_envelopes(self):
+        route=ROOT/'scenario/mixed/M15/route.csv'
+        with route.open(encoding='utf-8-sig',newline='') as stream:
+            rows=list(csv.DictReader(stream))
+        self.assertGreater(len(rows),100)
+        for row in rows:
+            active,ids=self.zones.measure(
+                {'road':int(row['road_id']),'s':float(row['road_s'])},
+                (float(row['x']),float(row['y'])),
+            )
+            self.assertFalse(active)
+            self.assertEqual(ids,[])
+
+    def test_unverified_pending_boundary_remains_global_unknown(self):
+        changed=copy.deepcopy(self.raw)
+        changed['school_zones'][14]['point_1']['x']+=1000
+        with tempfile.TemporaryDirectory() as tmp:
+            source=Path(tmp)/'invalid_boundary.yaml'
+            source.write_text(yaml.safe_dump(changed),encoding='utf-8')
+            zones=SchoolZones(source,self.map,FIXES)
+            pending=next(p for p in zones.pending if p['id']=='school_zone_15')
+            self.assertEqual(pending['uncertainty_scope'],'global')
+            with (ROOT/'scenario/mixed/M15/route.csv').open(
+                encoding='utf-8-sig',newline=''
+            ) as stream:
+                route_row=next(csv.DictReader(stream))
+            self.assertEqual(
+                zones.measure(
+                    {'road':int(route_row['road_id']),'s':float(route_row['road_s'])},
+                    (float(route_row['x']),float(route_row['y'])),
+                ),
+                (None,[]),
+            )
+
     def test_source_unchanged_and_wrong_source_rejected(self):
         before=SOURCE.read_bytes()
         SchoolZones(SOURCE,self.map,FIXES)
@@ -94,7 +147,7 @@ class SchoolZoneReviewTests(unittest.TestCase):
         for s,lane in ((650,-3),(739.8,-3),(700,2)):
             active,ids=self.zones.measure(dict(road=2076,s=s),self.rear_at(2076,lane,s))
             self.assertNotIn('school_zone_42',ids)
-            if not ids: self.assertIsNone(active)  # Two unresolved zones still exist.
+            if not ids: self.assertFalse(active)  # Bounded pending zones are far away.
 
 
 if __name__=='__main__': unittest.main()

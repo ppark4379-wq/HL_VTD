@@ -389,7 +389,10 @@ class HLVtdRvizBridge(Node):
         speed_kph = float(ego.get("speed", 0.0)) * 3.6
         target_kph = float(decision.get("target_speed", 0.0)) * 3.6
         stopped = target_kph <= 0.05
-        if bool(decision.get("emergency_brake")):
+        progress_recovery = bool(decision.get("progress_recovery_active"))
+        if progress_recovery:
+            status = "RECOVERY: contact_allowed"
+        elif bool(decision.get("emergency_brake")):
             status = "STOP: emergency_brake"
         elif stopped:
             reason = str(decision.get("stop_reason_text", "none"))
@@ -404,7 +407,8 @@ class HLVtdRvizBridge(Node):
         else:
             status = "DRIVE"
         summary = f"{status}\nv={speed_kph:.1f}  target={target_kph:.1f} km/h"
-        panel_color = (1.0, 0.25, 0.12, 1.0) if stopped else (1.0, 1.0, 1.0, 1.0)
+        panel_color = ((1.0, 0.65, 0.1, 1.0) if progress_recovery else
+                       (1.0, 0.25, 0.12, 1.0) if stopped else (1.0, 1.0, 1.0, 1.0))
         markers.append(
             self.text_marker(
                 "decision_panel", [ego_x, ego_y, 4.0], summary, 0.58,

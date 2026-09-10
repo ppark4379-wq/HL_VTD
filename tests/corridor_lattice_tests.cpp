@@ -1,4 +1,5 @@
 #include "planning/local/corridor_lattice.hpp"
+#include "planning/local/recovery_selection.hpp"
 #include "planning/local/path_planner.hpp"
 #include "planning/global/reference_path_generator.hpp"
 #include "logger/decision_trace.hpp"
@@ -75,6 +76,174 @@ void m08StaticObjects(WorldState& w) {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2 && std::string(argv[1])=="--no-cosmetic-replan") {
+            auto map=fixture();auto m=mission();auto w=world();
+            w.ego.y=-3.5;
+            w.egoObb=makeObb2D(w.ego.x+1.3725,w.ego.y,0.,4.855,1.88);
+            std::vector<Waypoint> current;
+            for(int i=0;i<=160;++i) {
+                Waypoint p;p.x=p.s=p.roadS=10.+i*.5;p.y=w.ego.y;
+                p.roadId=1;p.laneId=-1;current.push_back(p);
+            }
+            LaneChangeData replacement;
+            for(int i=0;i<20;++i)
+                require(!prepareLocalCorridorFallback(replacement,LaneChangeConfig{},PlanningBehaviorConfig{},
+                    w,map,m,current,nullptr),"safe off-centre travel requested a cosmetic replacement");
+            require(!map.corridorRuntime->localFallbackPending && !map.corridorRuntime->localFallbackEngaged,
+                    "rollback left a cosmetic search worker active");
+            require(replacement.phase==LaneChangePhase::None && replacement.path.empty(),
+                    "rollback generated an unnecessary manoeuvre");
+            require(current.front().y==-3.5 && current.back().y==-3.5,"incumbent path was mutated");
+            std::cout<<"no cosmetic replanning PASS\n";return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--lost-corridor-recovery") {
+            auto map=fixture();auto m=mission();auto w=world();
+            m.legs[0].allowedLanes={{1,0,-2},{2,0,-2}};
+            m.legs[0].targetLanes={{2,0,-2}};
+            w.egoSpeed=0.;w.egoPathValid=false; // valid measured pose, missing trajectory
+            map.corridorRuntime->laneConfig.localFallbackSearchBudgetMs=80.;
+            map.corridorRuntime->laneConfig.localFallbackRetryInterval=0.;
+            PathPlannerData tracking;DecisionTraceData trace;trace.enabled=true;
+            bool recovered=false;
+            const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+            while(std::chrono::steady_clock::now()<deadline) {
+                buildCorridorTrackingPath(tracking,PathPlannerConfig{},w,map,m,80.,&trace);
+                if(map.corridorRuntime->trackingPathApproved && map.corridorRuntime->trackingPathRelocalized) {
+                    recovered=true;break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            if(!recovered)for(const auto& event:trace.frameEvents)std::cerr<<event<<'\n';
+            require(recovered,"lost trajectory without an obstacle never triggered checked corridor reentry");
+            require(tracking.waypoints.back().laneId==-2,"recovery chose the nearby wrong lane instead of official corridor");
+            require(std::hypot(tracking.waypoints.front().x-w.ego.x,tracking.waypoints.front().y-w.ego.y)<.01,
+                    "recovery directly tracked a detached gateway instead of connecting the measured pose");
+            require(tracking.config.straightSpeed<=map.corridorRuntime->laneConfig.localFallbackSpeed,
+                    "lost corridor return must be low speed");
+            const auto wrong=map.corridorRuntime->network.lanes.at({1,0,-1}).pointIds[20];
+            require(!map.corridorRuntime->allowed[wrong],"recovery rewrote official mission permissions");
+            require(m.activeLegIndex==0,"recovery skipped the mission gateway");
+            std::cout<<"lost corridor recovery PASS\n";return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--bounded-reentry") {
+            auto map=fixture();auto m=mission();auto w=world();
+            m.legs[0].allowedLanes={{1,0,-2},{2,0,-2}};
+            m.legs[0].targetLanes={{2,0,-2}};
+            w.ego.y=-5.25;w.egoLaneId=-2;w.egoSpeed=0.;
+            w.egoObb=makeObb2D(w.ego.x+1.3725,w.ego.y,0.,4.855,1.88);
+            obstacle(w);auto& obj=w.objects[0];obj.raw.y=-5.25;
+            obj.raw.length=14.;obj.raw.width=3.;obj.raw.height=3.;
+            obj.obb=makeObb2D(35.,-5.25,0.,14.,3.);
+            std::vector<Waypoint> reference;
+            for(int i=0;i<=160;++i) {
+                Waypoint p;p.x=p.s=p.roadS=10.+i*.5;p.y=-5.25;p.roadId=1;p.laneId=-2;
+                reference.push_back(p);
+            }
+            LaneChangeConfig config;config.localFallbackSearchBudgetMs=80.;
+            config.localFallbackRetryInterval=0.;config.localFallbackHorizon=90.;
+            DecisionTraceData trace;trace.enabled=true;
+            LaneChangeData result;bool success=false;int highestTier=0;
+            const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(8);
+            while(std::chrono::steady_clock::now()<deadline) {
+                success=prepareLocalCorridorFallback(result,config,PlanningBehaviorConfig{},
+                    w,map,m,reference,&trace);
+                highestTier=std::max(highestTier,map.corridorRuntime->localFallbackSearchTier);
+                if(success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            if(!success) for(const auto& event:trace.frameEvents) std::cerr<<event<<'\n';
+            require(success,"bounded reentry failed around a long vehicle on a single-lane corridor");
+            require(highestTier==2,"outside reentry did not wait for both strict search tiers");
+            require(result.path.back().laneId==-2,"reentry did not return to the official lane");
+            require(std::any_of(result.path.begin(),result.path.end(),[](const auto& p){return std::abs(p.y+5.25)>1.75;}),
+                    "fixture did not exercise outside-corridor geometry");
+            require(corridorTrackingPathIsSafe(result.path,w,result.validatedObstacleClearance,nullptr,nullptr,&map),
+                    "bounded reentry intersected the long vehicle");
+            const auto id=map.corridorRuntime->network.lanes.at({1,0,-1}).pointIds[40];
+            require(!map.corridorRuntime->allowed[id] && !map.corridorRuntime->surfaceAllowed[id],
+                    "local reentry leaked into global corridor authority");
+            auto gateMap=fixture();auto gateMission=mission();
+            auto& leg=gateMission.legs[0];leg.targetLanes={{1,0,-2}};
+            leg.targetRoadS[LaneKey{1,0,-2}]=50.;leg.topologyAuthority=true;
+            auto gateWorld=w;gateWorld.objects.clear();
+            PathPlannerData tracking;
+            buildCorridorTrackingPath(tracking,PathPlannerConfig{},gateWorld,gateMap,gateMission,80.,nullptr);
+            CorridorReentryScope permission;
+            permission.preview.resize(gateMap.corridorRuntime->allowed.size(),false);
+            permission.outsideCorridor=true;
+            std::vector<Waypoint> passed,missed;
+            for(int i=0;i<=120;++i) {
+                Waypoint p;p.x=p.s=p.roadS=10.+i*.5;p.y=-5.25;p.roadId=1;p.laneId=-2;
+                passed.push_back(p);
+                if(p.x<55.) {p.y=-1.75;p.laneId=-1;}
+                missed.push_back(p);
+            }
+            require(corridorReentryPreservesMission(passed,*gateMap.corridorRuntime,gateMission,gateWorld,permission),
+                    "normal gateway passage followed by a forward tail was rejected");
+            require(!corridorReentryPreservesMission(missed,*gateMap.corridorRuntime,gateMission,gateWorld,permission),
+                    "late return bypassed the required gateway cross section");
+            std::cout<<"bounded reentry around long vehicle PASS\n";return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--progress-recovery-selection") {
+            using namespace recovery_selection;
+            const std::array<std::vector<std::size_t>,3> groups{{{0,1,2},{3},{4,5}}};
+            require(balancedOrder(groups)==std::vector<std::size_t>({0,3,4,1,5,2}),
+                    "directional families were not interleaved");
+            require(better({false,false,1000.},{true,false,1.},true),
+                    "cheap collision beat a collision-free path");
+            require(!better({true,false,1.},{false,false,1000.},false),
+                    "collision displaced a clear incumbent");
+            require(better({true,false,1000.},{true,true,1.},true),
+                    "terminal overlap beat an escape");
+            require(!better({true,false,98.},{true,false,100.},true),
+                    "minor cost jitter replaced the incumbent");
+            require(better({true,false,90.},{true,false,100.},true),
+                    "material improvement was suppressed");
+            ProgressRecoveryData held;held.active=true;held.blockedTime=3.4;
+            held.noMotionTime=2.;held.retryRemaining=.3;
+            suspendForTrafficStop(held,1.,2.,true);
+            require(!held.active && held.blockedTime==3.4 && held.noMotionTime==0. && held.retryRemaining==0.,
+                    "traffic hold erased static history or left recovery active");
+            suspendForTrafficStop(held,1.,2.,false);
+            require(held.blockedTime==0.,"a pure traffic wait armed path recovery");
+            auto map=fixture();auto m=mission();auto w=world();
+            w.ego.y=-5.25;w.egoLaneId=-2;w.egoSpeed=0.;
+            w.egoObb=makeObb2D(w.ego.x+1.3725,w.ego.y,0.,4.855,1.88);
+            obstacle(w);w.objects[0].raw.y=-5.25;w.objects[0].raw.height=3.;
+            w.objects[0].obb=makeObb2D(35.,-5.25,0.,4.,2.);
+            PlanningBehaviorConfig behavior;behavior.simulationProgressRecovery=1.;
+            behavior.progressRecoverySearchBudgetMs=1000.;
+            PathPlannerData path;std::size_t cursor=0;bool contact=true,retained=false;
+            DecisionTraceData trace;trace.enabled=true;
+            require(prepareCorridorProgressRecovery(path,contact,cursor,w,map,m,
+                LaneChangeConfig{},behavior,{},std::vector<int>{7},&trace),
+                "recovery produced no path in an open adjacent lane");
+            require(!contact,"recovery selected contact despite a clear adjacent lane");
+            const auto reference=path.waypoints;
+            require(prepareCorridorProgressRecovery(path,contact,cursor,w,map,m,
+                LaneChangeConfig{},behavior,reference,std::vector<int>{7},&trace,
+                std::numeric_limits<double>::quiet_NaN(),&retained),
+                "incumbent rescore lost all paths");
+            require(!contact && retained,"unchanged clear incumbent was not retained");
+            // All paths begin inside this body. Unconfirmed and pedestrian-
+            // sized actors must remain hard exclusions in contact recovery.
+            auto& o=w.objects[0];o.raw.x=11.;o.raw.y=-5.25;
+            o.raw.length=8.;o.raw.width=2.;o.obb=makeObb2D(11.,-5.25,0.,8.,2.);
+            require(!prepareCorridorProgressRecovery(path,contact,cursor,w,map,m,
+                LaneChangeConfig{},behavior,{},std::vector<int>{},&trace),
+                "unconfirmed overlapping actor was allowed");
+            o.raw.speed=1.;
+            require(!prepareCorridorProgressRecovery(path,contact,cursor,w,map,m,
+                LaneChangeConfig{},behavior,{},std::vector<int>{7},&trace),
+                "moving actor with an outdated confirmed ID was allowed");
+            o.raw.speed=0.;
+            o.raw.length=1.;o.raw.width=1.;o.raw.height=1.8;
+            o.obb=makeObb2D(11.,-5.25,0.,1.,1.);
+            require(!prepareCorridorProgressRecovery(path,contact,cursor,w,map,m,
+                LaneChangeConfig{},behavior,{},std::vector<int>{7},&trace),
+                "pedestrian-sized overlapping actor was allowed");
+            std::cout<<"progress recovery selection PASS\n";return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--surface-permission") {
             auto map=fixture();auto m=mission();auto w=world();
             auto& leg=m.legs.front();leg.allowedLanes.erase({1,0,-3});
@@ -195,6 +364,88 @@ int main(int argc,char** argv) {
                 }
             }
             std::cout<<"precomputed mission audit PASS legs="<<m.legs.size()<<'\n';
+            return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--m15-exact-gateway-target") {
+            PathGeneratorData map;
+            require(loadMap(map,"src/data/map/HL_FMA_VTD_LivingLab.xodr"),
+                    "map load");
+            std::string error;
+            require(initializeCorridorRuntime(
+                        map,"output/precomputed_lane_network",
+                        LaneChangeConfig{},&error),error.c_str());
+            // Minimal copy of the two M15 runtime legs around the failed fork.
+            // Both connector lanes are physically usable, but only 2960/-3
+            // lands on the artifact's handoff target 2809/-2.  The parallel
+            // 2960/-2 lane lands on 2809/-1 -> 2969 and cannot make the next
+            // required 2975 -> 2811 turn.
+            MissionCorridorData m;
+            m.valid=m.initialized=m.topologyAuthority=true;
+            MissionLegData leg;leg.valid=leg.topologyAuthority=true;
+            leg.allowedLanes={{2805,0,1},{2807,0,1},{2808,0,1},
+                {2809,0,-2},{2809,0,-1},{2942,0,-1},{2948,0,-1},
+                {2960,0,-3},{2960,0,-2}};
+            leg.gatewayLanes={{2960,0,-3},{2960,0,-2}};
+            leg.targetLanes={{2809,0,-2}};
+            leg.targetRoadS[{2809,0,-2}]=2.;
+            MissionLegData next;next.valid=next.topologyAuthority=true;
+            next.allowedLanes={{2809,0,-2},{2809,0,-1},{2975,0,-1},
+                {2811,0,-1},{2811,1,-1}};
+            next.gatewayLanes={{2975,0,-1}};
+            next.targetLanes={{2811,0,-1}};
+            next.targetRoadS[{2811,0,-1}]=2.;
+            m.legs={leg,next};
+
+            Waypoint correctExit;correctExit.roadId=2809;
+            correctExit.laneId=-2;correctExit.roadS=2.;
+            auto wrongExit=correctExit;wrongExit.laneId=-1;
+            require(missionPointIsTarget(m.legs.front(),correctExit),
+                    "M15 exact handoff lane was not recognized");
+            require(!missionPointIsTarget(m.legs.front(),wrongExit),
+                    "M15 wrong parallel exit lane completed the gateway");
+
+            auto w=world();
+            w.ego.x=1315.67041;w.ego.y=542.813416;
+            w.ego.heading=3.0952878;w.egoSpeed=.000185045864;
+            w.egoPathS=435.06275;
+            const auto match=worldToLane(map,w.ego.x,w.ego.y,w.ego.heading);
+            w.egoRoadId=match.roadId;w.egoSectionIndex=match.sectionIndex;
+            w.egoLaneId=match.laneId;w.egoRoadS=match.roadS;
+            w.egoLaneWidth=match.laneWidth;
+            w.egoObb=makeObb2D(
+                w.ego.x+1.3725*std::cos(w.ego.heading),
+                w.ego.y+1.3725*std::sin(w.ego.heading),
+                w.ego.heading,4.855,1.88);
+            LaneChangeData candidate;DecisionTraceData trace;trace.enabled=true;
+            const bool chosen=prepareCorridorLattice(
+                candidate,LaneChangeConfig{},PlanningBehaviorConfig{},w,map,m,
+                nullptr,nullptr,true,&trace);
+            const auto& runtime=*map.corridorRuntime;
+            const auto stepsAt=[&](const LaneKey& key,double roadS) {
+                const auto& ids=runtime.network.lanes.at(key).pointIds;
+                const auto found=std::min_element(
+                    ids.begin(),ids.end(),[&](auto a,auto b) {
+                        return std::abs(runtime.network.points[a].pose.roadS-roadS)<
+                               std::abs(runtime.network.points[b].pose.roadS-roadS);
+                    });
+                return runtime.gatewayLateralSteps.at(*found);
+            };
+            require(!chosen,"correct M15 connector requested a needless lane change");
+            require(stepsAt({2960,0,-3},5.)==0,
+                    "correct M15 connector lost its direct handoff");
+            require(stepsAt({2960,0,-2},5.)>0,
+                    "wrong M15 connector was still a zero-step gateway");
+
+            PathPlannerData route;
+            require(buildCorridorTrackingPath(
+                        route,PathPlannerConfig{},w,map,m,80.,&trace),
+                    "M15 exact gateway route was not materialized");
+            const auto exit=std::find_if(
+                route.waypoints.begin(),route.waypoints.end(),
+                [](const auto& point){return point.roadId==2809;});
+            require(exit!=route.waypoints.end() && exit->laneId==-2,
+                    "M15 route selected the 2809/-1 -> 2969 fork");
+            std::cout<<"M15 exact gateway target / wrong parallel fork PASS\n";
             return 0;
         }
         if(argc==2 && std::string(argv[1])=="--m14-guide-recovery") {
