@@ -64,6 +64,12 @@ add_test(NAME progress_recovery_selection COMMAND corridor_lattice_tests --progr
 add_test(NAME bounded_corridor_reentry COMMAND corridor_lattice_tests --bounded-reentry)
 add_test(NAME lost_corridor_recovery COMMAND corridor_lattice_tests --lost-corridor-recovery)
 add_test(NAME no_cosmetic_replan COMMAND corridor_lattice_tests --no-cosmetic-replan)
+add_test(NAME center_first_gateway_route COMMAND corridor_lattice_tests --center-first-global)
+add_test(NAME sole_gateway_safe_approach COMMAND corridor_lattice_tests --sole-gateway-approach)
+add_test(NAME multiple_gateway_queue COMMAND corridor_lattice_tests --multi-gateway-queue)
+add_test(NAME clear_lane_center_return COMMAND corridor_lattice_tests --clear-center-return)
+add_test(NAME extended_gateway_preview COMMAND corridor_lattice_tests --extended-gateway-preview)
+add_test(NAME cached_global_priority COMMAND corridor_lattice_tests --cached-global-priority)
 set_tests_properties(lost_corridor_recovery PROPERTIES TIMEOUT 10)
 set_tests_properties(bounded_corridor_reentry PROPERTIES TIMEOUT 15)
 add_executable(global_route_obstacle_tests tests/global_route_obstacle_tests.cpp ${CORRIDOR_SOURCES}
@@ -75,6 +81,14 @@ target_compile_features(global_route_obstacle_tests PRIVATE cxx_std_17)
 target_include_directories(global_route_obstacle_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_test(NAME global_route_obstacle_tests COMMAND global_route_obstacle_tests)
 add_test(NAME dense_global_route_regression COMMAND global_route_obstacle_tests --dense-global)
+add_executable(gateway_preview_reachability_tests tests/gateway_preview_reachability_tests.cpp ${CORRIDOR_SOURCES}
+    src/planning/global/mission_corridor.cpp src/planning/global/reference_path_generator.cpp
+    src/planning/local/path_planner.cpp src/planning/collision/collision_checker.cpp
+    src/data/map/map_loader.cpp src/utils/csv_utils.cpp src/utils/math_utils.cpp
+    src/utils/geometry.cpp src/logger/decision_trace.cpp)
+target_compile_features(gateway_preview_reachability_tests PRIVATE cxx_std_17)
+target_include_directories(gateway_preview_reachability_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+add_test(NAME gateway_preview_reachability COMMAND gateway_preview_reachability_tests)
 add_executable(local_corridor_fallback_tests tests/local_corridor_fallback_tests.cpp ${CORRIDOR_SOURCES}
     src/planning/global/mission_corridor.cpp src/planning/global/reference_path_generator.cpp
     src/planning/local/path_planner.cpp src/planning/collision/collision_checker.cpp
@@ -250,7 +264,10 @@ endif()
 target_include_directories(controller_logic_tests
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_test(NAME controller_logic_tests COMMAND controller_logic_tests)
+add_test(NAME school_zone_approach_regression COMMAND controller_logic_tests --school-zone-approach)
 add_test(NAME crosswalk_indicator_regression COMMAND controller_logic_tests --crosswalk-indicator)
+add_test(NAME gateway_route_handoff COMMAND controller_logic_tests --gateway-route-handoff)
+add_test(NAME progress_recovery_handoff COMMAND controller_logic_tests --progress-recovery-handoff)
 set_tests_properties(crosswalk_indicator_regression PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME dense_static_speed_regression COMMAND controller_logic_tests --dense-static-speed)

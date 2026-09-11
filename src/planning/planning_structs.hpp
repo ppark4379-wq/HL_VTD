@@ -29,6 +29,7 @@ struct PathPlannerConfig {
     double curveSpeed{4.0};
     double sharpCurveSpeed{5.5555555556};
     double schoolZoneSpeed{8.0};
+    double schoolZoneApproachSpeed{25.0 / 3.6};
     double goalTolerance{1.5};
 };
 
@@ -46,6 +47,8 @@ struct PlanningBehaviorConfig {
     double progressRecoveryRetryInterval{0.5};
     double progressRecoverySearchBudgetMs{15.0};
     double comfortableDeceleration{2.5};
+    double schoolZoneApproachDistance{20.0};
+    double schoolZoneApproachReactionTime{0.5};
     double stopSafetyMargin{1.0};
     double trafficStopPositionMargin{1.5}; // traffic stop only, not lane alignment
     double stopHoldTime{1.0};
@@ -228,6 +231,10 @@ struct CrosswalkObjectWaitState {
     double stoppedWait{};
     bool released{};
     bool hasEverMoved{};
+    bool hasPosition{};
+    double lastX{};
+    double lastY{};
+    double stationaryObservation{};
 };
 
 struct PlanningProcessData {

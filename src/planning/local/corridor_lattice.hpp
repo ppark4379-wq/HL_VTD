@@ -52,11 +52,21 @@ struct CorridorRuntime {
     std::size_t committedGlobalPathProgress{};
     bool committedGlobalPathReachesGateway{};
     bool committedGlobalPathHasExitPreview{};
+    // Actual Ego lane observation on this leg's required connector. This
+    // records passage only; it never advances mission/checkpoint progress.
+    bool activeGatewayObserved{};
     std::vector<Waypoint> pendingGatewayHandoffPath;
     // Geometry availability is not a collision approval. A blocked route
     // remains available as a local-planning reference, but must not replace
     // a safe avoidance trajectory in the controller.
     bool trackingPathApproved{};
+    // A checked prefix toward a blocked unique gateway is never a proof of
+    // gateway completion. Keep it separate from the complete global route.
+    std::vector<Waypoint> soleGatewayApproachPath;
+    bool soleGatewayApproachSelected{};
+    double laneCenterRetryAfter{};
+    int soleGatewayApproachBlocker{-1};
+    std::uint64_t soleGatewayApproachSignature{};
     int trackingPathBlockingObject{-1};
     double trackingPathValidatedClearance{-1.};
     // Short physical C2 bridge from the measured post-manoeuvre pose back to
@@ -213,6 +223,13 @@ bool retainCorridorAvoidanceTail(
     const PathGeneratorData& map,const MissionCorridorData& mission,
     const WorldState& world,const std::vector<Waypoint>& path,
     DecisionTraceData* trace=nullptr,double validatedClearance=-1.);
+
+// Advance a delayed centre return on the SAME committed lane chain. Never
+// searches another exit; the original centred join and all later samples stay.
+bool advanceClearLaneCenterReturn(std::vector<Waypoint>& path,
+    const WorldState& world,const PathGeneratorData& map,
+    const MissionCorridorData& mission,const PlanningBehaviorConfig& safety,
+    DecisionTraceData* trace=nullptr);
 
 bool initializeCorridorRuntime(PathGeneratorData& map,const std::string& directory,
                               const LaneChangeConfig& config,std::string* error);

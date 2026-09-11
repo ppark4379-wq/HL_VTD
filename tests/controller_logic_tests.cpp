@@ -2883,6 +2883,200 @@ void testSafeAvoidanceSuccessorAndPhysicalStopLine() {
     assert(planning.result.valid && planning.result.targetSpeed>0.);
 }
 
+void testCommittedGatewayRouteHandoff() {
+    auto world = makeWorldWithObstacle();
+    world.objects.clear();
+    LaneChangeData maneuver;
+    maneuver.phase = LaneChangePhase::Execute;
+    maneuver.localCorridorAvoidance = true;
+    maneuver.path = makeStraightGlobalPath().waypoints;
+
+    // The certified gateway route agrees with the executing local path near
+    // Ego, then turns toward the gateway farther ahead. Waiting for Execute
+    // to finish would drive past that future branch on the local path.
+    auto gateway = maneuver.path;
+    double arcLength = 0.0;
+    for (std::size_t i = 0; i < gateway.size(); ++i) {
+        auto& point = gateway[i];
+        const double t = std::clamp((point.x - 15.0) / 25.0, 0.0, 1.0);
+        point.y += 3.5 * t * t * (3.0 - 2.0 * t);
+        point.yaw = std::atan(3.5 * 6.0 * t * (1.0 - t) / 25.0);
+        if (i > 0) arcLength += std::hypot(point.x - gateway[i - 1].x,
+                                          point.y - gateway[i - 1].y);
+        point.s = arcLength;
+    }
+    const auto canResume = [&](const std::vector<Waypoint>& successor,
+                               bool safe = true) {
+        return canResumeCommittedGatewayRoute(maneuver, world, successor, safe);
+    };
+    assert(canResume(gateway));
+    assert(maneuver.phase == LaneChangePhase::Execute);
+    // The same handoff must work for ordinary obstacle avoidance, not only
+    // a path tagged as the local corridor fallback.
+    maneuver.localCorridorAvoidance = false;
+    maneuver.obstacleId = 7;
+    assert(canResume(gateway));
+    assert(!canResume(gateway, false));
+
+    auto disconnected = gateway;
+    for (auto& point : disconnected) point.y += 0.6;
+    assert(!canResume(disconnected));
+    auto oppositeHeading = gateway;
+    for (auto& point : oppositeHeading) point.yaw += 0.3;
+    assert(!canResume(oppositeHeading));
+
+    // Matching the very first pose is insufficient: a sharp sideways jump
+    // immediately ahead must not replace the incumbent trajectory.
+    auto incompatiblePrefix = gateway;
+    for (auto& point : incompatiblePrefix) {
+        point.y += 0.6 * std::clamp((point.x - 10.0) / 2.0, 0.0, 1.0);
+    }
+    assert(!canResume(incompatiblePrefix));
+    auto abruptSteeringPrefix = gateway;
+    for (auto& point : abruptSteeringPrefix) {
+        if (point.x >= 12.0) point.yaw += 0.3;
+    }
+    assert(!canResume(abruptSteeringPrefix));
+
+    // A short corridor stub may look aligned but cannot supply a usable
+    // successor beyond Ego. Gateway topology itself is checked by the caller.
+    auto shortStub = gateway;
+    shortStub.resize(18);  // Ends at x=17; Ego x=10 leaves only seven metres.
+    assert(!canResume(shortStub));
+    assert(!canResume({}));
+    auto beyondTail = world;
+    beyondTail.ego.x = 89.0F;
+    beyondTail.ego.y = -1.75F;
+    assert(!canResumeCommittedGatewayRoute(maneuver, beyondTail,
+                                           maneuver.path, true));
+
+    maneuver.roadConnectionManeuver = true;
+    assert(!canResume(gateway));
+    maneuver.roadConnectionManeuver = false;
+    maneuver.phase = LaneChangePhase::None;
+    assert(!canResume(gateway));
+    maneuver.phase = LaneChangePhase::Execute;
+    maneuver.path.clear();
+    assert(!canResume(gateway));
+}
+
+void testProgressRecoveryYieldsToUsableOrdinaryPath() {
+    auto world = makeWorldWithObstacle();
+    world.objects.clear();
+    world.egoSpeed = 0.0;
+    const auto ordinary = makeStraightGlobalPath().waypoints;
+    // A fresh safe route is usable from standstill, before a recovery trial
+    // travels two metres. Its adoption must not need a timer or prior motion.
+    assert(canResumeOrdinaryPathAfterRecovery(world, ordinary, true));
+    assert(!canResumeOrdinaryPathAfterRecovery(world, ordinary, false));
+
+    auto detached = ordinary;
+    for (auto& point : detached) point.y += 0.5;
+    assert(!canResumeOrdinaryPathAfterRecovery(world, detached, true));
+    auto headingMismatch = ordinary;
+    for (auto& point : headingMismatch) point.yaw = 0.3;
+    assert(!canResumeOrdinaryPathAfterRecovery(world, headingMismatch, true));
+    auto shortStub = ordinary;
+    shortStub.resize(18);  // seven metres remain ahead of Ego
+    assert(!canResumeOrdinaryPathAfterRecovery(world, shortStub, true));
+    assert(!canResumeOrdinaryPathAfterRecovery(world, {}, true));
+    auto pastTail = world;
+    pastTail.ego.x = 89.0F;
+    assert(!canResumeOrdinaryPathAfterRecovery(pastTail, ordinary, true));
+
+    // Nominal clearance is a real safety constraint, even if a different
+    // tight-gap path could be approved with a smaller margin. Do not hand a
+    // blocked nominal path back to the stop/recovery cycle using .05 m here.
+    WorldObjectState sideObstacle;
+    sideObstacle.raw.id = 91;
+    sideObstacle.raw.x = 25.0F;
+    sideObstacle.raw.y = 0.35F;
+    sideObstacle.raw.length = 4.0F;
+    sideObstacle.raw.width = 2.0F;
+    sideObstacle.raw.height = 2.0F;
+    sideObstacle.obb = makeObjectObb(sideObstacle.raw);
+    world.objects = {sideObstacle};
+    const bool nominalSafe = corridorTrackingPathIsSafe(ordinary, world, 0.3);
+    const bool tightSafe = corridorTrackingPathIsSafe(ordinary, world, 0.05);
+    assert(!nominalSafe && tightSafe);
+    assert(!canResumeOrdinaryPathAfterRecovery(world, ordinary, nominalSafe));
+
+    // Removing the actual constraint restores immediate ordinary authority.
+    world.objects.clear();
+    assert(canResumeOrdinaryPathAfterRecovery(world, ordinary,
+        corridorTrackingPathIsSafe(ordinary, world, 0.3)));
+}
+
+void testGatewayHandoffChecksAttachedConnectorAndFullTail() {
+    auto world = makeWorldWithObstacle();
+    world.objects.clear();
+    auto gateway = makeStraightGlobalPath().waypoints;
+    for (auto& point : gateway) {
+        point.y = -5.25;
+        point.laneId = -2;
+    }
+    LaneChangeData maneuver;
+    maneuver.phase = LaneChangePhase::Execute;
+    maneuver.localCorridorAvoidance = true;
+    maneuver.path = makeStraightGlobalPath().waypoints;
+    std::vector<Waypoint> connector;
+    for (int x = 10; x <= 40; ++x) {
+        Waypoint point;
+        point.x = point.roadS = x;
+        point.roadId = 1;
+        const double t = std::clamp((x - 15.0) / 25.0, 0.0, 1.0);
+        point.y = -1.75 - 3.5 * t * t * (3.0 - 2.0 * t);
+        point.yaw = std::atan(-3.5 * 6.0 * t * (1.0 - t) / 25.0);
+        point.laneId = t < 0.5 ? -1 : -2;
+        point.s = connector.empty() ? 100.0 : connector.back().s +
+            std::hypot(point.x - connector.back().x, point.y - connector.back().y);
+        connector.push_back(point);
+    }
+    // Ego is 3.5m away from the raw gateway line, but a checked connector
+    // starts underneath it and merges at x=40. Rejecting the raw line's Ego
+    // attachment must not reject this usable, continuous combined route.
+    assert(!corridorTrackingPathIsSafe(gateway, world, 0.3));
+    assert(corridorTrackingPathIsSafe(connector, world, 0.3));
+    assert(canResumeCommittedGatewayRoute(maneuver, world, connector, true));
+    std::vector<Waypoint> continuation;
+    assert(buildGatewayHandoffContinuation(continuation, connector, gateway));
+    assert(continuation.back().x == gateway.back().x);
+    assert(continuation.front().s == 100.0);
+    for (std::size_t i = 1; i < continuation.size(); ++i) {
+        const double gap = std::hypot(continuation[i].x - continuation[i-1].x,
+                                      continuation[i].y - continuation[i-1].y);
+        assert(gap > 0.0 && gap < 1.1);
+        assert(std::abs(continuation[i].s - continuation[i-1].s - gap) < 1e-9);
+    }
+    assert(corridorTrackingPathIsSafe(continuation, world, 0.3));
+
+    // An obstacle after the connector's endpoint still invalidates handoff:
+    // checking only the attached prefix would silently discard this danger.
+    WorldObjectState blocker;
+    blocker.raw.id = 93;
+    blocker.raw.x = 65.0F;
+    blocker.raw.y = -5.25F;
+    blocker.raw.length = 4.0F;
+    blocker.raw.width = 2.0F;
+    blocker.obb = makeObjectObb(blocker.raw);
+    world.objects = {blocker};
+    assert(corridorTrackingPathIsSafe(connector, world, 0.3));
+    const bool completePathSafe = corridorTrackingPathIsSafe(continuation, world, 0.3);
+    assert(!completePathSafe);
+    assert(!canResumeCommittedGatewayRoute(maneuver, world, connector, completePathSafe));
+
+    // Coincident junction roads/lanes do not establish the required join.
+    auto wrongKey = connector;
+    wrongKey.back().roadId = 99;
+    assert(!buildGatewayHandoffContinuation(continuation, wrongKey, gateway));
+    wrongKey = connector;
+    wrongKey.back().sectionIndex = 1;
+    assert(!buildGatewayHandoffContinuation(continuation, wrongKey, gateway));
+    wrongKey = connector;
+    wrongKey.back().laneId = -1;
+    assert(!buildGatewayHandoffContinuation(continuation, wrongKey, gateway));
+}
+
 }  // namespace
 
 void testCrosswalkUsersAndStopDistanceGuard() {
@@ -2943,6 +3137,14 @@ void testCrosswalkUsersAndStopDistanceGuard() {
     assert(props.size()==1 && !crosswalkHasRiskObject(crossing,world,4.,props));
     assert(world.objects.size()==1); // do not remove collision geometry
     world.egoSpeed=1.;previousStop={};assert(step().size()==1); // allow departure
+    world.objects.clear();assert(step().empty());
+    world.objects={actor};assert(step().size()==1); // packet omission is not a new yield
+    auto later=actor;later.raw.id=2;world.objects.push_back(later);
+    history.push_back({2,600,23,0,true,false});
+    for(int i=0;i<58;++i)assert(step().size()==1);
+    for(int i=0;i<3;++i)props=step();
+    assert(props.size()==2); // same crossing: observe the next cone without stopping anew
+    world.objects.resize(1);
     // Position-derived motion revokes an exemption even with stale scalar GT.
     world.objects[0].raw.speed=0.;world.objects[0].velocityValid=true;
     world.objects[0].velocityX=.5;
@@ -2986,6 +3188,51 @@ void testCrosswalkUsersAndStopDistanceGuard() {
     plan.stopDistanceValid=true;plan.stopDistance=.1;
     runControlProcess(untouched,world,plan,.05);
     assert(normal.safeCommand.targetAccel==untouched.safeCommand.targetAccel);
+}
+
+void testSoleGatewayEntranceQueue() {
+    WorldState world;world.ego.x=0.;world.ego.y=0.;world.ego.heading=0.;
+    world.egoObb=makeObb2D(0,0,0,4.8,1.9);
+    WorldObjectState bus;bus.raw.id=11;bus.raw.x=12.;bus.raw.length=12.;
+    bus.raw.width=2.5;bus.raw.heading=0.;bus.raw.speed=0.;world.objects={bus};
+    PathGeneratorData map;map.corridorRuntime=std::make_shared<CorridorRuntime>();
+    auto& r=*map.corridorRuntime;r.activeLeg=0;r.soleGatewayApproachBlocker=11;
+    r.soleGatewayApproachPath.resize(2);r.network.points.resize(2);
+    r.network.points[0].pose.x=20.;r.gatewayCost={20.,0.};
+    PrecomputedLaneConnection link;link.from={1,0,-1};link.to={2,0,-1};
+    link.fromPoint=0;link.toPoint=1;link.junctionId=1;r.network.connections={link};
+    MissionCorridorData mission;mission.valid=true;mission.legs.resize(1);
+    auto& leg=mission.legs[0];leg.valid=true;leg.gatewayLanes.insert(link.to);
+    leg.allowedLanes={link.from,link.to};
+    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission)));
+    r.network.points[0].pose.x=32.; // 14m before entry: long-vehicle queue
+    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission)));
+    r.network.points[0].pose.x=50.;
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission))); // mid-approach: bypass
+    StopLine pointLine;pointLine.begin={32.,0.};pointLine.end=pointLine.begin;
+    map.staticZones.stopLines={pointLine};
+    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission))); // point-form stop line
+    map.staticZones.stopLines.clear();
+    auto front=bus;front.raw.id=12;front.raw.x=28.;world.objects.push_back(front);
+    front.raw.id=13;front.raw.x=44.;world.objects.push_back(front);
+    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission))); // three-car queue
+    world.objects.resize(1);
+    r.network.points[0].pose.x=20.;world.objects[0].raw.speed=1.;
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission))); // ordinary dynamic follow
+    world.objects[0].raw.speed=0.;r.soleGatewayApproachPath.clear();
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission))); // safe full route wins
+    r.soleGatewayApproachPath.resize(2);leg.gatewayLanes.insert({2,0,-2});
+    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission))); // all gateways blocked
+    r.soleGatewayApproachPath.clear();
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission))); // one clear gateway wins
+    leg.targetLanes={link.to};leg.targetRoadS[link.to]=30.;
+    Waypoint a;a.roadId=1;a.laneId=-1;
+    Waypoint b=a;b.roadS=50.;
+    assert(!queuedGatewayBypassIsComplete({a,b},mission)); // clear parallel lane is insufficient
+    b.roadId=2;b.roadS=10.;
+    assert(!queuedGatewayBypassIsComplete({a,b},mission)); // not past gateway exit station
+    b.roadS=31.;
+    assert(queuedGatewayBypassIsComplete({a,b},mission));
 }
 
 void testTrajectoryIndicatorPreview() {
@@ -3140,8 +3387,20 @@ void testStationaryCrosswalkWaitReleasesOnlyYield() {
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "--progress-recovery-handoff") {
+        testProgressRecoveryYieldsToUsableOrdinaryPath();
+        std::cout << "progress recovery / ordinary path authority PASS\n";
+        return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--gateway-route-handoff") {
+        testCommittedGatewayRouteHandoff();
+        testGatewayHandoffChecksAttachedConnectorAndFullTail();
+        std::cout << "committed gateway route / continuous Execute handoff PASS\n";
+        return 0;
+    }
     if(argc==2 && std::string(argv[1])=="--crosswalk-indicator") {
         testCrosswalkUsersAndStopDistanceGuard();
+        testSoleGatewayEntranceQueue();
         testTrajectoryIndicatorPreview();
         testIndicatorStaysOnWhileStraddling();
         testFullCrosswalkClearanceHold();
@@ -3188,6 +3447,37 @@ int main(int argc, char** argv) {
         add(11,820.611267,-880.5578);add(3,815.65717,-884.31207);add(16,821.073,-875.6166);
         step();assert(std::abs(output.targetSpeed-10.0/3.6)<1e-9);
         std::cout<<"dense static speed regression: PASS\n";return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--school-zone-approach") {
+        PathPlannerConfig planner;
+        PlanningBehaviorConfig behavior;
+        planner.schoolZoneSpeed = 20.0 / 3.6;
+        planner.schoolZoneApproachSpeed = 25.0 / 3.6;
+        behavior.comfortableDeceleration = 0.8;
+        behavior.schoolZoneApproachDistance = 20.0;
+        behavior.schoolZoneApproachReactionTime = 0.5;
+        const auto limit = [&](double distance, double speed = 40.0 / 3.6) {
+            return schoolZoneApproachSpeedLimit(planner, behavior, distance, speed);
+        };
+        assert(limit(100.0) > 40.0 / 3.6);
+        assert(limit(70.0) < 40.0 / 3.6);
+        assert(limit(20.0) <= 25.0 / 3.6);
+        assert(std::abs(limit(0.0) - 20.0 / 3.6) < 1e-9);
+        for (double distance = 1.0; distance < 100.0; distance += 1.0)
+            assert(limit(distance) >= limit(distance - 1.0));
+        assert(limit(40.0, 40.0 / 3.6) < limit(40.0, 20.0 / 3.6));
+        behavior.comfortableDeceleration = 1.5; // Current YAML setting.
+        assert(limit(51.0) > 40.0 / 3.6);
+        assert(limit(50.0) < 40.0 / 3.6);
+        // A lower obstacle/turn/traffic cap remains lower, never raised to 25.
+        assert(std::min(15.0 / 3.6, limit(20.0)) == 15.0 / 3.6);
+        behavior.schoolZoneApproachDistance = 0.0;
+        behavior.schoolZoneApproachReactionTime = 0.0;
+        behavior.comfortableDeceleration = 0.8;
+        assert(std::abs(limit(40.0) - std::sqrt(std::pow(20.0 / 3.6, 2) +
+            2.0 * 0.8 * 40.0)) < 1e-9);
+        std::cout << "school zone approach profile: PASS\n";
+        return 0;
     }
     // Focused regression entry point; the default still runs every test and
     // reports the pre-existing close-moving-lead assertion failure.
@@ -3261,6 +3551,9 @@ int main(int argc, char** argv) {
     testLeadBrakingUsesRelativeStoppingDistance();
     testPreparedLaneChangeCancelsWhenBlockerMoves();
     testPreparedAvoidanceRequiresClearedContinuousSuccessor();
+    testCommittedGatewayRouteHandoff();
+    testProgressRecoveryYieldsToUsableOrdinaryPath();
+    testGatewayHandoffChecksAttachedConnectorAndFullTail();
     testStationaryAdjacentVehicleUsesShortRangeCaution();
     testCrossTrafficWaitingVehicleCapsBeforeLaunch();
     testMeasuredReverseObjectMotionDrivesPrediction();

@@ -31,6 +31,7 @@ struct Options {
     std::string map{"src/data/map/HL_FMA_VTD_LivingLab.xodr"};
     std::string pointDirectory{"output/precomputed_lane_network"};
     std::string config{"config/control.yaml"};
+    std::string gatewayHistorySnapshot;
     double timeout{5.};
     double snapshotTime{-1.};
     bool localFallback{};
@@ -49,6 +50,7 @@ Options parse(int argc, char** argv) {
         else if (flag=="--map") result.map=value;
         else if (flag=="--point-dir") result.pointDirectory=value;
         else if (flag=="--control-config") result.config=value;
+        else if (flag=="--gateway-history-snapshot") result.gatewayHistorySnapshot=value;
         else if (flag=="--timeoutseconds") result.timeout=std::stod(value);
         else if (flag=="--time") result.snapshotTime=std::stod(value);
         else if (flag=="--local-fallback") result.localFallback=value=="1";
@@ -190,6 +192,29 @@ int main(int argc, char** argv) {
         initializeDecisionTrace(trace,(directory/"decision.log").string());
         auto& runtime=*map.corridorRuntime;
         PathPlannerData tracking;
+        bool gatewayHistoryVerified=false;
+        if(!options.gatewayHistorySnapshot.empty()) {
+            Tree previousSnapshot;
+            boost::property_tree::read_json(options.gatewayHistorySnapshot,previousSnapshot);
+            if(previousSnapshot.get<std::size_t>("decision.active_leg")!=mission.activeLegIndex ||
+               previousSnapshot.get<double>("time_s")>=snapshot.get<double>("time_s"))
+                throw std::runtime_error("Gateway history must precede the snapshot in the same active leg");
+            LaneMatch previousMatch;
+            const auto previousWorld=readWorld(previousSnapshot,map,previousMatch);
+            const LaneKey previousLane{previousWorld.egoRoadId,previousWorld.egoSectionIndex,previousWorld.egoLaneId};
+            if(!previousMatch.valid || previousMatch.roadId!=previousLane.roadId ||
+               previousMatch.sectionIndex!=previousLane.sectionIndex || previousMatch.laneId!=previousLane.laneId ||
+               !mission.legs[mission.activeLegIndex].gatewayLanes.count(previousLane))
+                throw std::runtime_error("Gateway history pose is not on the measured required gateway lane");
+            // Replay the real earlier observation through the production
+            // latch. Discard its asynchronous search revision so the route
+            // below still uses every object in the current snapshot.
+            beginDecisionTraceFrame(trace,0,0.);
+            beginCorridorSearchFrame(runtime);
+            buildCorridorTrackingPath(tracking,config.planner,previousWorld,map,mission,80.,&trace);
+            requestCorridorGlobalReplan(runtime);
+            gatewayHistoryVerified=true;
+        }
         bool success=false, timedOut=false;
         std::size_t polls=0;
         double maxPollMs=0.;
@@ -264,6 +289,33 @@ int main(int argc, char** argv) {
                 "local_path.csv":"global_path.csv")).string()))
             throw std::runtime_error("Cannot write diagnostic path CSV");
         if(!tracking.waypoints.empty()) savePath(tracking.waypoints,(directory/"tracking_path.csv").string());
+        {
+            std::ofstream goals(directory/"global_search_goals.csv");
+            goals << "point_id,road_id,section_index,lane_id,road_s,x,y,handoff_cost\n";
+            goals << std::setprecision(12);
+            for(const auto& point:runtime.network.points) {
+                if(point.id<0 || static_cast<std::size_t>(point.id)>=runtime.globalSearchGoal.size() ||
+                   !runtime.globalSearchGoal[point.id]) continue;
+                const auto& p=point.pose;
+                goals << point.id << ',' << p.roadId << ',' << p.sectionIndex << ',' << p.laneId
+                      << ',' << p.roadS << ',' << p.x << ',' << p.y << ','
+                      << runtime.handoffCost[point.id] << '\n';
+            }
+        }
+        {
+            std::ofstream scope(directory/"global_search_scope.csv");
+            scope << "point_id,road_id,section_index,lane_id,road_s,x,y,global_allowed,goal,ordinary,handoff_cost\n";
+            scope << std::setprecision(12);
+            for(const auto& point:runtime.network.points) {
+                if(point.id<0 || static_cast<std::size_t>(point.id)>=runtime.trackingAllowed.size() ||
+                   !runtime.trackingAllowed[point.id]) continue;
+                const auto& p=point.pose;
+                scope << point.id << ',' << p.roadId << ',' << p.sectionIndex << ',' << p.laneId
+                      << ',' << p.roadS << ',' << p.x << ',' << p.y << ','
+                      << runtime.globalSearchAllowed[point.id] << ',' << runtime.globalSearchGoal[point.id]
+                      << ',' << runtime.ordinaryRoadPoint[point.id] << ',' << runtime.handoffCost[point.id] << '\n';
+            }
+        }
         int blocker=-1;
         const bool safe=!path.empty() && corridorTrackingPathIsSafe(path,world,
             options.localFallback?local.validatedObstacleClearance:
@@ -280,6 +332,7 @@ int main(int argc, char** argv) {
                 << ",\"polls\":" << polls << ",\"point_count\":" << path.size()
                 << ",\"revision\":" << runtime.routeRevision << ",\"request_revision\":" << runtime.globalRouteRequestRevision
                 << ",\"leg\":" << mission.activeLegIndex
+                << ",\"gateway_history_verified\":" << gatewayHistoryVerified
                 << ",\"snapshot_time_s\":" << snapshot.get<double>("time_s",0.)
                 << ",\"ego_lane\":[" << world.egoRoadId << ',' << world.egoSectionIndex << ',' << world.egoLaneId << ']'
                 << ",\"nearest_lane\":[" << nearest.roadId << ',' << nearest.sectionIndex << ',' << nearest.laneId << ']'

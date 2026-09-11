@@ -7,6 +7,15 @@
 #include <string>
 
 struct DecisionTraceData;
+// Front-bumper distance; returns an upper bound, never an acceleration request.
+double schoolZoneApproachSpeedLimit(const PathPlannerConfig& planner,
+    const PlanningBehaviorConfig& behavior, double distanceToEntry, double egoSpeed);
+// Finite only for a stationary entrance queue after all complete safe
+// gateway search failed. Mid-approach obstacles retain ordinary avoidance.
+double soleGatewayQueueDistance(const WorldState& world,
+    const PathGeneratorData& map, const MissionCorridorData& mission);
+bool queuedGatewayBypassIsComplete(const std::vector<Waypoint>& path,
+    const MissionCorridorData& mission);
 
 // Full-crosswalk yield is for vulnerable road users; ordinary vehicles retain
 // following, collision prediction and emergency braking authority.
@@ -35,6 +44,24 @@ double crosswalkStopRouteS(const Crosswalk& crossing, const WorldState& world,
 bool canCancelClearedPreparedAvoidance(
     const LaneChangeData& maneuver, const WorldState& world,
     const std::vector<Waypoint>& successor, bool successorPathSafe);
+
+// Geometry gate only: the caller separately certifies gateway topology and
+// current static/dynamic safety before releasing a temporary local detour.
+bool canResumeCommittedGatewayRoute(
+    const LaneChangeData& maneuver, const WorldState& world,
+    const std::vector<Waypoint>& successor, bool successorSafe);
+
+// Join the actually attached tracking path to its certified gateway tail.
+// Collision checking must use this continuous path, not require the unjoined
+// reference in the adjacent lane to already lie underneath Ego.
+bool buildGatewayHandoffContinuation(
+    std::vector<Waypoint>& output, const std::vector<Waypoint>& successor,
+    const std::vector<Waypoint>& gatewayReference);
+
+// Releasing a temporary recovery is a geometric/safety decision, not a
+// minimum travel-distance or elapsed-time quota.
+bool canResumeOrdinaryPathAfterRecovery(
+    const WorldState& world, const std::vector<Waypoint>& path, bool pathSafe);
 
 bool initializePlanning(PlanningProcessData& data,
                         const PathPlannerConfig& plannerConfig,

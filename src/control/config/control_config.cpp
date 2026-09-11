@@ -85,7 +85,12 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
                   << config.behavior.progressRecoveryMaxSpeed * 3.6 << '\n';
         return false;
     }
-    return config.planner.sharpCurveThreshold >
+    return positiveFinite(config.planner.schoolZoneApproachSpeed) &&
+           std::isfinite(config.behavior.schoolZoneApproachDistance) &&
+           config.behavior.schoolZoneApproachDistance >= 0.0 &&
+           std::isfinite(config.behavior.schoolZoneApproachReactionTime) &&
+           config.behavior.schoolZoneApproachReactionTime >= 0.0 &&
+           config.planner.sharpCurveThreshold >
                config.planner.curveThreshold &&
            config.planner.sharpCurveSpeed > 0.0 &&
            config.planner.sharpCurveSpeed <= config.planner.curveSpeed &&
@@ -228,6 +233,13 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.planner.sharpCurveSpeed) &&
         setSpeedConfigValue(values, "speed.school_zone_target_kph",
                        config.planner.schoolZoneSpeed) &&
+        (values.count("speed.school_zone_approach_target_kph") == 0 ||
+         setSpeedConfigValue(values, "speed.school_zone_approach_target_kph",
+                       config.planner.schoolZoneApproachSpeed)) &&
+        setOptionalConfigValue(values, "planning.school_zone_approach_distance",
+                       config.behavior.schoolZoneApproachDistance) &&
+        setOptionalConfigValue(values, "planning.school_zone_approach_reaction_time",
+                       config.behavior.schoolZoneApproachReactionTime) &&
         setConfigValue(values, "planning.comfortable_deceleration",
                        config.behavior.comfortableDeceleration) &&
         setConfigValue(values, "planning.stop_safety_margin",

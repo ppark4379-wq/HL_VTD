@@ -13,11 +13,14 @@
 #include <thread>
 
 void require(bool okay,const char* message) {if(!okay) throw std::runtime_error(message);}
-PathGeneratorData fixture(bool solid=false,bool sourceKnot=false) {
+PathGeneratorData fixture(bool solid=false,bool sourceKnot=false,
+                          double translationX=0.,double translationY=0.,
+                          const LaneChangeConfig& config=LaneChangeConfig{}) {
     PathGeneratorData map;PrecomputedLaneNetwork network;
     for(int rid=1;rid<=2;++rid) {
         Road road;road.id=rid;road.length=100.;
-        Geometry geometry;geometry.length=100.;geometry.x=(rid-1)*100.;road.geometries.push_back(geometry);
+        Geometry geometry;geometry.length=100.;geometry.x=(rid-1)*100.+translationX;
+        geometry.y=translationY;road.geometries.push_back(geometry);
         LaneSection section;
         for(int lid=-1;lid>=-3;--lid) {
             LaneDefinition lane;lane.id=lid;lane.type="driving";lane.widths.push_back({0.,3.5,0.,0.,0.});
@@ -26,7 +29,7 @@ PathGeneratorData fixture(bool solid=false,bool sourceKnot=false) {
             LaneSegment segment;segment.key=raw.key;
             for(int i=0;i<=200;++i) {
                 PrecomputedLanePoint p;p.id=network.points.size();p.pointIndex=i;p.width=3.5;p.usable=true;
-                p.pose.x=(rid-1)*100.+i*.5;p.pose.y=(lid+.5)*3.5;p.pose.s=p.pose.roadS=i*.5;p.pose.roadId=rid;p.pose.laneId=lid;
+                p.pose.x=(rid-1)*100.+i*.5+translationX;p.pose.y=(lid+.5)*3.5+translationY;p.pose.s=p.pose.roadS=i*.5;p.pose.roadId=rid;p.pose.laneId=lid;
                 if(i<200) p.nextPoint=p.id+1;
                 if(sourceKnot && i==100) p.nextPoint=-1;
                 if(sourceKnot && i==101) p.pose.x-=.5;
@@ -49,7 +52,7 @@ PathGeneratorData fixture(bool solid=false,bool sourceKnot=false) {
         c.fromPoint=network.lanes[c.from].pointIds.back();c.toPoint=network.lanes[c.to].pointIds.front();network.connections.push_back(c);
         map.laneGraph[c.from].push_back(c.to);
     }
-    std::string error;require(initializeCorridorRuntime(map,std::move(network),LaneChangeConfig{},&error),error.c_str());return map;
+    std::string error;require(initializeCorridorRuntime(map,std::move(network),config,&error),error.c_str());return map;
 }
 MissionCorridorData mission(bool onlyThird=false) {
     MissionCorridorData m;m.valid=m.initialized=true;MissionLegData leg;leg.valid=true;
@@ -76,6 +79,104 @@ void m08StaticObjects(WorldState& w) {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2 && std::string(argv[1])=="--clear-center-return") {
+            auto map=fixture();auto m=mission();auto w=world(30.);
+            PathPlannerData seed;
+            require(buildCorridorTrackingPath(seed,PathPlannerConfig{},w,map,m,120.,nullptr),"initialize centre fixture");
+            auto& runtime=*map.corridorRuntime;
+            std::vector<Waypoint> path;
+            for(int i=0;i<=240;++i) {
+                Waypoint p;p.x=30.+i*.5;p.y=-3.5;p.s=p.x;p.roadId=p.x<100.?1:2;
+                p.roadS=p.x<100.?p.x:p.x-100.;p.laneId=-1;
+                const double u=std::clamp((p.x-70.)/20.,0.,1.);
+                p.y+=1.75*u*u*u*(10.-15.*u+6.*u*u);
+                p.yaw=std::atan(1.75*30.*u*u*(1.-u)*(1.-u)/20.);
+                path.push_back(p);
+            }
+            const auto original=path;w.ego.y=-3.5;w.egoObb=makeObb2D(31.3725,-3.5,0.,4.855,1.88);
+            w.receiveTime=10.;
+            require(advanceClearLaneCenterReturn(path,w,map,m,PlanningBehaviorConfig{}),"clear offset failed to return to centre");
+            const auto at=std::min_element(path.begin(),path.end(),[](const auto& a,const auto& b){return std::abs(a.x-50.)<std::abs(b.x-50.);});
+            require(std::abs(at->y+1.75)<.1,"centre return stayed on dashed boundary");
+            require(std::abs(path.front().y-w.ego.y)<1e-5 && std::abs(path.front().yaw-w.ego.heading)<1e-5,"return starts with a steering jump");
+            for(const auto& p:original) if(p.x>=90.) {
+                const auto q=std::find_if(path.begin(),path.end(),[&](const auto& a){return a.x==p.x && a.y==p.y && a.s==p.s && a.roadId==p.roadId && a.laneId==p.laneId;});
+                require(q!=path.end(),"centring changed the original gateway tail");
+            }
+            w.receiveTime+=2.;const auto accepted=path;
+            require(!advanceClearLaneCenterReturn(path,w,map,m,PlanningBehaviorConfig{}),"committed centre return was regenerated");
+            require(path.size()==accepted.size(),"failed centre probe mutated its path");
+            path=original;w.receiveTime+=2.;obstacle(w);
+            w.objects.back().raw.length=.5;w.objects.back().raw.width=.3;
+            w.objects.back().obb=makeObb2D(35.,-1.75,0.,.5,.3);
+            require(corridorTrackingPathIsSafe(path,w,.3,nullptr,nullptr,&map),"fine offset fixture must already be safe");
+            require(!advanceClearLaneCenterReturn(path,w,map,m,PlanningBehaviorConfig{}),"nearby obstacle did not preserve fine avoidance");
+            require(path.size()==original.size() && path[20].y==original[20].y,"rejected return changed active avoidance");
+            w.objects.clear();runtime.soleGatewayApproachSelected=true;w.receiveTime+=2.;
+            require(!advanceClearLaneCenterReturn(path,w,map,m,PlanningBehaviorConfig{}),"queue approach was changed cosmetically");
+            runtime.soleGatewayApproachSelected=false;
+            auto solidMap=fixture(true);PathPlannerData solidSeed;
+            auto sw=world(30.);buildCorridorTrackingPath(solidSeed,PathPlannerConfig{},sw,solidMap,m,120.,nullptr);
+            sw=w;sw.receiveTime+=2.;
+            require(!advanceClearLaneCenterReturn(path,sw,solidMap,m,PlanningBehaviorConfig{}),"centre return crossed a solid boundary");
+            std::cout<<"clear centre return / unchanged gateway tail / dense and queue guards PASS\n";return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--cached-global-priority") {
+            auto map=fixture();auto m=mission();auto w=world();
+            m.topologyAuthority=true;m.checkpoints.resize(1);
+            m.checkpoints[0].checkpoint.x=120.;
+            m.checkpoints[0].checkpoint.y=-1.75;
+            auto& leg=m.legs[0];leg.topologyAuthority=true;leg.finalLeg=true;
+            for(const auto& lane:leg.targetLanes)leg.targetRoadS[lane]=20.;
+            PathPlannerData tracking;DecisionTraceData trace;trace.enabled=true;
+            require(buildCorridorTrackingPath(tracking,PathPlannerConfig{},w,map,m,80.,&trace),
+                    "fixture could not create initial gateway route");
+            auto& runtime=*map.corridorRuntime;
+            require(runtime.committedGlobalPathReachesGateway &&
+                    !runtime.globalRouteReplanRequested,
+                    "fixture did not establish an idle committed global route");
+            runtime.recoveryTrackingPath.clear();
+            for(const auto& point:runtime.committedGlobalPath) {
+                if(point.x>65.)break;
+                runtime.recoveryTrackingPath.push_back(point);
+            }
+            runtime.recoveryTrackingPathLeg=m.activeLegIndex;
+            runtime.recoveryTrackingPathProgress=0;
+            runtime.recoveryTrackingPathClearance=.3;
+            runtime.recoveryTrackingPathReachesReference=true;
+            require(runtime.recoveryTrackingPath.size()>20 &&
+                    corridorTrackingPathIsSafe(runtime.recoveryTrackingPath,w,.3,nullptr,nullptr,&map),
+                    "fixture recovery prefix must remain attached and clear");
+            const auto originalProgress=runtime.committedGlobalPathProgress;
+            w=world(25.);w.receiveTime=1.;
+            beginCorridorSearchFrame(runtime);
+            require(buildCorridorTrackingPath(tracking,PathPlannerConfig{},w,map,m,80.,&trace),
+                    "cached route became unavailable after normal forward motion");
+            require(runtime.committedGlobalPathProgress>originalProgress &&
+                    runtime.committedGlobalPath[runtime.committedGlobalPathProgress].x>=24.5,
+                    "attached recovery prefix froze committed global progress");
+            require(tracking.waypoints.back().x>runtime.recoveryTrackingPath.back().x+10.,
+                    "short recovery prefix kept priority over the full safe global route");
+
+            // The bridge still ends at x=65. A newly observed object at x=95
+            // is outside that bridge but ON the stored full gateway route.
+            // Global validation must see it before the bridge is exhausted.
+            obstacle(w);w.objects.back().raw.x=95.;
+            w.objects.back().obb=makeObb2D(95.,-1.75,0.,4.,2.);
+            require(corridorTrackingPathIsSafe(runtime.recoveryTrackingPath,w,.3,nullptr,nullptr,&map),
+                    "future obstacle unexpectedly intersects short recovery prefix");
+            trace.frameEvents.clear();w.receiveTime+=.05;
+            beginCorridorSearchFrame(runtime);
+            require(buildCorridorTrackingPath(tracking,PathPlannerConfig{},w,map,m,80.,&trace),
+                    "global obstacle recheck erased the safe recovery prefix");
+            require(runtime.globalRouteReplanRequested &&
+                    std::any_of(trace.frameEvents.begin(),trace.frameEvents.end(),[](const auto& event) {
+                        return event.find("async_search_started")!=std::string::npos;
+                    }),"safe short prefix suppressed a new obstacle on the global route");
+            require(corridorTrackingPathIsSafe(tracking.waypoints,w,.3,nullptr,nullptr,&map),
+                    "pending global search selected its blocked route instead of the safe prefix");
+            std::cout<<"cached global route priority / live obstacle recheck PASS\n";return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--no-cosmetic-replan") {
             auto map=fixture();auto m=mission();auto w=world();
             w.ego.y=-3.5;
@@ -94,6 +195,35 @@ int main(int argc,char** argv) {
             require(replacement.phase==LaneChangePhase::None && replacement.path.empty(),
                     "rollback generated an unnecessary manoeuvre");
             require(current.front().y==-3.5 && current.back().y==-3.5,"incumbent path was mutated");
+            // The selected route already bypasses the original lane blocker.
+            // Seeing that same blocker on the unused straight lane must not
+            // start another local search and replace a safe committed route.
+            auto detourMap=fixture();auto dw=world();obstacle(dw);
+            std::vector<Waypoint> detour;
+            for(int i=0;i<=160;++i) {
+                Waypoint p;p.x=10.+.5*i;p.roadS=p.x;p.roadId=1;
+                const double u=std::clamp((p.x-10.)/20.,0.,1.);
+                p.y=-1.75-3.5*(3.*u*u-2.*u*u*u);
+                p.yaw=std::atan(-3.5*6.*u*(1.-u)/20.);
+                p.laneId=u<.5?-1:-2;
+                p.s=detour.empty()?0.:detour.back().s+std::hypot(p.x-detour.back().x,p.y-detour.back().y);
+                detour.push_back(p);
+            }
+            require(corridorTrackingPathIsSafe(detour,dw,.3,nullptr,nullptr,&detourMap),
+                    "fixture detour not safe");
+            for(int i=0;i<20;++i)
+                require(!prepareLocalCorridorFallback(replacement,LaneChangeConfig{},PlanningBehaviorConfig{},
+                    dw,detourMap,m,detour,nullptr),"clear detour was replaced because straight lane is blocked");
+            require(!detourMap.corridorRuntime->localFallbackEngaged &&
+                    !detourMap.corridorRuntime->localFallbackPending,
+                    "clear detour launched redundant search");
+            // This retention must not suppress a new blocker ON the route.
+            auto next=dw.objects.front();next.raw.id=8;next.raw.x=45.;next.raw.y=-5.25;
+            next.obb=makeObb2D(45.,-5.25,0.,4.,2.);dw.objects.push_back(next);
+            prepareLocalCorridorFallback(replacement,LaneChangeConfig{},PlanningBehaviorConfig{},
+                dw,detourMap,m,detour,nullptr);
+            require(detourMap.corridorRuntime->localFallbackEngaged,
+                    "new obstacle on selected route did not activate local planning");
             std::cout<<"no cosmetic replanning PASS\n";return 0;
         }
         if(argc==2 && std::string(argv[1])=="--lost-corridor-recovery") {
@@ -294,6 +424,126 @@ int main(int argc,char** argv) {
             std::cout<<"configured lattice vehicle width PASS\n";
             return 0;
         }
+        if(argc==2 && std::string(argv[1])=="--extended-gateway-preview") {
+            const auto run=[](bool observed,double dx,double dy) {
+                LaneChangeConfig config;config.localFallbackHorizon=90.;
+                auto map=fixture(false,false,dx,dy,config);auto m=mission();
+                m.topologyAuthority=true;m.checkpoints.resize(4);
+                m.checkpoints[0].checkpoint.x=90.+dx;
+                m.checkpoints[1].checkpoint.x=99.+dx;
+                m.checkpoints[2].checkpoint.x=102.+dx;
+                m.checkpoints[3].checkpoint.x=190.+dx;
+                auto& leg=m.legs.front();leg.topologyAuthority=true;leg.finalLeg=false;
+                leg.gatewayCheckpoint=1;leg.toCheckpoint=2;
+                leg.gatewayLanes={{1,0,-1}};leg.targetLanes={{2,0,-3}};
+                leg.targetRoadS[{2,0,-3}]=2.;
+                MissionLegData next;next.valid=next.topologyAuthority=next.finalLeg=true;
+                next.fromCheckpoint=2;next.gatewayCheckpoint=next.toCheckpoint=3;
+                next.allowedLanes={{2,0,-1},{2,0,-2},{2,0,-3}};
+                next.targetLanes={{2,0,-3}};next.targetRoadS[{2,0,-3}]=90.;
+                m.legs.push_back(next);
+                auto w=world(110.);w.ego.x+=dx;w.ego.y+=dy;
+                w.egoRoadId=2;w.egoRoadS=10.;
+                w.egoObb=makeObb2D(w.ego.x+1.3725,w.ego.y,0.,4.855,1.88);
+                // Two long parked vehicles close both left lanes beyond the
+                // old 30 m preview. The free outer lane must be held until
+                // the whole body passes them, then return to the required lane.
+                for(int lane:{-2,-3}) {
+                    WorldObjectState o;o.raw.id=20-lane;o.raw.x=143.+dx;
+                    o.raw.y=(lane+.5)*3.5+dy;o.raw.length=40.;o.raw.width=2.;
+                    o.obb=makeObb2D(o.raw.x,o.raw.y,0.,o.raw.length,o.raw.width);
+                    w.objects.push_back(o);
+                }
+                PathPlannerData path;DecisionTraceData trace;trace.enabled=true;
+                auto& runtime=*map.corridorRuntime;
+                if(observed) {
+                    auto previous=w;previous.ego.x=90.+dx;previous.egoRoadId=1;
+                    previous.egoRoadS=previous.egoPathS=90.;
+                    previous.egoObb=makeObb2D(previous.ego.x+1.3725,previous.ego.y,0.,4.855,1.88);
+                    // Use an actual measured gateway pose to seed passage;
+                    // do not set the runtime permission bit directly.
+                    beginCorridorSearchFrame(runtime);
+                    buildCorridorTrackingPath(path,PathPlannerConfig{},previous,map,m,120.,&trace);
+                }
+                const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+                do {
+                    w.receiveTime+=.05;beginCorridorSearchFrame(runtime);
+                    buildCorridorTrackingPath(path,PathPlannerConfig{},w,map,m,120.,&trace);
+                    if(runtime.committedGlobalPathReachesGateway && !runtime.globalRouteReplanRequested)break;
+                    if(runtime.globalRouteSearchFailed)break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                } while(std::chrono::steady_clock::now()<deadline);
+                const bool success=runtime.committedGlobalPathReachesGateway && !runtime.globalRouteReplanRequested;
+                if(!observed) {
+                    require(!success,"unobserved earlier gateway was silently skipped");
+                    return;
+                }
+                if(!success)for(const auto& event:trace.frameEvents)std::cerr<<event<<'\n';
+                require(success,"observed gateway could not extend past the long obstacle cluster");
+                require(m.activeLegIndex==0,"preview advanced mission without measured target passage");
+                const auto& route=runtime.committedGlobalPath;
+                require(missionPointIsTarget(m.legs[0],route.back()),"extended route never returned to the required exit lane");
+                require(route.back().x>185.+dx,"global preview still terminates inside the obstacle cluster");
+                const auto body=vehicleFootprintFromObb(w.egoObb,{w.ego.x,w.ego.y,w.ego.heading});
+                for(const auto& p:route)for(const auto& o:w.objects)
+                    require(!intersects(vehicleFootprintAt(body,{p.x,p.y,p.yaw},.3),o.obb),
+                            "extended gateway route touches a parked vehicle");
+                const auto firstTarget=std::find_if(route.begin(),route.end(),[](const auto& p){return p.roadId==2 && p.laneId==-3;});
+                require(firstTarget!=route.end() && firstTarget->roadS>60.,
+                        "required exit-lane return happened before the long vehicles were passed");
+            };
+            run(false,0.,0.);run(true,0.,0.);run(true,230.,-120.);
+            std::cout<<"observed gateway / extended obstacle preview / translated geometry PASS\n";return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--center-first-global") {
+            const auto run=[](bool singleLane) {
+                auto map=fixture();auto m=mission();auto w=world();
+                m.topologyAuthority=true;m.checkpoints.resize(2);
+                m.checkpoints[0].checkpoint.x=10.;m.checkpoints[1].checkpoint.x=180.;
+                auto& leg=m.legs.front();leg.topologyAuthority=true;leg.finalLeg=true;
+                leg.gatewayCheckpoint=leg.toCheckpoint=1;
+                if(singleLane) {
+                    leg.allowedLanes={{1,0,-1},{2,0,-1}};
+                    leg.targetLanes={{2,0,-1}};
+                }
+                for(const auto& lane:leg.targetLanes) leg.targetRoadS[lane]=80.;
+                obstacle(w);auto& o=w.objects.front();
+                // A small obstruction touches the lane-centre envelope.
+                // A full adjacent-lane detour and a cheaper in-lane shift
+                // both fit; prefer the centre route when it is available.
+                o.raw.x=55.;o.raw.y=-3.;o.raw.width=1.;
+                o.obb=makeObb2D(o.raw.x,o.raw.y,0.,o.raw.length,o.raw.width);
+                PathPlannerData tracking;DecisionTraceData trace;trace.enabled=true;
+                auto& runtime=*map.corridorRuntime;
+                const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+                do {
+                    beginCorridorSearchFrame(runtime);
+                    buildCorridorTrackingPath(tracking,PathPlannerConfig{},w,map,m,80.,&trace);
+                    if(runtime.committedGlobalPathReachesGateway && !runtime.globalRouteReplanRequested) break;
+                    if(runtime.globalRouteSearchFailed) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                } while(std::chrono::steady_clock::now()<deadline);
+                if(!runtime.committedGlobalPathReachesGateway)
+                    for(const auto& event:trace.frameEvents)std::cerr<<event<<'\n';
+                require(runtime.committedGlobalPathReachesGateway && !runtime.globalRouteReplanRequested,
+                        "centre-first/offset-fallback fixture has no complete gateway route");
+                require(corridorTrackingPathIsSafe(runtime.committedGlobalPath,w,.3,nullptr,nullptr,&map),
+                        "centre-first/offset-fallback route intersects the obstruction");
+                require(missionPointIsTarget(leg,runtime.committedGlobalPath.back()),
+                        "centre-first/offset-fallback route missed required gateway");
+                if(singleLane) {
+                    require(std::all_of(runtime.committedGlobalPath.begin(),runtime.committedGlobalPath.end(),
+                        [](const auto& p){return p.laneId==-1;}),"offset fallback left its only permitted lane");
+                    require(std::any_of(runtime.committedGlobalPath.begin(),runtime.committedGlobalPath.end(),
+                        [](const auto& p){return p.y>-1.2;}),"failed centre search did not use needed fine offset");
+                } else {
+                    require(std::any_of(runtime.committedGlobalPath.begin(),runtime.committedGlobalPath.end(),
+                        [](const auto& p){return p.y<-5.2;}),"cheap off-centre shift displaced feasible lane-centre detour");
+                }
+            };
+            run(false);run(true);
+            std::cout<<"centre-first global / fine offset fallback PASS\n";return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--observed-global-replan") {
             auto map=fixture();auto m=mission();auto w=world(10.);
             m.topologyAuthority=true;m.checkpoints.resize(2);
@@ -332,6 +582,128 @@ int main(int argc,char** argv) {
                     "post-avoidance global route starts on the old lane");
             std::cout<<"observed whole-corridor / post-avoidance replan PASS\n";
             return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--multi-gateway-queue") {
+            auto map=fixture();auto m=mission();auto w=world(70.);
+            m.topologyAuthority=true;m.checkpoints.resize(2);
+            m.checkpoints[1].checkpoint.x=140.;m.checkpoints[1].checkpoint.y=-3.5;
+            auto& leg=m.legs[0];leg.topologyAuthority=true;leg.finalLeg=true;
+            leg.gatewayCheckpoint=leg.toCheckpoint=1;
+            leg.gatewayLanes=leg.targetLanes={{2,0,-1},{2,0,-2}};
+            leg.allowedLanes.erase({2,0,-3});
+            for(const auto& key:leg.targetLanes)leg.targetRoadS[key]=80.;
+            for(int lane:{-1,-2}) {
+                WorldObjectState o;o.raw.id=-lane;o.raw.x=140.;o.raw.y=(lane+.5)*3.5;
+                o.raw.length=12.;o.raw.width=3.5;
+                o.obb=makeObb2D(o.raw.x,o.raw.y,0.,12.,3.5);w.objects.push_back(o);
+            }
+            auto& r=*map.corridorRuntime;PathPlannerData path;
+            const auto poll=[&](bool approach) {
+                const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+                do {
+                    w.receiveTime+=.05;beginCorridorSearchFrame(r);
+                    buildCorridorTrackingPath(path,PathPlannerConfig{},w,map,m,160.,nullptr);
+                    if(approach?r.soleGatewayApproachSelected:
+                        (r.committedGlobalPathReachesGateway&&!r.globalRouteReplanRequested))return true;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                }while(std::chrono::steady_clock::now()<until);
+                return false;
+            };
+            require(poll(true),"all blocked gateway alternatives lost safe queue approach");
+            require(corridorTrackingPathIsSafe(path.waypoints,w,.3,nullptr,nullptr,&map),
+                    "multiple-gateway queue approach intersects a blocker");
+            require(path.waypoints.back().laneId==-1,"unnecessary lane change to equivalent queue");
+            w.objects.pop_back();requestCorridorGlobalReplan(r);
+            require(poll(false),"opening one gateway did not restore a clear full route");
+            require(r.soleGatewayApproachPath.empty(),"blocked queue outranked open gateway");
+            require(corridorTrackingPathIsSafe(r.committedGlobalPath,w,.3,nullptr,nullptr,&map),
+                    "open-gateway route intersects remaining queue");
+            std::cout<<"multiple gateways: safe queue / open exit priority PASS\n";return 0;
+        }
+        if(argc==2 && std::string(argv[1])=="--sole-gateway-approach") {
+            auto map=fixture();auto m=mission(true);auto w=world(45.);
+            m.topologyAuthority=true;m.checkpoints.resize(2);
+            m.checkpoints[0].checkpoint.x=45.;m.checkpoints[1].checkpoint.x=140.;
+            m.checkpoints[1].checkpoint.y=-8.75;
+            auto& leg=m.legs.front();leg.topologyAuthority=true;leg.finalLeg=true;
+            leg.gatewayCheckpoint=leg.toCheckpoint=1;leg.gatewayLanes={{2,0,-3}};
+            leg.targetRoadS[{2,0,-3}]=80.;
+            obstacle(w);auto& o=w.objects.front();o.raw.x=135.;o.raw.y=-8.75;
+            o.obb=makeObb2D(o.raw.x,o.raw.y,0.,4.,2.);
+            PathPlannerData path;DecisionTraceData trace;trace.enabled=true;
+            auto& runtime=*map.corridorRuntime;
+            const auto poll=[&](bool approach) {
+                const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+                do {
+                    w.receiveTime+=.05;beginCorridorSearchFrame(runtime);
+                    buildCorridorTrackingPath(path,PathPlannerConfig{},w,map,m,160.,&trace);
+                    if(approach?runtime.soleGatewayApproachSelected:
+                        (runtime.committedGlobalPathReachesGateway && !runtime.globalRouteReplanRequested)) return true;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                } while(std::chrono::steady_clock::now()<deadline);
+                for(const auto& event:trace.frameEvents)std::cerr<<event<<'\n';
+                return false;
+            };
+            require(poll(true),"blocked sole gateway produced no safe approach");
+            require(!runtime.committedGlobalPathReachesGateway,"approach falsely completed the gateway");
+            require(runtime.trackingPathApproved,"approach not approved for actual tracking");
+            require(path.waypoints.back().x<132.,"approach penetrates the blocked gateway");
+            require(corridorTrackingPathIsSafe(path.waypoints,w,.3,nullptr,nullptr,&map),"approach intersects actor");
+            w.objects.clear();requestCorridorGlobalReplan(runtime);
+            require(poll(false),"opening the gate did not restore the complete route");
+            require(runtime.soleGatewayApproachPath.empty(),"stale approach masked the full route");
+            // A detour around the same gateway actor exists in the adjacent
+            // lane. The complete collision-free route MUST win over approach.
+            auto alternateMap=fixture();auto alternate=mission();auto aw=world(45.);
+            alternate.topologyAuthority=true;alternate.checkpoints=m.checkpoints;
+            auto& al=alternate.legs.front();al.topologyAuthority=true;al.finalLeg=true;
+            al.gatewayCheckpoint=al.toCheckpoint=1;al.gatewayLanes={{2,0,-3}};
+            al.targetLanes={{2,0,-3}};al.targetRoadS[{2,0,-3}]=80.;
+            obstacle(aw);aw.objects.front().raw.x=135.;aw.objects.front().raw.y=-8.75;
+            aw.objects.front().obb=makeObb2D(135.,-8.75,0.,4.,2.);
+            auto& ar=*alternateMap.corridorRuntime;
+            const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+            do {
+                aw.receiveTime+=.05;beginCorridorSearchFrame(ar);
+                buildCorridorTrackingPath(path,PathPlannerConfig{},aw,alternateMap,alternate,160.,&trace);
+                require(!ar.soleGatewayApproachSelected,"partial approach beat a valid complete detour");
+                if(ar.committedGlobalPathReachesGateway && !ar.globalRouteReplanRequested)break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            } while(std::chrono::steady_clock::now()<until);
+            require(ar.committedGlobalPathReachesGateway,"available alternate-lane detour was not found");
+            require(corridorTrackingPathIsSafe(ar.committedGlobalPath,aw,.3,nullptr,nullptr,&alternateMap),
+                    "preferred full detour collides with gateway blocker");
+            // A blocked sole exit must be approached IN its lane, not by
+            // truncating a late diagonal merge beside its stationary queue.
+            auto queuedMap=fixture();auto qm=alternate;auto qw=world(70.);
+            // Production laneGraph contains legal lateral links too. These
+            // are searchable APPROACH edges, never proof of an entry lane.
+            for(int road:{1,2}) for(int lane:{-1,-2}) {
+                queuedMap.laneGraph[{road,0,lane}].push_back({road,0,lane-1});
+                queuedMap.laneGraph[{road,0,lane-1}].push_back({road,0,lane});
+            }
+            qm.checkpoints[1].checkpoint.x=190.;
+            WorldObjectState queue;queue.raw.id=101;queue.raw.x=190.;
+            queue.raw.y=-8.75;queue.raw.length=24.;queue.raw.width=3.5;
+            queue.obb=makeObb2D(190.,-8.75,0.,24.,3.5);qw.objects={queue};
+            auto parallel=queue;parallel.raw.id=102;parallel.raw.x=184.;parallel.raw.y=-1.75;
+            parallel.obb=makeObb2D(184.,-1.75,0.,24.,3.5);qw.objects.push_back(parallel);
+            auto& qr=*queuedMap.corridorRuntime;
+            const auto queueDeadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+            do {
+                qw.receiveTime+=.05;beginCorridorSearchFrame(qr);
+                buildCorridorTrackingPath(path,PathPlannerConfig{},qw,queuedMap,qm,160.,&trace);
+                if(qr.soleGatewayApproachSelected)break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }while(std::chrono::steady_clock::now()<queueDeadline);
+            require(qr.soleGatewayApproachSelected,"entrance queue approach absent");
+            require(!qr.soleGatewayApproachPath.empty() &&
+                    qr.soleGatewayApproachPath.back().laneId==-3 &&
+                    std::abs(qr.soleGatewayApproachPath.back().y+8.75)<.1,
+                    "reachable entrance queue was replaced by waiting in a parallel lane");
+            require(corridorTrackingPathIsSafe(qr.soleGatewayApproachPath,qw,.3,nullptr,nullptr,&queuedMap),
+                    "gateway-lane approach ignored a real obstacle");
+            std::cout<<"sole gateway: safe approach / no false completion / opening replan PASS\n";return 0;
         }
         if(argc==3 && std::string(argv[1])=="--precomputed-mission-audit") {
             PathGeneratorData map;

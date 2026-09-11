@@ -26,8 +26,11 @@ speed:
   curve_target_kph: 30.0           # 곡률 기반 물리 상한이 더 낮으면 그 값을 적용
   sharp_curve_target_kph: 6.0     # 반경 5m급 connector에서 조향 slew 시간 확보
   school_zone_target_kph: 20.0     # 일반 목표보다 높이지 않음
+  school_zone_approach_target_kph: 25.0 # 진입 전 목표 상한; 구역 안 20km/h는 유지
 
 planning:
+  school_zone_approach_distance: 20.0 # [m] 앞범퍼가 진입 20m 전일 때까지 25km/h 이하
+  school_zone_approach_reaction_time: 0.5 # [s] 필터/제동 응답 여유를 속도에 비례해 추가
   comfortable_deceleration: 1.5   # [m/s^2] 정지 계획용 감속도
                                   # 2.5로 두면 목표 지점에 4.5 m/s로 도달해
                                   # 정지선/횡단보도를 4 m 가까이 지나쳐 선다.
@@ -87,7 +90,7 @@ planning:
   # 시뮬레이션 전용: 정지 위치에서 실제 대기 중, 움직인 적 없는 점유 객체의 정지 확인.
   # 처음부터 서 있는 보행자도 구분할 수 없는 정책이므로 실차에 사용하지 않는다.
   simulation_crosswalk_static_release: 1
-  crosswalk_static_confirmation_time: 3.0 # [s] 도착 전/신호 대기 시간은 제외; 움직임 확인 시 해제 취소
+  crosswalk_static_confirmation_time: 3.0 # [s] 최초는 정지 위치 대기, 같은 횡단보도 후속 객체는 정적 관측; 움직이면 해제 취소
   # 횡단보도 위 정지는 감점이다. 입구가 아니라 그 앞 정지선에 선다.
   crosswalk_stop_line_search: 15.0  # [m] 횡단보도 앞 정지선 탐색 거리
   # 전역 게이트웨이 회피경로를 기다리는 동안 사용하는 제한된 로컬 회피.
@@ -104,7 +107,7 @@ planning:
   # 신호·보행자·횡단보도 정지는 시간 제한 없이 유지한다. 0이면 비활성.
   simulation_progress_recovery: 1
   progress_recovery_stop_timeout: 3.0     # [s] 동적 위험 해소/정적 확정 이후 정체
-  progress_recovery_speed_kph: 3.0        # [km/h] 충돌 감수 탈출 속도
+  progress_recovery_speed_kph: 5.0        # [km/h] 충돌 감수 탈출 속도
   progress_recovery_max_speed_kph: 5.0    # [km/h] 이전 코드 기본 허용 상한과 동일
   progress_recovery_retry_interval: 0.5   # [s] 실패/정체 및 접촉 진행 중 후보 재탐색
   progress_recovery_search_budget_ms: 15.0 # [ms] 좌우·정면 후보 묶음 사이에서 확인하는 연성 예산
@@ -117,7 +120,7 @@ lane_change:
   lattice_lane_cost: 2.0
   lattice_curvature_cost: 30.0
   lattice_progress_cost: 1.0
-  lattice_obstacle_clearance: 0.30 # [m] 정적 장애물과 nominal OBB 사이 추종 오차 여유
+  lattice_obstacle_clearance: 0.50 # [m] 정적 장애물과 nominal OBB 사이 추종 오차 여유
   lattice_tight_obstacle_clearance: 0.05 # [m] 0.30m 후보가 전부 막힌 필수 회피에만 쓰는 최소 여유
   gateway_reserve_distance: 8.0  # [m] 마지막 합법적 횡이동 앞 여유
   obstacle_trigger_minimum_distance: 5.0  # [m] 정적으로 판단되면 대기 없이 즉시 회피 검토

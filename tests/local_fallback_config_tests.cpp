@@ -248,6 +248,23 @@ int main() {
             require(!file.load(change(source,"simulation_crosswalk_static_release",invalid),propsConfig),
                     "invalid simulation release switch accepted");
 
+        DrivingConfig schoolConfig;
+        auto oldSchool = withoutKey(source, "school_zone_approach_target_kph");
+        oldSchool = withoutKey(oldSchool, "school_zone_approach_distance");
+        oldSchool = withoutKey(oldSchool, "school_zone_approach_reaction_time");
+        require(file.load(oldSchool, schoolConfig) &&
+                std::abs(schoolConfig.planner.schoolZoneApproachSpeed - 25.0 / 3.6) < 1e-9 &&
+                schoolConfig.behavior.schoolZoneApproachDistance == 20.0,
+                "old config must load school approach defaults");
+        require(file.load(change(source, "school_zone_approach_target_kph", "24"), schoolConfig) &&
+                std::abs(schoolConfig.planner.schoolZoneApproachSpeed - 24.0 / 3.6) < 1e-9,
+                "school approach speed must convert km/h to m/s");
+        for (const auto& key : {"school_zone_approach_target_kph", "school_zone_approach_distance",
+                                "school_zone_approach_reaction_time"})
+            for (const auto& invalid : {"-1", "nan", "inf"})
+                require(!file.load(change(source, key, invalid), schoolConfig),
+                        "invalid school approach configuration accepted");
+
         std::cout << "local fallback configuration tests passed\n";
         return 0;
     } catch (const std::exception& error) {
