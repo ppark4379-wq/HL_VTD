@@ -1447,6 +1447,8 @@ void testPreviousLocalPathBridgesOneFrameSectionRebuildFailure() {
     planning.roadLanePlanner.config = planning.pathPlanner.config;
     planning.config = {};
     planning.laneChangeConfig = {};
+    planning.roadLanePlannerMissionLegValid = true;
+    planning.roadLanePlannerMissionLeg = 0;
 
     // 직전 프레임에 정상적으로 생성되어 아직 30 m 이상 남은
     // local path. 현재 프레임의 map에서는 의도적으로 새 경로를
@@ -2534,6 +2536,35 @@ void testNearestWaypointCannotJumpToOverlappingFutureBranch() {
     }
 }
 
+void testConsumedPathDoesNotSteerBackwards() {
+    for(double heading : {0., 1.2, -2.4}) {
+        PathPlannerData planner;
+        for(int i=0;i<=20;++i) {
+            Waypoint p;p.s=i;p.x=100.+i*std::cos(heading);
+            p.y=-30.+i*std::sin(heading);p.yaw=heading;
+            planner.waypoints.push_back(p);
+        }
+        planner.nearestIndex=19;
+        GtFrame gt;gt.ego.heading=heading;
+        const auto& end=planner.waypoints.back();
+        gt.ego.x=end.x+.3*std::cos(heading)-.4*std::sin(heading);
+        gt.ego.y=end.y+.3*std::sin(heading)+.4*std::cos(heading);
+        auto plan=runPurePursuit(planner,gt,1.4);
+        assert(plan.valid && plan.goalReached && plan.targetSpeed==0.);
+        assert(std::abs(plan.steering)<1e-9);
+        gt.ego.x=end.x+4.*std::cos(heading);
+        gt.ego.y=end.y+4.*std::sin(heading);
+        plan=runPurePursuit(planner,gt,1.4);
+        assert(!plan.valid && plan.targetSpeed==0.);
+        assert(std::abs(plan.steering)<1e-9);
+        gt.ego.x=end.x-8.*std::cos(heading);
+        gt.ego.y=end.y-8.*std::sin(heading);
+        planner.nearestIndex=12;
+        plan=runPurePursuit(planner,gt,1.4);
+        assert(plan.valid && !plan.goalReached && plan.targetSpeed>0.);
+    }
+}
+
 void testLaneGraphDoesNotInventMissingSectionLink() {
     PathGeneratorData map;
     map.sampleInterval = 0.5;
@@ -3023,7 +3054,7 @@ void testProgressRecoveryYieldsToUsableOrdinaryPath() {
         corridorTrackingPathIsSafe(ordinary, world, 0.3)));
 }
 
-void testDetachedStoredPlanArmsRecovery() {
+PathGeneratorData makeRecoveryRuntimeMap() {
     auto map=makeStraightTwoLaneMap();PrecomputedLaneNetwork network;
     for(const auto& entry:map.laneSegments) {
         PrecomputedLane raw;raw.key=entry.first;raw.topologyStatus="connected";
@@ -3037,6 +3068,11 @@ void testDetachedStoredPlanArmsRecovery() {
     }
     std::string error;
     assert(initializeCorridorRuntime(map,std::move(network),LaneChangeConfig{},&error));
+    return map;
+}
+
+void testDetachedStoredPlanArmsRecovery() {
+    auto map=makeRecoveryRuntimeMap();
     PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
     planning.roadLanePlanner=planning.pathPlanner;
     planning.roadLanePlannerMissionLegValid=true;planning.roadLanePlannerMissionLeg=0;
@@ -3052,13 +3088,189 @@ void testDetachedStoredPlanArmsRecovery() {
     world.egoObb=makeObb2D(111.3725,-1.75,0.,4.855,1.88);
     GtFrame gt;gt.ego=world.ego;
     runPlanningProcess(planning,gt,world,map,.05);
-    assert(planning.result.trackingPlan.valid && !planning.result.valid);
-    assert(planning.result.targetSpeed>.05);
+    // The old path is already behind Ego. It must arm recovery without
+    // advertising a valid PP target or steering back toward its endpoint.
+    assert(!planning.result.trackingPlan.valid && !planning.result.valid);
+    assert(std::abs(planning.result.trackingPlan.steering)<1e-9);
     for(int i=0;i<10;++i) {world.receiveTime+=.05;runPlanningProcess(planning,gt,world,map,.05);}
     assert(planning.progressRecovery.active && planning.progressRecovery.blockedTime>=.2);
-    // Recovery activation must never bypass invalid sensor observations.
+    // A failed map/path match with a finite measured pose must recover too.
     world.inputValid=false;runPlanningProcess(planning,gt,world,map,.05);
+    assert(planning.result.valid && planning.result.progressRecoveryActive);
+    assert(planning.result.targetSpeed>.05);
+    // Corrupt telemetry is a different authority: never synthesize a pose.
+    world.ego.heading=std::numeric_limits<float>::quiet_NaN();
+    gt.ego=world.ego;runPlanningProcess(planning,gt,world,map,.05);
     assert(!planning.progressRecovery.active && planning.progressRecovery.blockedTime==0.);
+}
+
+void testSimulationRecoveryStopEdgeCases() {
+    // Vary independent blockers through the production planner AND final
+    // actuator limiter; a positive planner speed alone is insufficient.
+    for(int variant=0;variant<8;++variant) {
+        auto map=makeRecoveryRuntimeMap();
+        PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
+        planning.config.simulationProgressRecovery=1.;
+        planning.config.progressRecoveryStopTimeout=.2;
+        auto& mission=planning.missionCorridor;
+        mission.valid=mission.initialized=mission.topologyAuthority=true;
+        mission.checkpoints.resize(1);mission.checkpoints[0].checkpoint.x=95.;
+        MissionLegData leg;leg.valid=leg.topologyAuthority=true;
+        leg.allowedLanes={{1,0,-1},{1,0,-2}};leg.gatewayLanes={{1,0,-1}};
+        leg.targetLanes={{1,0,-1}};leg.targetRoadS[{1,0,-1}]=95.;
+        mission.legs.push_back(leg);
+        auto world=makeWorldWithObstacle();world.egoSpeed=0.;world.trafficLight={};
+        WorldObjectState car;car.raw.id=91;car.raw.x=11.;car.raw.y=-1.75;
+        car.raw.length=8.;car.raw.width=8.;car.raw.height=1.5;
+        if(variant==1) car.raw.speed=1.; // moving-actor EBS must never time out
+        if(variant==2) {car.raw.length=1.;car.raw.width=1.;car.raw.height=1.8;}
+        car.obb=makeObb2D(car.raw.x,car.raw.y,0.,car.raw.length,car.raw.width);
+        world.objects={car};
+        if(variant==3) { // no lane-network geometry at all
+            map.corridorRuntime.reset();map.laneSegments.clear();
+            world.inputValid=world.egoLaneValid=world.egoPathValid=false;
+        }
+        if(variant==4) { // no reference or mission, but live finite telemetry
+            planning.pathPlanner.waypoints.clear();mission={};map.corridorRuntime.reset();
+        }
+        if(variant==5) { // missing graph start / consumed tail
+            world.ego.x=110.;world.ego.y=3.;world.egoRoadS=world.egoPathS=110.;
+            world.inputValid=world.egoLaneValid=world.egoPathValid=false;
+        }
+        if(variant==6 || variant==7) { // actual gateway queue, not an overlap
+            world.objects[0].raw.x=19.;
+            world.objects[0].obb=makeObb2D(19.,-1.75,0.,8.,8.);
+            planning.stationaryObjects={{91,100.,19.,-1.75,true,false}};
+        }
+        if(variant==7) {
+            // A red-light approach may not override a real queue wait.
+            mission.checkpoints[0].checkpoint.x=30.;
+            mission.legs[0].targetLanes={{1,0,-2}};
+            mission.legs[0].targetRoadS.clear();
+            mission.legs[0].targetRoadS[{1,0,-2}]=30.;
+            mission.legs[0].gatewayLanes={{1,0,-2}};
+            world.trafficLight.id=42;world.trafficLight.state=1;
+            StopLine stop;stop.id=88;stop.controllerId=42;stop.roadId=1;
+            stop.laneIds={-1};stop.routeS=30.;
+            stop.begin={30.,-3.5};stop.end={30.,0.};
+            map.staticZones.stopLines={stop};
+        }
+        world.egoObb=makeObb2D(world.ego.x+1.3725,world.ego.y,world.ego.heading,4.855,1.88);
+        GtFrame gt;gt.ego=world.ego;ControlProcessData control;
+        control.controller.hasPreviousAcceleration=true;control.controller.previousAcceleration=-10.;
+        bool sawRecovery=false;
+        for(int i=0;i<65;++i) {
+            world.receiveTime+=.05;
+            runPlanningProcess(planning,gt,world,map,.05);
+            runControlProcess(control,world,planning.result,.05);
+            if(variant==1 || variant==2) {
+                assert(planning.result.emergencyBrake && planning.result.targetSpeed==0.);
+                assert(!planning.result.progressRecoveryActive);
+                assert(control.latestCommand.targetAccel<0.);
+                continue;
+            }
+            if(i<15)continue;
+            if(variant==7) {
+                if(planning.result.progressRecoveryActive)
+                    std::cerr<<"signal queue frame="<<i<<" gap="
+                             <<soleGatewayQueueDistance(world,map,mission)
+                             <<" blockers="<<map.corridorRuntime->gatewayQueueBlockers.size()<<'\n';
+                assert(!planning.result.progressRecoveryActive);
+                assert(planning.result.stopReason==StopReason::RedLight);
+                assert(planning.result.stopDistanceValid && planning.result.stopDistance>2.);
+                assert(planning.result.targetSpeed==0. && control.latestCommand.targetAccel<0.);
+                continue;
+            }
+            if(!(planning.result.valid && planning.result.targetSpeed>.05 &&
+                 !planning.result.emergencyBrake && control.latestCommand.targetAccel>0.))
+                std::cerr<<"recovery edge variant="<<variant<<" frame="<<i
+                         <<" active="<<planning.result.progressRecoveryActive<<'\n';
+            assert(planning.result.valid && planning.result.targetSpeed>.05);
+            assert(!planning.result.emergencyBrake && control.latestCommand.targetAccel>0.);
+            sawRecovery=sawRecovery || planning.result.progressRecoveryActive;
+        }
+        if(variant==1 || variant==2) {
+            // Once danger is gone, a retained actuator brake must eventually
+            // release; keep Ego stationary to exercise the restart path.
+            world.objects.clear();
+            bool resumed=false;
+            for(int i=0;i<80;++i) {
+                world.receiveTime+=.05;
+                runPlanningProcess(planning,gt,world,map,.05);
+                runControlProcess(control,world,planning.result,.05);
+                resumed=resumed || (planning.result.valid && planning.result.targetSpeed>.05 &&
+                    !planning.result.emergencyBrake && control.latestCommand.targetAccel>0.);
+            }
+            assert(resumed);
+        } else if(variant!=7) assert(sawRecovery);
+        if(variant==3 || variant==4 || variant==5)
+            assert(planning.result.progressRecoveryGeometryFallback);
+        planning.config.simulationProgressRecovery=0.;
+        runPlanningProcess(planning,gt,world,map,.05);
+        assert(!planning.result.progressRecoveryActive);
+    }
+}
+
+void testStationaryContactRecoveryKeepsDriving() {
+    auto map=makeRecoveryRuntimeMap();
+    PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
+    planning.config.simulationProgressRecovery=1.;
+    planning.config.progressRecoveryStopTimeout=.2;
+    auto& mission=planning.missionCorridor;
+    mission.valid=mission.initialized=mission.topologyAuthority=true;
+    mission.checkpoints.resize(1);mission.checkpoints[0].checkpoint.x=95.;
+    MissionLegData leg;leg.valid=leg.topologyAuthority=true;
+    leg.allowedLanes={{1,0,-1},{1,0,-2}};leg.gatewayLanes={{1,0,-1}};
+    leg.targetLanes={{1,0,-1}};leg.targetRoadS[{1,0,-1}]=95.;
+    mission.legs.push_back(leg);
+    auto world=makeWorldWithObstacle();world.egoSpeed=0.;world.trafficLight={};
+    world.ego.x=10.;world.ego.y=-1.75;world.ego.heading=0.;
+    world.egoRoadS=world.egoPathS=10.;world.egoRoadId=1;world.egoLaneId=-1;
+    world.egoObb=makeObb2D(11.3725,-1.75,0.,4.855,1.88);
+    world.inputValid=world.egoLaneValid=world.egoPathValid=true;
+    WorldObjectState car;car.raw.id=91;car.raw.x=10.;car.raw.y=-1.75;
+    car.raw.length=4.4;car.raw.width=1.8;car.raw.height=1.5;
+    car.obb=makeObb2D(10.,-1.75,0.,4.4,1.8);world.objects={car};
+    planning.stationaryObjects={{91,100.,10.,-1.75,true,false}};
+    GtFrame gt;gt.ego=world.ego;ControlProcessData control;
+    for(int i=0;i<100;++i) {
+        world.receiveTime+=.05;
+        runPlanningProcess(planning,gt,world,map,.05);
+        runControlProcess(control,world,planning.result,.05);
+        if(i<60) continue; // confirmation, timeout and brake slew have expired
+        assert(planning.result.valid && planning.result.progressRecoveryActive);
+        assert(planning.result.progressRecoveryContactExpected);
+        assert(planning.result.targetSpeed>.05 && !planning.result.emergencyBrake);
+        assert(!control.safety.invalidInput && control.latestCommand.targetAccel>0.);
+    }
+    // A real transient emergency still overrides the contact drive command.
+    auto emergency=planning.result;emergency.emergencyBrake=true;
+    runControlProcess(control,world,emergency,.05);
+    assert(control.safety.emergencyBrakeApplied && control.latestCommand.targetAccel<0.);
+    // New moving actors must also interrupt an ALREADY active static escape.
+    world.objects.front().raw.speed=1.;
+    auto second=world.objects.front();second.raw.id=92;
+    world.objects.push_back(second);
+    for(int pass=0;pass<2;++pass) {
+        for(int i=0;i<35;++i) {
+            world.receiveTime+=.05;
+            runPlanningProcess(planning,gt,world,map,.05);
+            runControlProcess(control,world,planning.result,.05);
+            assert(planning.result.emergencyBrake && planning.result.targetSpeed==0.);
+            assert(!planning.result.progressRecoveryActive);
+            assert(control.safety.emergencyBrakeApplied && control.latestCommand.targetAccel<0.);
+        }
+        world.objects.erase(world.objects.begin());
+    }
+    bool resumed=false;
+    for(int i=0;i<80;++i) {
+        world.receiveTime+=.05;
+        runPlanningProcess(planning,gt,world,map,.05);
+        runControlProcess(control,world,planning.result,.05);
+        resumed=resumed || (planning.result.valid && planning.result.targetSpeed>.05 &&
+            !planning.result.emergencyBrake && control.latestCommand.targetAccel>0.);
+    }
+    assert(resumed);
 }
 
 void testGatewayHandoffChecksAttachedConnectorAndFullTail() {
@@ -3245,46 +3457,51 @@ void testCrosswalkUsersAndStopDistanceGuard() {
 }
 
 void testSoleGatewayEntranceQueue() {
-    WorldState world;world.ego.x=0.;world.ego.y=0.;world.ego.heading=0.;
-    world.egoObb=makeObb2D(0,0,0,4.8,1.9);
+    WorldState world;world.egoObb=makeObb2D(0.,0.,0.,4.8,1.9);
     WorldObjectState bus;bus.raw.id=11;bus.raw.x=12.;bus.raw.length=12.;
-    bus.raw.width=2.5;bus.raw.heading=0.;bus.raw.speed=0.;world.objects={bus};
+    bus.raw.width=2.5;bus.obb=makeObb2D(12.,0.,0.,12.,2.5);world.objects={bus};
     PathGeneratorData map;map.corridorRuntime=std::make_shared<CorridorRuntime>();
-    auto& r=*map.corridorRuntime;r.activeLeg=0;r.soleGatewayApproachBlocker=11;
-    r.soleGatewayApproachPath.resize(2);r.network.points.resize(2);
-    r.network.points[0].pose.x=20.;r.gatewayCost={20.,0.};
-    PrecomputedLaneConnection link;link.from={1,0,-1};link.to={2,0,-1};
-    link.fromPoint=0;link.toPoint=1;link.junctionId=1;r.network.connections={link};
+    auto& r=*map.corridorRuntime;r.activeLeg=0;
     MissionCorridorData mission;mission.valid=true;mission.legs.resize(1);
-    auto& leg=mission.legs[0];leg.valid=true;leg.gatewayLanes.insert(link.to);
-    leg.allowedLanes={link.from,link.to};
-    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission)));
-    r.network.points[0].pose.x=32.; // 14m before entry: long-vehicle queue
-    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission)));
-    r.network.points[0].pose.x=50.;
-    assert(std::isinf(soleGatewayQueueDistance(world,map,mission))); // mid-approach: bypass
-    StopLine pointLine;pointLine.begin={32.,0.};pointLine.end=pointLine.begin;
-    map.staticZones.stopLines={pointLine};
-    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission))); // point-form stop line
+    auto& leg=mission.legs[0];leg.valid=true;leg.gatewayLanes={{2,0,-1}};
+    // No route-search conclusion yet: distance alone does not create a queue.
+    StopLine line;line.begin={20.,0.};line.end=line.begin;
+    map.staticZones.stopLines={line};
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission)));
+    r.gatewayQueueBlockers={11}; // completed full search found no safe passage
+    const double gap=soleGatewayQueueDistance(world,map,mission);
+    assert(std::isfinite(gap));
+    r.activeGatewayObserved=true;world.trafficLight={};
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission)));
+    r.activeGatewayObserved=false;
+    assert(soleGatewayQueueDistance(world,map,mission)==gap);
+    assert(r.soleGatewayApproachPath.empty()); // no dependency on approach adoption
+    map.staticZones.stopLines[0].begin.x=200.;
+    map.staticZones.stopLines[0].end.x=200.;
+    assert(soleGatewayQueueDistance(world,map,mission)==gap);
     map.staticZones.stopLines.clear();
-    auto front=bus;front.raw.id=12;front.raw.x=28.;world.objects.push_back(front);
-    front.raw.id=13;front.raw.x=44.;world.objects.push_back(front);
-    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission))); // three-car queue
-    world.objects.resize(1);
-    r.network.points[0].pose.x=20.;world.objects[0].raw.speed=1.;
-    assert(std::isinf(soleGatewayQueueDistance(world,map,mission))); // ordinary dynamic follow
-    world.objects[0].raw.speed=0.;r.soleGatewayApproachPath.clear();
-    assert(std::isinf(soleGatewayQueueDistance(world,map,mission))); // safe full route wins
-    r.soleGatewayApproachPath.resize(2);leg.gatewayLanes.insert({2,0,-2});
-    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission))); // all gateways blocked
-    r.soleGatewayApproachPath.clear();
-    assert(std::isinf(soleGatewayQueueDistance(world,map,mission))); // one clear gateway wins
-    leg.targetLanes={link.to};leg.targetRoadS[link.to]=30.;
+    assert(soleGatewayQueueDistance(world,map,mission)==gap);
+    world.ego.y=3.5;world.egoObb=makeObb2D(0.,3.5,0.,4.8,1.9);
+    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission)));
+    // An approved, attached complete bypass always wins over old queue evidence.
+    for(int i=0;i<60;++i) {
+        Waypoint p;p.x=p.s=i;p.y=3.5;r.committedGlobalPath.push_back(p);
+    }
+    r.committedGlobalPathReachesGateway=true;
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission)));
+    r.committedGlobalPathReachesGateway=false;
+    world.objects[0].raw.speed=1.;
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission)));
+    world.objects[0].raw.speed=0.;leg.gatewayLanes.insert({2,0,-2});
+    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission)));
+    r.gatewayQueueBlockers.clear(); // new search found a passage
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission)));
+    leg.targetLanes={{2,0,-1}};leg.targetRoadS[{2,0,-1}]=30.;
     Waypoint a;a.roadId=1;a.laneId=-1;
     Waypoint b=a;b.roadS=50.;
-    assert(!queuedGatewayBypassIsComplete({a,b},mission)); // clear parallel lane is insufficient
+    assert(!queuedGatewayBypassIsComplete({a,b},mission));
     b.roadId=2;b.roadS=10.;
-    assert(!queuedGatewayBypassIsComplete({a,b},mission)); // not past gateway exit station
+    assert(!queuedGatewayBypassIsComplete({a,b},mission));
     b.roadS=31.;
     assert(queuedGatewayBypassIsComplete({a,b},mission));
 }
@@ -3405,6 +3622,182 @@ void testSettledStraightManeuverSpeedCap() {
     assert(cap()==slow);
 }
 
+void testYellowAndFlashingRedStops() {
+    struct Scene {
+        PathGeneratorData map{makeStraightTwoLaneMap()};
+        PlanningProcessData planning;
+        WorldState world{makeWorldWithObstacle()};
+        Scene() {
+            planning.pathPlanner=makeStraightGlobalPath();
+            planning.config.simulationCrosswalkStaticRelease=1.;
+            planning.config.simulationProgressRecovery=1.;
+            world.objects.clear();world.egoSpeed=0.;world.frontBumperOffset=3.8;
+            world.trafficLight.id=42;world.trafficLight.state=6;
+            StopLine stop;stop.id=88;stop.controllerId=42;stop.roadId=1;
+            stop.laneIds={-1};stop.routeS=15.;
+            stop.begin={15.,-3.5};stop.end={15.,0.};
+            map.staticZones.stopLines={stop};
+            map.staticZones.flashingRedControllerIds={42};
+            Crosswalk crossing;crossing.id=77;crossing.roadId=1;
+            crossing.entryRouteS=20.;crossing.exitRouteS=26.;
+            crossing.polygon={{20.,-8.},{26.,-8.},{26.,8.},{20.,8.}};
+            map.staticZones.crosswalks={crossing};
+        }
+        void step(double dt=.05) {
+            world.receiveTime+=dt;GtFrame gt;gt.ego=world.ego;
+            runPlanningProcess(planning,gt,world,map,dt);
+        }
+        void distance(double d) {
+            world.frontBumperPathS=15.-d;
+            world.egoRoadS=world.egoPathS=world.frontBumperPathS-3.8;
+            world.ego.x=world.egoPathS;
+            world.egoObb=makeObb2D(world.ego.x+1.3725,-1.75,0.,4.855,1.88);
+        }
+    };
+    for(double distance:{1.2,2.9,15.}) {
+        Scene yellow;yellow.distance(distance);yellow.world.egoSpeed=4.2;
+        yellow.world.trafficLight.state=2;yellow.step();
+        assert(yellow.planning.result.stopReason==StopReason::RedLight);
+        const double target=yellow.planning.result.targetSpeed;
+        yellow.world.trafficLight.state=1;yellow.step();
+        assert(yellow.planning.result.stopReason==StopReason::RedLight);
+        assert(std::abs(yellow.planning.result.targetSpeed-target)<1e-9);
+        yellow.world.trafficLight.state=3;yellow.step();
+        assert(yellow.planning.result.stopReason==StopReason::None);
+    }
+    for(double distance:{0.,1.2,1.9,2.0}) {
+        Scene empty;empty.distance(distance);
+        for(int i=0;i<9;++i) {empty.step();assert(!empty.planning.stopManager.hold.holdSatisfied);}
+        empty.step();assert(empty.planning.stopManager.hold.holdSatisfied);
+        assert(empty.planning.result.stopReason==StopReason::None);
+        assert(empty.planning.result.targetSpeed>0.);
+        empty.world.egoSpeed=1.;empty.step();
+        assert(empty.planning.result.stopReason==StopReason::None); // one stop suffices
+        empty.world.trafficLight.state=0;empty.step();
+        empty.world.trafficLight.state=6;empty.step();
+        assert(empty.planning.result.stopReason==StopReason::None); // packet gap is not another stop
+        empty.map.staticZones.stopLines.front().id=89;empty.world.egoSpeed=0.;empty.step();
+        assert(!empty.planning.stopManager.hold.holdSatisfied); // another line needs its own stop
+    }
+    for(double distance:{-.1,2.01,4.}) {
+        Scene outside;outside.distance(distance);
+        for(int i=0;i<25;++i)outside.step();
+        assert(!outside.planning.stopManager.hold.holdSatisfied);
+        assert(outside.planning.result.stopReason==StopReason::FlashingRed);
+    }
+    Scene interrupted;interrupted.distance(1.2);
+    for(int i=0;i<6;++i)interrupted.step();
+    interrupted.world.egoSpeed=.1;interrupted.step();
+    assert(interrupted.planning.stopManager.hold.stoppedTime==0.);
+    interrupted.world.egoSpeed=0.;
+    for(int i=0;i<9;++i)interrupted.step();
+    assert(!interrupted.planning.stopManager.hold.holdSatisfied);
+    interrupted.step();assert(interrupted.planning.stopManager.hold.holdSatisfied);
+    Scene delayed;delayed.distance(1.2);delayed.step(3.);
+    assert(!delayed.planning.stopManager.hold.holdSatisfied);
+    Scene unspecified;unspecified.map.staticZones.flashingRedControllerIds.clear();
+    unspecified.step();assert(unspecified.planning.result.stopReason==StopReason::FlashingRed);
+    Scene pedestrian;pedestrian.distance(1.2);
+    WorldObjectState actor;actor.raw.id=9;actor.raw.x=23.;actor.raw.y=7.9;
+    actor.raw.length=.5;actor.raw.width=.6;actor.raw.height=1.7;
+    actor.obb=makeObb2D(23.,7.9,0.,.5,.6);pedestrian.world.objects={actor};
+    for(int i=0;i<100;++i) {
+        pedestrian.step();assert(pedestrian.planning.result.targetSpeed==0.);
+    }
+    assert(pedestrian.planning.stopManager.hold.holdSatisfied);
+    assert(pedestrian.planning.result.stopReason==StopReason::CrosswalkBlocked);
+    pedestrian.world.objects.front().raw.y=8.2;
+    pedestrian.world.objects.front().obb=makeObb2D(23.,8.2,0.,.5,.6);
+    pedestrian.step();assert(pedestrian.planning.result.targetSpeed==0.); // body still overlaps
+    pedestrian.world.objects.clear();
+    for(int i=0;i<22;++i)pedestrian.step(); // existing crossing clearance margin
+    assert(pedestrian.planning.result.stopReason==StopReason::None);
+    assert(pedestrian.planning.result.targetSpeed>0.);
+}
+
+void testRecoveryApproachesSignalStopLine() {
+    // Missing ordinary geometry must not turn a distant signal plan into
+    // immediate braking. Exercise the planner and final actuator together.
+    for (int signal : {1, 2, 6}) {
+        PathGeneratorData map;
+        StopLine stop; stop.id=88; stop.controllerId=42; stop.roadId=1;
+        stop.laneIds={-1}; stop.routeS=60.;
+        stop.begin={60.,-3.5}; stop.end={60.,0.};
+        map.staticZones.stopLines={stop};
+        PlanningProcessData planning;
+        planning.config.simulationProgressRecovery=1.;
+        planning.config.progressRecoveryStopTimeout=.2;
+        planning.config.progressRecoverySpeed=5./3.6;
+        planning.config.comfortableDeceleration=1.5;
+        planning.progressRecovery.active=true;
+        planning.progressRecovery.missionLeg=planning.missionCorridor.activeLegIndex;
+        planning.progressRecovery.planner=makeStraightGlobalPath();
+        // The recovery path has a different station origin from the guide.
+        // Regulatory distance must remain in the sensed guide coordinates.
+        for (auto& p:planning.progressRecovery.planner.waypoints) p.s+=1000.;
+        auto world=makeWorldWithObstacle(); world.objects.clear();
+        world.frontBumperOffset=3.8; world.egoSpeed=5./3.6;
+        world.trafficLight.id=42; world.trafficLight.state=3;
+        ControlProcessData control;
+        const auto step=[&] {
+            world.receiveTime+=.05;
+            world.egoRoadS=world.egoPathS=world.ego.x;
+            world.frontBumperPathS=world.egoPathS+world.frontBumperOffset;
+            world.egoObb=makeObb2D(world.ego.x+1.3725,-1.75,0.,4.855,1.88);
+            GtFrame gt; gt.ego=world.ego;
+            runPlanningProcess(planning,gt,world,map,.05);
+            runControlProcess(control,world,planning.result,.05);
+        };
+        step();
+        assert(planning.result.progressRecoveryActive && planning.result.targetSpeed>.05);
+        world.trafficLight.state=signal;
+        step();
+        assert(planning.result.progressRecoveryActive && planning.result.targetSpeed>.05);
+        assert(planning.result.stopDistanceValid);
+        assert(std::abs(planning.result.stopDistance-46.2)<1e-5);
+        assert(planning.result.stopReason==(signal==6?StopReason::FlashingRed:StopReason::RedLight));
+        assert(control.latestCommand.targetAccel>=-.01);
+        bool stoppedAtLine=false;
+        for (int i=0;i<1400;++i) {
+            step();
+            const double distance=60.-world.frontBumperPathS;
+            assert(planning.result.stopDistanceValid);
+            assert(std::abs(planning.result.stopDistance-distance)<1e-5);
+            assert(!planning.result.emergencyBrake);
+            assert(distance>=0.);
+            if (distance>2.) {
+                assert(planning.result.targetSpeed>.05);
+                assert(world.egoSpeed>.05);
+            }
+            if (world.egoSpeed<=.01 && planning.result.targetSpeed<=.05) {
+                assert(distance<=2.);
+                stoppedAtLine=true;
+                std::cout<<"recovery signal="<<signal<<" front_bumper_distance="<<distance<<'\n';
+                break;
+            }
+            const double nextSpeed=std::max(0.,world.egoSpeed+control.latestCommand.targetAccel*.05);
+            world.ego.x+=.5*(world.egoSpeed+nextSpeed)*.05;
+            world.egoSpeed=nextSpeed;
+        }
+        assert(stoppedAtLine);
+        if (signal==6) {
+            for (int i=0;i<5;++i) {step();assert(!planning.stopManager.hold.holdSatisfied);}
+            for (int i=0;i<10;++i) step();
+            assert(planning.stopManager.hold.holdSatisfied);
+        } else {
+            for (int i=0;i<40;++i) {
+                step();
+                assert(planning.result.targetSpeed==0.);
+                assert(control.latestCommand.targetAccel<0.);
+            }
+            world.trafficLight.state=3;
+        }
+        for (int i=0;i<20;++i) step();
+        assert(planning.result.stopReason==StopReason::None);
+        assert(planning.result.targetSpeed>.05 && control.latestCommand.targetAccel>0.);
+    }
+}
+
 void testStationaryCrosswalkWaitReleasesOnlyYield() {
     auto map=makeStraightTwoLaneMap();
     PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
@@ -3441,10 +3834,40 @@ void testStationaryCrosswalkWaitReleasesOnlyYield() {
 }
 
 int main(int argc, char** argv) {
+    if(argc==2 && std::string(argv[1])=="--recovery-signal-approach") {
+        testRecoveryApproachesSignalStopLine();
+        std::cout<<"recovery signal approach / bumper stop / release PASS\n";
+        return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--signal-stop-policy") {
+        testYellowAndFlashingRedStops();
+        std::cout<<"yellow stop / flashing red continuous stop / pedestrian clearance PASS\n";
+        return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--consumed-path") {
+        testConsumedPathDoesNotSteerBackwards();
+        testDetachedStoredPlanArmsRecovery();
+        testPreviousLocalPathBridgesOneFrameSectionRebuildFailure();
+        std::cout<<"consumed path steering / recovery PASS\n";return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--contact-progress") {
+        testStationaryContactRecoveryKeepsDriving();
+        std::cout<<"stationary contact / positive actuator command / emergency override PASS\n";
+        return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--gateway-queue") {
+        testSoleGatewayEntranceQueue();
+        std::cout<<"gateway queue / adjacent lane / upstream obstacle PASS\n";return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--progress-recovery-handoff") {
         testProgressRecoveryYieldsToUsableOrdinaryPath();
         testDetachedStoredPlanArmsRecovery();
         std::cout << "progress recovery / ordinary path authority PASS\n";
+        return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--recovery-stop-edges") {
+        testSimulationRecoveryStopEdgeCases();
+        std::cout<<"simulation recovery / repeated EBS / exhausted geometry / unsignalized queue PASS\n";
         return 0;
     }
     if (argc == 2 && std::string(argv[1]) == "--gateway-route-handoff") {

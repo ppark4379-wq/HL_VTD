@@ -46,7 +46,7 @@
             <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_White" Name="Ego"/>
             <Init>
                 <Speed Value="0.0000000000000000e+00"/>
-                <PosAbsolute X="1.1124522294921876e+03" Y="-2.5615583038330072e+01" Z="6.4880297325000001e+01" Direction="2.5226671520056261e+00" AlignToRoad="true"/>
+                <PosAbsolute X="1.3810899999999999e+03" Y="-1.9222499999999999e+02" Z="6.4880300000000005e+01" Direction="3.2937853643636985e+00" AlignToRoad="true"/>
             </Init>
         </Player>
         <Player>
@@ -192,7 +192,7 @@
         <PlayerActions Player="New Player01">
             <Action Name="">
                 <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.1000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="1.1000000000000000e+01" X="1.1124522294921876e+03" Y="-2.5615583038330072e+01"/>
+                <EditorPos Radius="1.1000000000000000e+01" X="1.3810899999999999e+03" Y="-1.9222499999999999e+02"/>
                 <LaneChange Direction="-1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="5.0000000000000000e+00" Time="2.0000000000000000e+00"/>
                 <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="7.5000000000000000e+00"/>
             </Action>
@@ -312,7 +312,7 @@
             <Waypoint X="1.3171250000000000e+03" Y="-2.0007101440429688e+02" Options="0x00000000" Z="7.8555611067000001e+01" Weight="1.0000000000000000e+00" Yaw="2.7091828106021625e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
             <Waypoint X="1.3058920898437500e+03" Y="-1.9488656616210938e+02" Options="0x00000000" Z="7.8555611067000001e+01" Weight="1.0000000000000000e+00" Yaw="2.4096672973108704e+00" Pitch="5.1309436628335384e-02" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
             <Waypoint X="1.0881779785156250e+03" Y="7.0579910278320312e-01" Options="0x00000000" Z="6.3525679474999997e+01" Weight="1.0000000000000000e+00" Yaw="1.2915193546430537e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
-            <Waypoint X="1.0924495849609375e+03" Y="1.5601295471191406e+01" Options="0x00000000" Z="6.3525679474999997e+01" Weight="1.0000000000000000e+00" Yaw="5.8318174553376478e-01" Pitch="2.9446343070323115e-02" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="1.0924495849609375e+03" Y="1.5601295471191406e+01" Options="0x00000000" Z="6.3525679474999997e+01" Weight="1.0000000000000000e+00" Yaw="5.8318174553376467e-01" Pitch="2.9446343070323115e-02" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
             <Waypoint X="1.3296791992187500e+03" Y="1.7210771179199219e+02" Options="0x00000000" Z="5.5154479174999999e+01" Weight="1.0000000000000000e+00" Yaw="1.0707237570807631e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
             <Waypoint X="1.3391412353515625e+03" Y="1.8942486572265625e+02" Options="0x00000000" Z="5.5154479174999999e+01" Weight="1.0000000000000000e+00" Yaw="1.7314229987492671e+00" Pitch="6.2780336995622585e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
             <Waypoint X="1.3210849609375000e+03" Y="3.0086785888671875e+02" Options="0x00000000" Z="5.5736081650000003e+01" Weight="1.0000000000000000e+00" Yaw="1.7314229987492671e+00" Pitch="6.2780336995622585e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
@@ -352,7 +352,7 @@
         <CharacterActions Character="New Character">
             <Action Name="">
                 <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.3000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="1.3000000000000000e+01" X="1.1124522294921876e+03" Y="-2.5615583038330072e+01"/>
+                <EditorPos Radius="1.3000000000000000e+01" X="1.3810899999999999e+03" Y="-1.9222499999999999e+02"/>
                 <Motion Move="jog" Rate="0.0000000000000000e+00" Speed="2.4749999046325684e+00" Force="false" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
                 <CharacterPath Loop="false" PathShape="2" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Beam="true" ClampToGround="false"/>
             </Action>

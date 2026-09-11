@@ -1,0 +1,2 @@
+1
+mapped turn lost all tracking geometry

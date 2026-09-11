@@ -1,0 +1,34 @@
+{
+  "scope": "diagnosis only; production code unchanged after analysis-only request",
+  "snapshot_time_s": 0.2144,
+  "geometry_witness_scope": "first two obstacles and lane return before gateway, not a full new closed-loop route",
+  "witness_candidates_checked": 2304,
+  "witness_candidates_passing": 216,
+  "first_passing_witness": {
+    "offset": "0.75",
+    "on_start": "12",
+    "on_end": "28",
+    "off_start": "48",
+    "off_end": "55",
+    "clearance": "0.05",
+    "surface_ok": "1",
+    "collision_free": "1",
+    "max_curvature": "0.0864392",
+    "blocker": "-1",
+    "reason": ""
+  },
+  "global_candidate_offsets_m": [
+    -0.36,
+    0,
+    0.36
+  ],
+  "approximate_clear_lateral_interval_at_0_05_m_margin": [
+    0.730534918,
+    0.930963218
+  ],
+  "local_initial_connection_length_m": 0.280246,
+  "curve_minimum_length_m": 3.0,
+  "m16_prior_progress_fix_live_goal_reached": true,
+  "m16_prior_progress_fix_live_duration_s": 474.817469,
+  "m16_prior_progress_fix_live_collision_frames": 396
+}

@@ -319,7 +319,7 @@ void printMapReadiness(const StaticZoneData& zones,
                   << schoolZoneTargetSpeed * 3.6 << " km/h\n";
     }
     if (zones.flashingRedControllerIds.empty()) {
-        std::cout << "[config-warning] no packet traffic-light ID is marked as flashing red\n";
+        std::cout << "[map] flashing signal color unspecified: stop once, then yield to pedestrians\n";
     }
     if (!zones.finish.valid) {
         std::cout << "[config-warning] official finish coordinate is not configured\n";
@@ -523,7 +523,29 @@ int main(int argc, char* argv[]) {
             return std::chrono::duration<double, std::milli>(end - begin).count();
         };
 
-        while (receiveGtFrame(receiver)) {
+        bool waitingForGt = false;
+        while (true) {
+            if (!receiveGtFrame(receiver)) {
+                if (!didVtdReceiveTimeOut(receiver.client)) break;
+                if (!waitingForGt) {
+                    if (!options.receive_only) {
+                        ControlCommand timeoutCommand{};
+                        timeoutCommand.targetAccel = static_cast<float>(
+                            drivingConfig.controller.minAcceleration);
+                        sendControlCommand(receiver.client, timeoutCommand);
+                    }
+                    std::cerr << "[safety] GT receive timeout; waiting for fresh input to resume\n";
+                }
+                waitingForGt = true;
+                // Preserve partial packet bytes and retry this connection.
+                // A temporary GT pause must not terminate the controller and
+                // leave the last emergency brake latched after GT returns.
+                continue;
+            }
+            if (waitingForGt) {
+                std::cout << "[network] GT input resumed; control loop resumed\n";
+                waitingForGt = false;
+            }
             const auto loopStart = timingNow();
             const GtFrame& gt = getLatestGtFrame(receiver);
             if (!isRdbClockConnected(rdbClock) &&
@@ -645,14 +667,6 @@ int main(int argc, char* argv[]) {
                 std::cout << "[drive] goal reached\n";
                 break;
             }
-        }
-
-        if (didVtdReceiveTimeOut(receiver.client)) {
-            ControlCommand timeoutCommand{};
-            timeoutCommand.targetAccel = static_cast<float>(
-                drivingConfig.controller.minAcceleration);
-            sendControlCommand(receiver.client, timeoutCommand);
-            std::cerr << "[safety] GT receive timeout; emergency brake sent\n";
         }
 
         disconnectGtReceiver(receiver);

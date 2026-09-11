@@ -90,7 +90,7 @@ class ExtractionTests(unittest.TestCase):
         for column in ("Static obstacle", "Lane change", "Speed change"):
             self.assertEqual(rows["M05"][column], "")
         self.assertEqual(rows["M14"]["Pedestrian"], "")
-        self.assertEqual(list(rows), [f"M{i:02d}" for i in range(1, 19)])
+        self.assertEqual(list(rows), [f"M{i:02d}" for i in range(1, 21)])
         for scenario_id in ("M15", "M16", "M17"):
             self.assertTrue(all(v == CHECK for k, v in rows[scenario_id].items() if k != "Scenario"))
         self.assertEqual(rows["M18"]["Lane change"], "")

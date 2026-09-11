@@ -1,0 +1,55 @@
+{
+  "M19-01": {
+    "run": "output/verification/M19-01/m19_join_verify_20260912_0238",
+    "duration_s": 61.8190358,
+    "goal_reached": true,
+    "collision_frames": 0,
+    "max_abs_planned_steering_rad": 0.354236958,
+    "steering_saturated_frames": 0,
+    "roads": [
+      "100",
+      "1172",
+      "1139",
+      "1145",
+      "211",
+      "679",
+      "208",
+      "3261"
+    ],
+    "planning_p95_ms": 0.29352
+  },
+  "M20": {
+    "run": "output/verification/M20/m20_steering_verify_20260912_0240",
+    "duration_s": 85.274581,
+    "goal_reached": true,
+    "collision_frames": 157,
+    "max_abs_planned_steering_rad": 0.376924008,
+    "steering_saturated_frames": 0,
+    "roads": [
+      "126",
+      "2426",
+      "1094",
+      "1043"
+    ],
+    "planning_p95_ms": 11.644077
+  },
+  "M19": {
+    "run": "output/verification/M19/m19_inline_verify_20260912_0245",
+    "duration_s": 60.059795,
+    "goal_reached": true,
+    "collision_frames": 0,
+    "max_abs_planned_steering_rad": 0.358881343,
+    "steering_saturated_frames": 0,
+    "roads": [
+      "100",
+      "1172",
+      "1139",
+      "1145",
+      "211",
+      "679",
+      "208",
+      "3261"
+    ],
+    "planning_p95_ms": 0.251391
+  }
+}

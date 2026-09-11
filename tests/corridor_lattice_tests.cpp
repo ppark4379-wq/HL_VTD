@@ -79,10 +79,27 @@ void m08StaticObjects(WorldState& w) {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2 && std::string(argv[1])=="--gateway-prefix") {
+            auto map=fixture();auto m=mission(true);auto w=world(10.);
+            m.topologyAuthority=true;m.checkpoints.resize(2);
+            auto& leg=m.legs[0];leg.topologyAuthority=true;leg.finalLeg=true;
+            leg.gatewayCheckpoint=leg.toCheckpoint=1;leg.gatewayLanes={{2,0,-3}};
+            leg.targetRoadS[{2,0,-3}]=80.;
+            PathPlannerData tracking;auto& r=*map.corridorRuntime;
+            beginCorridorSearchFrame(r);
+            require(buildCorridorTrackingPath(tracking,PathPlannerConfig{},w,map,m,160.,nullptr),
+                    "pending gateway search lost its reachable approach prefix");
+            require(std::isfinite(r.trackingGatewayStopDistance),
+                    "unfinished gateway alignment has no braking endpoint");
+            require(tracking.waypoints.back().x<100.,
+                    "fallback continued straight beyond the gateway lane-change window");
+            require(m.activeLegIndex==0,"prefix advanced the mission");
+            std::cout<<"gateway prefix / stop before unreachable straight suffix PASS\n";return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--tight-map-corner") {
             // Generic right-angle connector: no scenario/road ID dependency.
             // The broad driving surface admits a larger-radius body sweep.
-            for(double radius:{4.,10.}) {
+            for(double radius:{4.,10.}) for(bool sourceSeams:{false,true}) {
                 PathGeneratorData map;PrecomputedLaneNetwork network;
                 Road road;road.id=1;road.length=100.;
                 LaneSection section;LaneDefinition lane;lane.id=-1;lane.type="driving";
@@ -104,6 +121,10 @@ int main(int argc,char** argv) {
                         p.pose.x=30.+radius;p.pose.y=-radius-(s-30.-arcLength);
                         p.pose.yaw=-std::acos(-1.)/2.;
                     }
+                    // Short source derivative seams must get the same
+                    // feasible corner search as a sustained over-limit arc.
+                    if(sourceSeams && s>30. && s<30.+arcLength)
+                        p.pose.yaw+=(i%2 ? .04 : -.04);
                     if(i<400)p.nextPoint=i+1;
                     raw.pointIds.push_back(i);segment.points.push_back(p.pose);network.points.push_back(p);
                 }
@@ -754,6 +775,86 @@ int main(int argc,char** argv) {
                     "reachable entrance queue was replaced by waiting in a parallel lane");
             require(corridorTrackingPathIsSafe(qr.soleGatewayApproachPath,qw,.3,nullptr,nullptr,&queuedMap),
                     "gateway-lane approach ignored a real obstacle");
+            // Advance into the approved lane change, then complete another
+            // global search against the unchanged queue. Replanning must not
+            // move the lane-change geometry forward underneath the tracker.
+            const auto committedQueue=qr.soleGatewayApproachPath;
+            const auto shift=std::find_if(committedQueue.begin(),committedQueue.end(),
+                [&](const auto& p){return std::abs(p.y-qw.ego.y)>.4;});
+            require(shift!=committedQueue.end(),"queue fixture has no lateral approach");
+            qw.ego.x=shift->x;qw.ego.y=shift->y;qw.ego.heading=shift->yaw;
+            qw.egoRoadId=shift->roadId;qw.egoSectionIndex=shift->sectionIndex;
+            qw.egoLaneId=shift->laneId;qw.egoRoadS=shift->roadS;qw.egoPathS=shift->s;
+            qw.egoObb=makeObb2D(qw.ego.x+1.3725*std::cos(qw.ego.heading),
+                qw.ego.y+1.3725*std::sin(qw.ego.heading),qw.ego.heading,4.855,1.88);
+            requestCorridorGlobalReplan(qr);
+            bool refreshed=false;
+            const auto refreshDeadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+            do {
+                qw.receiveTime+=.05;beginCorridorSearchFrame(qr);
+                buildCorridorTrackingPath(path,PathPlannerConfig{},qw,queuedMap,qm,160.,&trace);
+                if(qr.globalRouteSearchFailed) {refreshed=true;break;}
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }while(std::chrono::steady_clock::now()<refreshDeadline);
+            require(refreshed,"queue refresh did not finish");
+            require(qr.soleGatewayApproachPath.size()==committedQueue.size() &&
+                std::equal(committedQueue.begin(),committedQueue.end(),qr.soleGatewayApproachPath.begin(),
+                    [](const auto& a,const auto& b){return a.x==b.x && a.y==b.y && a.yaw==b.yaw;}),
+                "unchanged queue replanning replaced an attached lane change and deferred entry");
+            const auto waiting=committedQueue[committedQueue.size()-25];
+            qw.ego.x=waiting.x;qw.ego.y=waiting.y;qw.ego.heading=waiting.yaw;
+            qw.egoRoadId=waiting.roadId;qw.egoSectionIndex=waiting.sectionIndex;
+            qw.egoLaneId=waiting.laneId;qw.egoRoadS=waiting.roadS;qw.egoPathS=waiting.s;
+            qw.egoObb=makeObb2D(qw.ego.x+1.3725*std::cos(qw.ego.heading),
+                qw.ego.y+1.3725*std::sin(qw.ego.heading),qw.ego.heading,4.855,1.88);
+            beginCorridorSearchFrame(qr);
+            buildCorridorTrackingPath(path,PathPlannerConfig{},qw,queuedMap,qm,160.,&trace);
+            GtFrame queueGt;queueGt.ego=qw.ego;
+            const auto queueTracking=runPurePursuit(path,queueGt,qw.egoSpeed);
+            require(queueTracking.valid &&
+                std::hypot(path.waypoints[queueTracking.nearestIndex].x-qw.ego.x,
+                           path.waypoints[queueTracking.nearestIndex].y-qw.ego.y)<.75,
+                "retained queue route restarted Pure Pursuit at its old origin after 35m");
+            LaneChangeData unnecessaryBypass;
+            require(!prepareLocalCorridorFallback(unnecessaryBypass,qr.laneConfig,
+                PlanningBehaviorConfig{},qw,queuedMap,qm,path.waypoints,&trace) &&
+                !qr.localFallbackEngaged,
+                "safe queue endpoint triggered another local bypass past its waiting vehicle");
+            // Identical obstacle/entrance distances, different feasibility:
+            // legal lane changes permit a complete bypass; a solid boundary
+            // requires waiting behind the same upstream entrance obstacle.
+            // Its distance exceeds the former checkpoint/entrance filters.
+            for(bool solid:{false,true}) {
+                auto upstreamMap=fixture(solid);auto um=m;auto uw=world(10.);
+                uw.ego.y=-8.75;uw.egoLaneId=-3;
+                uw.egoObb=makeObb2D(11.3725,-8.75,0.,4.855,1.88);
+                WorldObjectState actor;actor.raw.id=201;actor.raw.x=40.;actor.raw.y=-8.75;
+                actor.raw.length=4.4;actor.raw.width=2.;
+                actor.obb=makeObb2D(40.,-8.75,0.,4.4,2.);uw.objects={actor};
+                auto& ur=*upstreamMap.corridorRuntime;
+                const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+                bool ready=false;
+                do {
+                    uw.receiveTime+=.05;beginCorridorSearchFrame(ur);
+                    buildCorridorTrackingPath(path,PathPlannerConfig{},uw,upstreamMap,um,180.,&trace);
+                    ready=solid?ur.soleGatewayApproachSelected:
+                        ur.committedGlobalPathReachesGateway && !ur.globalRouteReplanRequested;
+                    if(ready) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                } while(std::chrono::steady_clock::now()<deadline);
+                require(ready,"wait/bypass was chosen by distance instead of full-route feasibility");
+                require(corridorTrackingPathIsSafe(path.waypoints,uw,.3,nullptr,nullptr,&upstreamMap),
+                        "feasibility-selected route intersects the upstream obstacle");
+                if(solid) {
+                    require(path.waypoints.back().laneId==-3 && path.waypoints.back().x<36.,
+                            "blocked upstream entrance did not get an in-lane waiting endpoint");
+                    require(ur.gatewayQueueBlockers==std::vector<int>{201},
+                            "failed full search lost its entrance blocker evidence");
+                } else {
+                    require(ur.soleGatewayApproachPath.empty() && ur.gatewayQueueBlockers.empty(),
+                            "available full bypass was replaced by waiting");
+                }
+            }
             std::cout<<"sole gateway: safe approach / no false completion / opening replan PASS\n";return 0;
         }
         if(argc==3 && std::string(argv[1])=="--precomputed-mission-audit") {

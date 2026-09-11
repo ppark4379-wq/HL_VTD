@@ -1,0 +1,24 @@
+[
+  {
+    "id": 2,
+    "lateral_center": -1.5364811994844219,
+    "half_width_projected": 1.2770161175437178,
+    "ego_half_width": 0.94,
+    "clearance": 0.05,
+    "blocked_lateral_interval": [
+      -3.8034973170281394,
+      0.7305349180592959
+    ]
+  },
+  {
+    "id": 3,
+    "lateral_center": 2.8250229677134304,
+    "half_width_projected": 0.9040597496722312,
+    "ego_half_width": 0.94,
+    "clearance": 0.05,
+    "blocked_lateral_interval": [
+      0.9309632180411993,
+      4.719082717385661
+    ]
+  }
+]

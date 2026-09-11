@@ -55,7 +55,7 @@
             <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_White" Name="Ego"/>
             <Init>
                 <Speed Value="0.0000000000000000e+00"/>
-                <PosAbsolute X="3.6284336488257600e+02" Y="-6.9190198238262838e+01" Z="4.1500000000000000e+01" Direction="5.0869309082427705e-01" AlignToRoad="true"/>
+                <PosAbsolute X="3.0102400000000000e+02" Y="-2.3997200000000001e+02" Z="4.4159999999999997e+01" Direction="5.3487645235648476e+00" AlignToRoad="true"/>
             </Init>
         </Player>
         <Player>
@@ -182,24 +182,24 @@
         <PlayerActions Player="New Player11">
             <Action Name="">
                 <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.0000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="1.0000000000000000e+01" X="3.6284336488257600e+02" Y="-6.9190198238262838e+01"/>
+                <EditorPos Radius="1.0000000000000000e+01" X="3.0102400000000000e+02" Y="-2.3997200000000001e+02"/>
                 <SpeedChange Rate="5.0000000000000000e+01" Target="6.9444444444444446e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
             </Action>
             <Action Name="">
                 <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.0000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="1.0000000000000000e+01" X="3.6284336488257600e+02" Y="-6.9190198238262838e+01"/>
+                <EditorPos Radius="1.0000000000000000e+01" X="3.0102400000000000e+02" Y="-2.3997200000000001e+02"/>
                 <SpeedChange Rate="2.0000000000000000e+02" Target="0.0000000000000000e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="4.0000000000000000e+00"/>
             </Action>
             <Action Name="">
                 <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.0000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="1.0000000000000000e+01" X="3.6284336488257600e+02" Y="-6.9190198238262838e+01"/>
+                <EditorPos Radius="1.0000000000000000e+01" X="3.0102400000000000e+02" Y="-2.3997200000000001e+02"/>
                 <SpeedChange Rate="5.0000000000000000e+01" Target="5.5555555555555554e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="7.0000000000000000e+00"/>
             </Action>
         </PlayerActions>
     </TrafficControl>
     <MovingObjectsControl>
         <PathShape ShapeId="1" ShapeType="polyline" Closed="false" Name="PathShape01">
-            <Waypoint X="3.0102368164062500e+02" Y="-2.3997181701660156e+02" Options="0x00000000" Z="4.7518203035694562e+01" Weight="1.0000000000000000e+00" Yaw="5.3709090956286643e+00" Pitch="6.2734583105059087e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
+            <Waypoint X="3.0102368164062500e+02" Y="-2.3997181701660156e+02" Options="0x00000000" Z="4.7518203035694562e+01" Weight="1.0000000000000000e+00" Yaw="5.3709090956286643e+00" Pitch="6.2734583105059079e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
             <Waypoint X="3.3133364868164062e+02" Y="-2.7914532470703125e+02" Options="0x00000000" Z="4.8000000000000000e+01" Weight="1.0000000000000000e+00" Yaw="6.1588308569440446e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
             <Waypoint X="3.5893557739257812e+02" Y="-2.8259555053710938e+02" Options="0x00000000" Z="4.8000000000000000e+01" Weight="1.0000000000000000e+00" Yaw="7.1246752415733849e-01" Pitch="4.8745374189988373e-02" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
             <Waypoint X="4.1850271606445312e+02" Y="-2.3113977050781250e+02" Options="0x00000000" Z="4.4159999999999997e+01" Weight="1.0000000000000000e+00" Yaw="1.1363611230284865e+00" Pitch="0.0000000000000000e+00" Roll="0.0000000000000000e+00" Time="0.0000000000000000e+00"/>
@@ -259,7 +259,7 @@
         <CharacterActions Character="New Character01">
             <Action Name="">
                 <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.4000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="1.4000000000000000e+01" X="3.6284336488257600e+02" Y="-6.9190198238262838e+01"/>
+                <EditorPos Radius="1.4000000000000000e+01" X="3.0102400000000000e+02" Y="-2.3997200000000001e+02"/>
                 <Motion Move="walk" Rate="0.0000000000000000e+00" Speed="1.2999999523162842e+00" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
                 <CharacterPath Loop="false" PathShape="2" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Beam="true" ClampToGround="false"/>
             </Action>

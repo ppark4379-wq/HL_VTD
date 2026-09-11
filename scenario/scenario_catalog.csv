@@ -43,3 +43,8 @@ M15,mixed,mixed/M15,internal.mixed_checkpoint_path_shape_route,packaged,VTD Path
 M16,mixed,mixed/M16,internal.mixed_checkpoint_path_shape_route,packaged,VTD PathShape01 8개 체크포인트 경로 추종; 실주행 검증 전
 M17,mixed,mixed/M17,internal.mixed_checkpoint_path_shape_route,packaged,VTD PathShape02 6개 체크포인트 경로 추종; 경로·Ego 정렬 및 실주행 검증 전
 M18,mixed,mixed/M18,internal.mixed_checkpoint_path_shape_route,packaged,VTD PathShape01 10개 체크포인트 경로 추종; 실주행 검증 전
+M19,mixed,mixed/M19,internal.mixed_checkpoint_path_shape_route,packaged,VTD PathShape01 4개 체크포인트 교차로 경로 추종; 실주행 검증 전
+M19-01,mixed,mixed/M19-01,internal.mixed_checkpoint_path_shape_route,packaged,VTD M19-1 PathShape01 4개 체크포인트 교차로 경로 추종; 실주행 검증 전
+M19-02,mixed,mixed/M19-02,internal.mixed_checkpoint_path_shape_route,packaged,VTD M19-2 PathShape02 4개 체크포인트 교차로 경로 추종; 실주행 검증 전
+M20,mixed,mixed/M20,internal.mixed_checkpoint_path_shape_route,packaged,VTD PathShape01 4개 체크포인트 교차로 경로 추종; 실주행 검증 전
+M20-01,mixed,mixed/M20-01,internal.mixed_checkpoint_path_shape_route,packaged,VTD M20-1 PathShape01 4개 체크포인트 교차로 경로 추종; 실주행 검증 전

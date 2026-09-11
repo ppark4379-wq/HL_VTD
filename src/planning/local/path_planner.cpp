@@ -198,6 +198,23 @@ PathPlan runPurePursuit(PathPlannerData& planner, const GtFrame& gt,
     const double targetDistance = std::hypot(dx, dy);
     const double headingError = computeHeadingError(gt, target);
 
+    // A consumed local prefix is not a forward steering target. Projection
+    // clamps to its last sample, so without this check PP keeps chasing a
+    // point beside/behind the rear axle and can demand nearly pi/2 steering.
+    const bool terminalTarget = plan.targetIndex + 1 == planner.waypoints.size();
+    if (terminalTarget && targetDistance <= planner.config.goalTolerance) {
+        plan.goalReached = true;
+        plan.valid = true;
+        planner.nearestIndex = plan.nearestIndex;
+        planner.latestPlan = plan;
+        return plan;
+    }
+    if (terminalTarget && dx * std::cos(gt.ego.heading) +
+                              dy * std::sin(gt.ego.heading) <= 0.) {
+        planner.latestPlan = plan;
+        return plan;
+    }
+
     plan.steering = computePurePursuitSteering(
         headingError, targetDistance, planner.config.wheelbase);
     plan.targetSpeed = chooseTargetSpeed(plan.maxCurvature, planner.config);

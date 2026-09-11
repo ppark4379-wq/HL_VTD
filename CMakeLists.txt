@@ -67,6 +67,7 @@ add_test(NAME lost_corridor_recovery COMMAND corridor_lattice_tests --lost-corri
 add_test(NAME no_cosmetic_replan COMMAND corridor_lattice_tests --no-cosmetic-replan)
 add_test(NAME center_first_gateway_route COMMAND corridor_lattice_tests --center-first-global)
 add_test(NAME sole_gateway_safe_approach COMMAND corridor_lattice_tests --sole-gateway-approach)
+add_test(NAME gateway_prefix_deadline COMMAND corridor_lattice_tests --gateway-prefix)
 add_test(NAME multiple_gateway_queue COMMAND corridor_lattice_tests --multi-gateway-queue)
 add_test(NAME clear_lane_center_return COMMAND corridor_lattice_tests --clear-center-return)
 add_test(NAME extended_gateway_preview COMMAND corridor_lattice_tests --extended-gateway-preview)
@@ -82,6 +83,7 @@ target_compile_features(global_route_obstacle_tests PRIVATE cxx_std_17)
 target_include_directories(global_route_obstacle_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_test(NAME global_route_obstacle_tests COMMAND global_route_obstacle_tests)
 add_test(NAME dense_global_route_regression COMMAND global_route_obstacle_tests --dense-global)
+add_test(NAME expanded_global_route_regression COMMAND global_route_obstacle_tests --expanded-global)
 add_executable(gateway_preview_reachability_tests tests/gateway_preview_reachability_tests.cpp ${CORRIDOR_SOURCES}
     src/planning/global/mission_corridor.cpp src/planning/global/reference_path_generator.cpp
     src/planning/local/path_planner.cpp src/planning/collision/collision_checker.cpp
@@ -109,6 +111,9 @@ target_compile_features(reference_reconnect_cache_tests PRIVATE cxx_std_17)
 target_include_directories(reference_reconnect_cache_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_test(NAME reference_reconnect_cache_tests COMMAND reference_reconnect_cache_tests)
 add_executable(replay_corridor_scene tools/verification/replay_corridor_scene.cpp ${CORRIDOR_SOURCES}
+    src/planning/planning_process.cpp src/planning/behavior/behavior_planner.cpp
+    src/planning/local/lane_change_planner.cpp src/planning/local/local_path_planner.cpp
+    src/data/map/map_matcher.cpp src/data/map/static_zones.cpp src/data/gt/gt_processor.cpp
     src/planning/global/mission_corridor.cpp src/planning/global/reference_path_generator.cpp
     src/planning/local/path_planner.cpp src/planning/collision/collision_checker.cpp
     src/data/map/map_loader.cpp src/control/config/control_config.cpp
@@ -268,7 +273,13 @@ add_test(NAME controller_logic_tests COMMAND controller_logic_tests)
 add_test(NAME school_zone_approach_regression COMMAND controller_logic_tests --school-zone-approach)
 add_test(NAME crosswalk_indicator_regression COMMAND controller_logic_tests --crosswalk-indicator)
 add_test(NAME gateway_route_handoff COMMAND controller_logic_tests --gateway-route-handoff)
+add_test(NAME gateway_queue_detection COMMAND controller_logic_tests --gateway-queue)
 add_test(NAME progress_recovery_handoff COMMAND controller_logic_tests --progress-recovery-handoff)
+add_test(NAME simulation_contact_progress COMMAND controller_logic_tests --contact-progress)
+add_test(NAME simulation_recovery_stop_edges COMMAND controller_logic_tests --recovery-stop-edges)
+add_test(NAME consumed_path_steering COMMAND controller_logic_tests --consumed-path)
+add_test(NAME signal_stop_policy COMMAND controller_logic_tests --signal-stop-policy)
+add_test(NAME recovery_signal_approach COMMAND controller_logic_tests --recovery-signal-approach)
 set_tests_properties(crosswalk_indicator_regression PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME dense_static_speed_regression COMMAND controller_logic_tests --dense-static-speed)

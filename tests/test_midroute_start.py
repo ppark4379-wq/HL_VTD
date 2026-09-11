@@ -12,7 +12,8 @@ sys.path.insert(0, str(REPO_ROOT / "tools" / "verification"))
 
 from sync_vtd_scenario import (
     EgoAbsolutePosition, SyncError, read_route_sync_options,
-    sync_manifest_from_xml, trim_route_to_ego_start,
+    resolve_destination, scenario_identity, sync_manifest_from_xml,
+    trim_route_to_ego_start,
 )
 from run_scenario import build_command
 import xml.etree.ElementTree as ET
@@ -48,6 +49,24 @@ class MidrouteStartTests(unittest.TestCase):
         self.assertEqual(float(rows[0]["s"]), 0)
         self.assertEqual(float(rows[-1]["s"]), 25)
         self.assertEqual(self.checkpoints.read_bytes(), original)
+
+    def test_numbered_variant_is_normalized_as_distinct_scenario(self):
+        self.assertEqual(
+            scenario_identity("M19-1"), ("M19-01", "M19-01", "mixed")
+        )
+        self.assertEqual(
+            scenario_identity("M19-2_test"),
+            ("M19-02", "M19-02_test", "mixed"),
+        )
+
+    def test_numbered_variant_does_not_resolve_to_base_package(self):
+        root = self.package / "repository"
+        (root / "scenario/mixed/M19").mkdir(parents=True)
+        variant = root / "scenario/mixed/M19-01"
+        variant.mkdir()
+        destination, stem = resolve_destination(Path("M19-1.xml"), root)
+        self.assertEqual(destination, variant)
+        self.assertEqual(stem, "M19-01")
 
     def test_returning_to_start_restores_first_leg(self):
         leg = trim_route_to_ego_start(

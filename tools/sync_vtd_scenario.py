@@ -129,7 +129,12 @@ def scenario_identity(stem: str) -> tuple[str, str, str]:
         )
     prefix = match.group(1).upper()
     scenario_id = f"{prefix}{int(match.group(2)):02d}"
-    normalized_stem = scenario_id + match.group(3)
+    suffix = match.group(3)
+    variant = re.match(r"^-(\d+)(.*)$", suffix)
+    if variant:
+        scenario_id += f"-{int(variant.group(1)):02d}"
+        suffix = variant.group(2)
+    normalized_stem = scenario_id + suffix
     return scenario_id, normalized_stem, CATEGORY_BY_PREFIX[prefix]
 
 

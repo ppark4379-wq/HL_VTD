@@ -1,0 +1,30 @@
+{
+  "source": "output/verification/M18/m18_rviz",
+  "ego_footprint": {
+    "front": 3.8,
+    "rear": 1.055,
+    "width": 1.88
+  },
+  "restart_frame": 1373,
+  "restart_wall_s": 68.9222955,
+  "objects": {
+    "6": {
+      "logged_vs_reconstructed_mismatches": 0,
+      "actual_contact_frames": 15,
+      "actual_first_contact_s": 69.2813547,
+      "actual_last_contact_s": 69.9631698,
+      "held_pose_overlap_frames": 14,
+      "held_pose_first_overlap_s": 69.3161841,
+      "held_pose_0_5m_back_overlap_frames": 0
+    },
+    "7": {
+      "logged_vs_reconstructed_mismatches": 0,
+      "actual_contact_frames": 13,
+      "actual_first_contact_s": 75.2012689,
+      "actual_last_contact_s": 75.8011584,
+      "held_pose_overlap_frames": 0,
+      "held_pose_first_overlap_s": null,
+      "held_pose_0_5m_back_overlap_frames": 0
+    }
+  }
+}

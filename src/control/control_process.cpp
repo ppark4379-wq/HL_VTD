@@ -21,6 +21,17 @@ void runControlProcess(ControlProcessData& data,
     runLongitudinalControl(data.controller, data.nominalCommand,
                            world.egoSpeed, planning.targetSpeed,
                            std::max(dt, 1e-3));
+    // After the simulation standstill timeout has expired, a retained -10
+    // stop-hold state must not add another braking interval to every retry.
+    // Steering slew and the final emergency/invalid-input limiter still run.
+    if (planning.progressRecoveryActive && planning.valid && !planning.emergencyBrake &&
+        planning.targetSpeed > .05 && std::abs(world.egoSpeed) <= .2) {
+        const double launch = std::min(data.controller.config.maxAcceleration,
+            std::max(.3, data.controller.config.kp * (planning.targetSpeed-world.egoSpeed)));
+        data.nominalCommand.targetAccel = static_cast<float>(std::max(
+            static_cast<double>(data.nominalCommand.targetAccel), launch));
+        data.controller.previousAcceleration = data.nominalCommand.targetAccel;
+    }
     // Speed-only PD and its jerk limiter can brake too weakly for a late
     // traffic stop. Bound the command by remaining FRONT-BUMPER distance.
     // This does not affect ordinary driving/avoidance or weaken EBS.

@@ -1,0 +1,22 @@
+{
+  "source": "output/verification/M18/m18_rviz/run.csv",
+  "time_basis": "elapsed_wall_time_s",
+  "controller_id": 136,
+  "stop_line_id": 590,
+  "line_point": [
+    612.115,
+    -116.186
+  ],
+  "yellow_frame": 6047,
+  "yellow_time_s": 303.091827,
+  "remaining_distance_when_target_zero_m": 47.9333141,
+  "stopped_frame": 6058,
+  "remaining_distance_while_stopped_m": 47.7497486,
+  "stopped_pose": [
+    565.206604,
+    -137.527893
+  ],
+  "green_time_s": 324.090833,
+  "resume_time_s": 325.292188,
+  "code_changed": false
+}

@@ -51,14 +51,6 @@ enum class StopReason : std::uint32_t {
     StationaryPathBlocked = 1U << 5,
 };
 
-// 황색신호는 매 프레임 판단이 뒤집히면 안 되므로 한 번 정한 결과를 고정한다.
-// 관련 신호등이 바뀌면 Undecided로 되돌린다.
-enum class YellowDecision {
-    Undecided,
-    Stop,
-    Pass,
-};
-
 // 정지 요청 하나. "왜"뿐 아니라 "어디에" 서는지를 함께 가진다.
 // 해제는 위치가 아니라 원인이 사라질 때만 이루어져야 한다.
 struct StopRequest {
@@ -78,16 +70,10 @@ struct StopHoldState {
     int stopLineId{-1};
 };
 
-struct YellowSignalState {
-    int controllerId{-1};
-    YellowDecision decision{YellowDecision::Undecided};
-};
-
 // 프레임 간 유지하는 정지 관리 상태.
 struct StopManagerData {
     std::vector<StopRequest> requests;
     StopHoldState hold;
-    YellowSignalState yellow;
 };
 
 // 모든 후보에 항상 적용되는 제약.

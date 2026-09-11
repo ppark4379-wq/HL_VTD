@@ -96,7 +96,8 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
            config.planner.sharpCurveSpeed <= config.planner.curveSpeed &&
            config.planner.maximumLateralAcceleration > 0.0 &&
            config.behavior.comfortableDeceleration > 0.0 &&
-           config.behavior.stopHoldTime >= 1.0 &&
+           std::isfinite(config.behavior.stopHoldTime) &&
+           config.behavior.stopHoldTime >= 0.5 &&
            config.behavior.followTimeGap > 0.0 &&
            config.behavior.minimumFollowDistance > 0.0 &&
            config.behavior.followGapGain > 0.0 &&

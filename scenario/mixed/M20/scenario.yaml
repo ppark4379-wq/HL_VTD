@@ -1,0 +1,80 @@
+schema_version: 1
+scenario:
+  id: M20
+  category: mixed
+  name: checkpoint_path_shape_route
+  description: VTD M20 PathShape01의 4개 체크포인트를 이용한 LivingLAB 경로 추종을 검증
+  file: M20.xml
+  format: vtd_native
+  map: LivingLAB
+runtime:
+  simulator: VTD
+  simulator_version: '2025.2'
+  sync_source_before_run: /home/autonav/VIRES/VTD.2025.2/Data/Projects/Current/Scenarios/M20.xml
+  mission_start_leg: 0
+route:
+  default: route.csv
+  mode: packaged
+  compatible_routes: []
+  preserve_checkpoint_coordinates: true
+  path_shape_lane_snap: false
+  smooth_checkpoint_segments:
+  - 2
+  smooth_checkpoint_handle_m: 8.0
+  trim_route_to_ego_start: true
+  trim_max_distance_m: 8.0
+validation:
+  ego_control: external
+  start_position_tolerance_m: 8.0
+  start_heading_tolerance_deg: 10.0
+parameters:
+  ego_speed_mps:
+    type: float
+    unit: m/s
+    default: 0.0
+entities:
+- name: Ego
+  type: vehicle
+  role: ego
+  initial_position:
+    x: 658.8014146567459
+    y: -321.4922841147277
+    z: 44.329197041600736
+    heading_rad: 0.7122379015048004
+- name: New Player
+  type: vehicle
+  initial_route:
+    path_id: 1
+    start_s_m: 114.43
+    target_s_m: 276.43835179606106
+    start_lane: 5
+  role: relevant_object
+- name: New Object
+  type: obstacle
+  initial_position:
+    x: 714.6549682617188
+    y: -269.2744445800781
+    z: 46.9
+    heading_rad: 0.0
+  role: relevant_object
+- name: New Object01
+  type: obstacle
+  initial_position:
+    x: 712.9200439453125
+    y: -270.357666015625
+    z: 46.89919038733067
+    heading_rad: 0.0
+  role: relevant_object
+events: []
+expected_outcomes:
+- follow_reference_path
+- reach_route_end
+evaluation:
+  codes:
+  - internal.mixed_checkpoint_path_shape_route
+  required_metrics:
+  - ego_speed
+  - lateral_error
+  - collision
+  - route_progress
+  thresholds_status: pending

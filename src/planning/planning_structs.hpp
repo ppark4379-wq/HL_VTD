@@ -36,9 +36,9 @@ struct PathPlannerConfig {
 struct PlanningBehaviorConfig {
     bool ignoreTrafficLights{};
     // VTD-only, explicitly enabled by the run configuration. Path/collision
-    // stops from confirmed static obstacles may be overridden after a
-    // sustained standstill. Dynamic EBS, traffic lights and pedestrian/
-    // crosswalk waits retain their ordinary authority.
+    // stops, repeated EBS and exhausted geometry may be overridden after a
+    // sustained standstill. Explicit traffic-light/crosswalk waits retain
+    // their authority. Contact is scored and recorded, never labelled safe.
     double simulationProgressRecovery{};
     double progressRecoveryStopTimeout{3.0};
     double progressRecoverySpeed{3.0 / 3.6};
@@ -51,7 +51,7 @@ struct PlanningBehaviorConfig {
     double schoolZoneApproachReactionTime{0.5};
     double stopSafetyMargin{1.0};
     double trafficStopPositionMargin{1.5}; // traffic stop only, not lane alignment
-    double stopHoldTime{1.0};
+    double stopHoldTime{0.5};
     double stoppedSpeedThreshold{0.15};
     double followTimeGap{1.8};
     double minimumFollowDistance{5.0};
@@ -191,6 +191,7 @@ struct PlanningResult {
     bool crosswalkActive{};
     bool laneChangeActive{};
     bool progressRecoveryActive{};
+    bool progressRecoveryGeometryFallback{};
     bool progressRecoveryContactExpected{};
     bool progressRecoveryEmergencyOverridden{};
     StopReason progressRecoveryOverriddenStop{StopReason::None};
@@ -208,6 +209,10 @@ struct ProgressRecoveryData {
     std::size_t missionLeg{static_cast<std::size_t>(-1)};
     std::size_t searchCursor{};
     bool contactExpected{};
+    bool geometryFallback{};
+    // Scoped to an active recovery on this mission leg. VTD may stop
+    // reporting the approach signal once Ego enters the connector.
+    bool gatewayQueueGreenAuthorized{};
 };
 
 struct StationaryObjectState {
@@ -223,6 +228,7 @@ struct CrosswalkOccupancyState {
     int id{-1};
     bool occupied{};
     double clearanceHoldRemaining{};
+    bool waitUntilClear{}; // Flashing-red yield cannot time out a still-present pedestrian.
 };
 
 struct CrosswalkObjectWaitState {

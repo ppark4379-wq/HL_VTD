@@ -367,9 +367,52 @@ void denseGlobalRegressions() {
     denseStaggeredGlobalRoute();emptyRoadRemainsStraight();
     solidIntermediateBoundaryCannotBeSkipped();
 }
+void expandedNarrowGatewayRoute() {
+    auto map=fixture();auto m=mission();auto w=world();
+    w.ego.y=-5.25;w.egoLaneId=-2;
+    w.egoObb=makeObb2D(w.ego.x+1.3725,w.ego.y,0.,4.855,1.88);
+    // Two different box sizes leave a 0.19m-wide interval of feasible ego
+    // centre positions. Original centre +/-0.66m samples cannot represent it.
+    auto truck=object(60.,7.,8.,4.);truck.raw.y=w.ego.y-2.27;
+    truck.obb=makeObb2D(60.,truck.raw.y,0.,8.,4.);
+    auto car=object(62.,6.9,4.4,2.4);car.raw.id=8;car.raw.y=w.ego.y+3.1;
+    car.obb=makeObb2D(62.,car.raw.y,0.,4.4,2.4);
+    w.objects={truck,car};
+    auto& r=*map.corridorRuntime;
+    const double nominal=r.laneConfig.latticeObstacleClearance;
+    require(awaitGlobalRoute(map,m,w,"expanded narrow gateway"),"expanded gap did not reach gateway");
+    require(std::abs(r.globalPathClearance()-.05)<1e-6,"tight route lost its clearance certificate");
+    require(r.laneConfig.latticeObstacleClearance==nominal,"tight route changed nominal configuration");
+    require(corridorTrackingPathIsSafe(r.committedGlobalPath,w,.05,nullptr,nullptr,&map),
+            "expanded global route intersects a full vehicle footprint");
+    const auto revision=r.routeRevision;
+    PathPlannerData tracking;
+    for(int i=0;i<5;++i) {
+        beginCorridorSearchFrame(r);
+        require(buildCorridorTrackingPath(tracking,PathPlannerConfig{},w,map,m,80.,nullptr),
+                "tight global route disappeared on subsequent frame");
+        require(r.trackingPathApproved && std::abs(r.trackingPathValidatedClearance-.05)<1e-6,
+                "subsequent frame rechecked tight path with nominal clearance");
+        require(r.routeRevision==revision && !r.globalRouteReplanRequested,
+                "unchanged tight route triggered repeated global search");
+        require(tracking.config.straightSpeed<=r.laneConfig.localFallbackSpeed,
+                "tight global route did not retain the low-speed cap");
+    }
+    // Live obstacles still invalidate a narrow path; the certificate is a
+    // margin, not permission to drive through a newly occupied passage.
+    w.objects.back().raw.y-=.4;
+    w.objects.back().obb=makeObb2D(62.,w.objects.back().raw.y,0.,4.4,2.4);
+    require(!corridorTrackingPathIsSafe(r.committedGlobalPath,w,.05,nullptr,nullptr,&map),
+            "tight path certificate suppressed live obstacle checks");
+}
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2 && std::string(argv[1])=="--expanded-global") {
+            expandedNarrowGatewayRoute();
+            std::cout<<"expanded narrow gateway / clearance / retention / speed regression PASS\n";
+            return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--dense-global") {
             denseGlobalRegressions();
             std::cout<<"dense global / unchanged tracking / empty-road / solid-boundary regressions PASS\n";

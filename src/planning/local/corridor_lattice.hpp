@@ -48,6 +48,12 @@ struct CorridorRuntime {
     // leaves it after a dynamic avoidance, or a newly stationary object
     // physically blocks it.
     std::vector<Waypoint> committedGlobalPath;
+    // Certificate travels with the route; never relax the global config.
+    double committedGlobalPathClearance{-1.};
+    double globalPathClearance() const {
+        return committedGlobalPathClearance>=0.
+            ? committedGlobalPathClearance : laneConfig.latticeObstacleClearance;
+    }
     std::size_t committedGlobalPathLeg{static_cast<std::size_t>(-1)};
     std::size_t committedGlobalPathProgress{};
     bool committedGlobalPathReachesGateway{};
@@ -56,14 +62,22 @@ struct CorridorRuntime {
     // records passage only; it never advances mission/checkpoint progress.
     bool activeGatewayObserved{};
     std::vector<Waypoint> pendingGatewayHandoffPath;
+    double pendingGatewayHandoffClearance{-1.};
     // Geometry availability is not a collision approval. A blocked route
     // remains available as a local-planning reference, but must not replace
     // a safe avoidance trajectory in the controller.
     bool trackingPathApproved{};
+    // A sampled prefix ending at the last gateway-reachable point is a
+    // braking endpoint while a checked lane change/return is being planned.
+    double trackingGatewayStopDistance{std::numeric_limits<double>::infinity()};
     // A checked prefix toward a blocked unique gateway is never a proof of
     // gateway completion. Keep it separate from the complete global route.
     std::vector<Waypoint> soleGatewayApproachPath;
+    // Direct entrance obstacles observed after a completed full-route search
+    // failed. Independent of whether its waiting approach can be attached.
+    std::vector<int> gatewayQueueBlockers;
     bool soleGatewayApproachSelected{};
+    bool soleGatewayApproachInEntranceLane{};
     double laneCenterRetryAfter{};
     int soleGatewayApproachBlocker{-1};
     std::uint64_t soleGatewayApproachSignature{};
@@ -192,6 +206,13 @@ bool prepareCorridorProgressRecovery(
     const std::vector<int>& confirmedStationaryObjectIds, DecisionTraceData* trace,
     double failedHeadingChange = std::numeric_limits<double>::quiet_NaN(),
     bool* retainedReference = nullptr);
+
+// Last-resort VTD motion after every checked candidate fails. Follows the
+// required mission direction with bounded curvature, but does NOT certify
+// road surface or collision clearance and must never enter ordinary caches.
+void prepareSimulationCreepFallback(PathPlannerData& output, const WorldState& world,
+    const PathGeneratorData& map, const MissionCorridorData& mission,
+    const std::vector<Waypoint>& reference, DecisionTraceData* trace);
 
 // Returns only a currently attached, fully checked local replacement. False
 // never clears the active trajectory; Pending/Engaged report worker state.

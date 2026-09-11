@@ -116,7 +116,9 @@ def main(argv: list[str] | None = None) -> int:
         rows = build_registry(args.catalog, args.ego_name)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with args.output.open("w", encoding="utf-8-sig", newline="") as stream:
-            writer = csv.DictWriter(stream, fieldnames=COLUMNS)
+            writer = csv.DictWriter(
+                stream, fieldnames=COLUMNS, lineterminator="\n"
+            )
             writer.writeheader()
             writer.writerows(rows)
     except (OSError, ValueError, csv.Error) as error:
@@ -124,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     registered = {row["Scenario"] for row in rows}
-    missing = [f"M{i:02d}" for i in range(1, 19) if f"M{i:02d}" not in registered]
+    missing = [f"M{i:02d}" for i in range(1, 21) if f"M{i:02d}" not in registered]
     if missing:
         print("WARNING: not registered in catalog: " + ", ".join(missing), file=sys.stderr)
     print(f"Wrote {len(rows)} scenarios to {args.output}")

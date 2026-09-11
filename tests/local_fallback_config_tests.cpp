@@ -109,6 +109,7 @@ int main() {
         source = change(source, "dense_static_speed_kph", "10");
         source = change(source, "min_acceleration", "-4");
         source = change(source, "progress_recovery_speed_kph", "3");
+        source = change(source, "progress_recovery_stop_timeout", "3");
         source = change(source, "progress_recovery_max_speed_kph", "5");
 
 
@@ -229,6 +230,12 @@ int main() {
         valid = change(valid, "local_fallback_retry_interval", "0.08");
         require(file.load(valid, boundary), "valid equal-boundary config rejected");
 
+        DrivingConfig signalConfig;
+        require(file.load(change(source,"stop_hold_time","0.5"),signalConfig),
+                "half-second flashing-red stop rejected");
+        for(const auto& value:{"0.49","nan","inf","-1"})
+            require(!file.load(change(source,"stop_hold_time",value),signalConfig),
+                    "invalid flashing-red stop duration accepted");
         DrivingConfig propsConfig;
         require(file.load(source,propsConfig) &&
                 propsConfig.behavior.simulationCrosswalkStaticRelease==1.,

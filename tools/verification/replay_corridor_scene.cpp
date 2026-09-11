@@ -1,10 +1,12 @@
-// Fixed-observation diagnostic replay of the production corridor route worker.
-// No VTD socket, control command, mission progress update or synthetic motion.
+// Diagnostic replay of the production corridor worker and optional planning
+// pipeline, using fixed observations or recorded poses. No VTD socket or
+// control command; recorded poses do not respond to the replay's steering.
 #include "control/config/control_config.hpp"
 #include "logger/decision_trace.hpp"
 #include "planning/global/mission_corridor.hpp"
 #include "planning/global/reference_path_generator.hpp"
 #include "planning/local/corridor_lattice.hpp"
+#include "planning/planning_process.hpp"
 #include "utils/geometry.hpp"
 
 #include <boost/property_tree/json_parser.hpp>
@@ -36,6 +38,9 @@ struct Options {
     double snapshotTime{-1.};
     bool localFallback{};
     bool trackingRecovery{};
+    bool queueApproach{};
+    int planningFrames{};
+    std::string trajectory;
 };
 
 Options parse(int argc, char** argv) {
@@ -55,6 +60,9 @@ Options parse(int argc, char** argv) {
         else if (flag=="--time") result.snapshotTime=std::stod(value);
         else if (flag=="--local-fallback") result.localFallback=value=="1";
         else if (flag=="--tracking-recovery") result.trackingRecovery=value=="1";
+        else if (flag=="--queue-approach") result.queueApproach=value=="1";
+        else if (flag=="--planning-frames") result.planningFrames=std::stoi(value);
+        else if (flag=="--trajectory-jsonl") result.trajectory=value;
         else throw std::runtime_error("Unknown argument: "+flag);
     }
     if (result.snapshot.empty() || result.mission.empty() || result.output.empty() ||
@@ -101,6 +109,8 @@ WorldState readWorld(const Tree& document, const PathGeneratorData& map,
     world.ego.x=ego.get<float>("x"); world.ego.y=ego.get<float>("y");
     world.ego.z=ego.get<float>("z"); world.ego.heading=ego.get<float>("heading");
     world.egoSpeed=ego.get<double>("speed");
+    world.trafficLight.id=document.get<int>("traffic_light.id",-1);
+    world.trafficLight.state=document.get<int>("traffic_light.state",0);
     world.receiveTime=document.get<double>("receive_time_s",0.);
     world.egoRoadId=ego.get<int>("road_id");
     world.egoSectionIndex=ego.get<int>("section_index");
@@ -187,11 +197,22 @@ int main(int argc, char** argv) {
         mission.activeLegIndex=snapshot.get<std::size_t>("decision.active_leg");
         if(mission.activeLegIndex>=mission.legs.size()) throw std::runtime_error("Invalid snapshot active leg");
         LaneMatch nearest;
-        const auto world=readWorld(snapshot,map,nearest);
+        auto world=readWorld(snapshot,map,nearest);
+        std::ifstream trajectory;
+        if(!options.trajectory.empty()) {
+            trajectory.open(options.trajectory);
+            if(!trajectory || options.planningFrames<=0)
+                throw std::runtime_error("Trajectory requires --planning-frames and a readable JSONL");
+        }
         DecisionTraceData trace;
         initializeDecisionTrace(trace,(directory/"decision.log").string());
         auto& runtime=*map.corridorRuntime;
         PathPlannerData tracking;
+        PlanningProcessData planning;
+        planning.config=config.behavior;
+        planning.laneChangeConfig=config.laneChange;
+        planning.pathPlanner.config=config.planner;
+        planning.missionCorridor=mission;
         bool gatewayHistoryVerified=false;
         if(!options.gatewayHistorySnapshot.empty()) {
             Tree previousSnapshot;
@@ -224,16 +245,32 @@ int main(int argc, char** argv) {
             const double elapsed=std::chrono::duration<double>(pollStart-started).count();
             beginDecisionTraceFrame(trace,polls,elapsed);
             beginCorridorSearchFrame(runtime);
-            buildCorridorTrackingPath(tracking,config.planner,world,map,mission,80.,&trace);
+            if(trajectory.is_open()) {
+                std::string line;
+                if(!std::getline(trajectory,line)) break;
+                std::istringstream input(line);Tree current;
+                boost::property_tree::read_json(input,current);
+                world=readWorld(current,map,nearest);
+            }
+            if(options.planningFrames>0) {
+                auto frameWorld=world;
+                if(!trajectory.is_open()) frameWorld.receiveTime+=polls*.05;
+                GtFrame gt;gt.ego=world.ego;
+                runPlanningProcess(planning,gt,frameWorld,map,.05,&trace);
+                tracking=planning.roadLanePlanner;
+            } else buildCorridorTrackingPath(tracking,config.planner,world,map,mission,80.,&trace);
             ++polls;
             maxPollMs=std::max(maxPollMs,std::chrono::duration<double,std::milli>(Clock::now()-pollStart).count());
-            success=options.trackingRecovery ? runtime.trackingPathApproved :
+            success=options.queueApproach ? runtime.soleGatewayApproachSelected && runtime.trackingPathApproved :
+                options.trackingRecovery ? runtime.trackingPathApproved &&
+                    !std::isfinite(runtime.trackingGatewayStopDistance) :
                 runtime.committedGlobalPathReachesGateway && !runtime.globalRouteReplanRequested;
-            if(success || (!options.trackingRecovery && runtime.globalRouteSearchFailed)) break;
+            if(options.planningFrames>0 ? polls>=static_cast<std::size_t>(options.planningFrames) :
+               (success || (!options.trackingRecovery && runtime.globalRouteSearchFailed))) break;
             if(std::chrono::duration<double>(Clock::now()-started).count()>=options.timeout) {
                 timedOut=true; break;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(trajectory.is_open()?50:10));
         }
         LaneChangeData local;
         if(options.localFallback) {
@@ -284,7 +321,8 @@ int main(int argc, char** argv) {
             timedOut=!success && runtime.localFallbackPending;
         }
         const double wallMs=std::chrono::duration<double,std::milli>(Clock::now()-started).count();
-        const auto& path=options.localFallback?local.path:options.trackingRecovery?tracking.waypoints:runtime.committedGlobalPath;
+        const auto& path=options.localFallback?local.path:options.queueApproach?runtime.soleGatewayApproachPath:
+            options.trackingRecovery?tracking.waypoints:runtime.committedGlobalPath;
         if(!path.empty() && !savePath(path,(directory/(options.localFallback?
                 "local_path.csv":"global_path.csv")).string()))
             throw std::runtime_error("Cannot write diagnostic path CSV");
@@ -319,13 +357,23 @@ int main(int argc, char** argv) {
         int blocker=-1;
         const bool safe=!path.empty() && corridorTrackingPathIsSafe(path,world,
             options.localFallback?local.validatedObstacleClearance:
-                config.laneChange.latticeObstacleClearance,&blocker,&config.behavior,&map);
+                runtime.globalPathClearance(),&blocker,&config.behavior,&map);
         const bool goal=!path.empty() && missionPointIsTarget(mission.legs[mission.activeLegIndex],path.back());
         std::ostringstream summary;
         summary << std::boolalpha << std::setprecision(10)
                 << "{\"success\":" << success << ",\"goal\":" << goal
                 << ",\"local_fallback\":" << options.localFallback
-                << ",\"validated_clearance\":" << (options.localFallback?local.validatedObstacleClearance:config.laneChange.latticeObstacleClearance)
+                << ",\"queue_approach\":" << runtime.soleGatewayApproachSelected
+                << ",\"planning_frames\":" << options.planningFrames
+                << ",\"planning_valid\":" << planning.result.valid
+                << ",\"planning_speed\":" << planning.result.targetSpeed
+                << ",\"planning_lane_change\":" << static_cast<int>(planning.laneChange.phase)
+                << ",\"progress_recovery\":" << planning.result.progressRecoveryActive
+                << ",\"contact_expected\":" << planning.result.progressRecoveryContactExpected
+                << ",\"tracking_approved\":" << runtime.trackingPathApproved
+                << ",\"reentry_selected\":" << runtime.trackingPathRelocalized
+                << ",\"gateway_stop_required\":" << std::isfinite(runtime.trackingGatewayStopDistance)
+                << ",\"validated_clearance\":" << (options.localFallback?local.validatedObstacleClearance:runtime.globalPathClearance())
                 << ",\"safe\":" << safe << ",\"blocking_object\":" << blocker
                 << ",\"timed_out\":" << timedOut << ",\"search_failed\":" << runtime.globalRouteSearchFailed
                 << ",\"wall_ms\":" << wallMs << ",\"max_poll_ms\":" << maxPollMs

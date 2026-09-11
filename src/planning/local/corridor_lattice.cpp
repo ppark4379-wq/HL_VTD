@@ -16,6 +16,11 @@
 #include <sstream>
 #include <future>
 
+bool connectToReferencePath(std::vector<Waypoint>& output,
+    const std::vector<Waypoint>& reference,std::size_t referenceProgress,
+    CorridorRuntime& runtime,const PathGeneratorData& map,const WorldState& world,
+    double horizon,DecisionTraceData* trace,bool corridorOnly,double clearance=-1.);
+
 bool corridorObstacleAtPathLevel(const PathGeneratorData& map,
                                 const Waypoint& point,
                                 const WorldObjectState& object) {
@@ -31,10 +36,13 @@ struct CorridorGlobalRouteWorker {
         LaneKey startLane;
         double startRoadS{}, receiveTime{};
         double searchMilliseconds{};
+        double clearance{-1.};
         bool success{};
         bool exitPreview{};
         bool approachOnly{};
+        bool approachInEntranceLane{};
         int approachBlocker{-1};
+        std::vector<int> queueBlockers;
         bool exception{};
         std::vector<Waypoint> path;
         std::vector<std::string> diagnostics;
@@ -92,6 +100,7 @@ void addEdge(CorridorRuntime& r,std::int64_t from,CorridorEdge e) {
 void activate(CorridorRuntime& r,const MissionCorridorData& mission) {
     if(r.activeLeg==mission.activeLegIndex) return;
     r.pendingGatewayHandoffPath.clear();
+    r.pendingGatewayHandoffClearance=r.globalPathClearance();
     if(r.activeLeg!=static_cast<std::size_t>(-1) &&
        r.activeLeg+1==mission.activeLegIndex &&
        r.committedGlobalPathHasExitPreview &&
@@ -106,12 +115,15 @@ void activate(CorridorRuntime& r,const MissionCorridorData& mission) {
     r.committedTransitionProgress=0;
     r.committedTransitionEntered=false;
     r.committedGlobalPath.clear();
+    r.committedGlobalPathClearance=-1.;
     r.committedGlobalPathLeg=mission.activeLegIndex;
     r.committedGlobalPathProgress=0;
     r.committedGlobalPathReachesGateway=false;
     r.committedGlobalPathHasExitPreview=false;
     r.activeGatewayObserved=false;
     r.soleGatewayApproachPath.clear();r.soleGatewayApproachSelected=false;
+    r.soleGatewayApproachInEntranceLane=false;
+    r.gatewayQueueBlockers.clear();
     r.recoveryTrackingPath.clear();
     r.recoveryTrackingPathLeg=mission.activeLegIndex;
     r.recoveryTrackingPathProgress=0;
@@ -440,13 +452,11 @@ std::vector<Waypoint> forwardPath(const CorridorRuntime& r,std::int64_t start,do
     auto first=r.network.points[start].pose;first.s=startS;out.push_back(first);
     std::set<std::int64_t> seen;
     for(auto id=start;seen.insert(id).second && out.back().s-startS<horizon;) {
-        // Prefer the gateway-aware choice. If the strict search finds no
-        // edge here (e.g. a handoff gap right at a leg boundary), fall back
-        // to any allowed forward lane rather than truncating the tracking
-        // path. A short/awkward continuation is always better than stopping
-        // the vehicle because "no path" was found.
+        // Keep the directed suffix to the required gateway. At the last
+        // lane-change opportunity a straight edge may still be inside the
+        // corridor yet already have infinite gateway cost. End the prefix
+        // there; only explicit physical occupancy probes may continue it.
         const auto* e=forwardChoice(r,id);
-        if(!e) e=forwardChoice(r,id,false);
         if(!e && allowAnyContinuation) e=forwardChoice(r,id,false,true);
         if(!e) break;
         if(e->transition>=0) {
@@ -754,8 +764,11 @@ bool smoothSourceJoins(std::vector<Waypoint>& path,const CorridorRuntime& r,
            (std::abs(yawDelta)<=.19*distance+1e-6 || sustainedMapCurve)) continue;
         bool fixed=false;
         std::ostringstream repairFailures;
+        // A short source seam can border a tight mapped arc even when its
+        // adjacent derivatives do not classify it as a sustained curve.
+        // Search the same radius/tangent family for both; the footprint,
+        // road marks, curvature and obstacle checks still decide feasibility.
         for(double radius:{3.,5.,8.,12.,16.,24.}) {
-            if(!infeasibleMapCurve && radius>8.) break;
             std::size_t first=i-1,last=i;
             while(first>0 && path[i].s-path[first].s<radius) --first;
             while(last+1<path.size() && path[last].s-path[i-1].s<radius) ++last;
@@ -774,11 +787,10 @@ bool smoothSourceJoins(std::vector<Waypoint>& path,const CorridorRuntime& r,
             // change to 80 degrees. A mapped right-angle corner needs its own
             // bounded tangent family, with the SAME curvature/body checks.
             for(double tangentScale:{1.,1.2,1.4,1.6}) {
-                if(!infeasibleMapCurve && tangentScale!=1.) break;
                 replacement.clear();
                 reason.clear();
                 if(!curve(replacement,path[first],r.network.points[a].curvature,end,&maxK,
-                          tangentScale,infeasibleMapCurve?1.75:1.4)) continue;
+                          tangentScale,1.75)) continue;
                 Waypoint rejected;
                 bool onSurface=surfaceAndMarks(r,map,replacement,world,reason,corridorOnly,&rejected);
                 if(!onSurface && infeasibleMapCurve && corridorOnly &&
@@ -1209,8 +1221,10 @@ bool materializePrecomputedGatewayRouteStage(
     std::vector<Waypoint>& output,CorridorRuntime& r,
     const PathGeneratorData& map,const WorldState& world,
     const MissionCorridorData& mission,std::int64_t start,
-    DecisionTraceData* trace,bool allowOffsets,bool queueApproach=false) {
+    DecisionTraceData* trace,bool allowOffsets,bool queueApproach=false,
+    bool expandedOffsets=false,double clearance=-1.) {
     output.clear();
+    if(clearance<0.) clearance=r.laneConfig.latticeObstacleClearance;
     const auto* leg=activeMissionLeg(mission);
     if(!leg || start<0 || !r.allowed[start] ||
        leg->toCheckpoint>=mission.checkpoints.size()) return false;
@@ -1220,30 +1234,130 @@ bool materializePrecomputedGatewayRouteStage(
     const auto goalCount=std::count(goal.begin(),goal.end(),true);
     if(goalCount==0) return false;
 
-    constexpr int offsetStateCount=3;
+    const int offsetStateCount=expandedOffsets?13:3;
+    const auto body=egoFootprint(world);
+    // Allocate search labels only for this corridor, not the entire map.
+    // Sorted point IDs retain the existing A* tie-breaking order.
+    std::vector<std::int64_t> activePoints;
+    std::vector<std::int64_t> compact(r.network.points.size(),-1);
+    for(std::size_t i=0;i<searchAllowed.size();++i) if(searchAllowed[i]) {
+        compact[i]=activePoints.size();activePoints.push_back(i);
+    }
+    if(compact[start]<0) return false;
+    const char* stage=expandedOffsets?"expanded_offsets":
+        allowOffsets?"offset_fallback":"lane_centers";
+    const double extent=std::max(0.,r.laneConfig.maximumLateralOffset);
+    std::map<LaneKey,std::array<double,2>> gapOffsets;
+    if(expandedOffsets) {
+        std::map<LaneKey,std::vector<std::int64_t>> lanePoints;
+        for(const auto id:activePoints) lanePoints[keyOf(r.network.points[id].pose)].push_back(id);
+        for(const auto& [key,ids]:lanePoints) {
+            std::vector<std::pair<double,double>> blockedIntervals;
+            for(const auto& object:world.objects) {
+                if(!isStationaryRouteObstacle(object)) continue;
+                double best=inf;const Waypoint* near=nullptr;
+                for(const auto id:ids) {
+                    const auto& pose=r.network.points[id].pose;
+                    const double d=std::hypot(pose.x-object.raw.x,pose.y-object.raw.y);
+                    if(d<best) {best=d;near=&pose;}
+                }
+                if(!near || best>extent+body.length+object.raw.length ||
+                   !corridorObstacleAtPathLevel(map,*near,object)) continue;
+                const double c=std::cos(near->yaw),sn=std::sin(near->yaw);
+                double lo=inf,hi=-inf;
+                for(const auto& corner:object.obb.corners) {
+                    const double lateral=-(corner.x-near->x)*sn+(corner.y-near->y)*c;
+                    lo=std::min(lo,lateral);hi=std::max(hi,lateral);
+                }
+                blockedIntervals.push_back({lo-body.width/2.-clearance,
+                                            hi+body.width/2.+clearance});
+            }
+            std::sort(blockedIntervals.begin(),blockedIntervals.end());
+            std::array<double,2> candidates{0.,0.},widths{0.,0.};
+            const auto consider=[&](double lo,double hi) {
+                for(int side=0;side<2;++side) {
+                    const double l=std::max(lo,side==0?-extent:0.);
+                    const double h=std::min(hi,side==0?0.:extent);
+                    if(h-l>widths[side]) {widths[side]=h-l;candidates[side]=(h+l)/2.;}
+                }
+            };
+            double cursor=-extent;
+            for(const auto& interval:blockedIntervals) {
+                consider(cursor,std::min(extent,interval.first));
+                cursor=std::max(cursor,interval.second);
+            }
+            consider(cursor,extent);gapOffsets[key]=candidates;
+        }
+    }
+    const auto lateralOffset=[&](std::int64_t point,int offset) {
+        const double room=std::max(0.,std::min(extent,
+            r.network.points[point].width/2.-body.width/2.-
+                r.laneConfig.minimumLaneEdgeClearance));
+        if(offset<3) return double(offset-1)*room;
+        if(offset>=11) return gapOffsets.at(keyOf(r.network.points[point].pose))[offset-11];
+        return (offset%2? -1.:1.)*extent*(1.+(offset-3)/2)/4.;
+    };
+    const auto offsetAllowed=[&](std::int64_t point,int offset) {
+        if(offset<3) return true;
+        const auto& p=r.network.points[point];
+        const double lateral=lateralOffset(point,offset);
+        if(std::abs(lateral)<1e-5) return false;
+        for(int prior=0;prior<offset;++prior)
+            if(std::abs(lateral-lateralOffset(point,prior))<1e-5) return false;
+        const double room=std::max(0.,p.width/2.-body.width/2.-r.laneConfig.minimumLaneEdgeClearance);
+        if(std::abs(lateral)<=room+1e-6) return true;
+        const auto adjacent=lateral<0.?p.rightPoint:p.leftPoint;
+        return (lateral<0.?p.rightChangeAllowed:p.leftChangeAllowed) &&
+            adjacent>=0 && searchAllowed[adjacent] && visible(r.network,adjacent) &&
+            std::abs(normalizeAngle(p.pose.yaw-r.network.points[adjacent].pose.yaw))<.5;
+    };
+    // A narrow passage can start inside a merge/taper. The original in-lane
+    // endpoints stop at lane IDs and cannot express an offset beginning
+    // before that seam. Only the expanded tier follows the unique declared
+    // longitudinal successor across it; every resulting curve is still swept.
+    std::vector<std::array<CorridorEdge,4>> expandedShifts;
+    if(expandedOffsets) {
+        expandedShifts.resize(activePoints.size());
+        const std::array<double,4> lengths{6.,8.,r.laneConfig.latticeShortDistance,
+                                                r.laneConfig.latticeMediumDistance};
+        for(std::size_t i=0;i<activePoints.size();++i) {
+            const auto origin=activePoints[i];
+            auto cursor=origin;double travelled=0.;std::size_t lengthIndex=0;
+            for(int steps=0;steps<200 && lengthIndex<lengths.size();++steps) {
+                const CorridorEdge* next=nullptr;
+                for(const auto& edge:r.forward[cursor]) {
+                    if(edge.lateral || edge.to<0 || !searchAllowed[edge.to]) continue;
+                    if(next) {next=nullptr;break;}
+                    next=&edge;
+                }
+                if(!next || next->to==cursor) break;
+                cursor=next->to;travelled+=next->distance;
+                if(std::abs(normalizeAngle(r.network.points[cursor].pose.yaw-
+                                          r.network.points[origin].pose.yaw))>.5) break;
+                while(lengthIndex<lengths.size() && travelled>=lengths[lengthIndex])
+                    expandedShifts[i][lengthIndex++]={cursor,travelled,-1,true};
+            }
+        }
+    }
     // With a farther return frontier, reaching a neighbouring free lane is
     // not enough: the chosen route must also visit this leg's actual target.
     // Keep that path-dependent fact in A*, rather than rejecting the cheapest
     // assembled path and accidentally declaring every alternative blocked.
-    const auto stateId=[](std::int64_t point,int offset,bool targetVisited=false) {
-        return point*offsetStateCount*2+(targetVisited?offsetStateCount:0)+offset;
+    const auto stateId=[&](std::int64_t point,int offset,bool targetVisited=false) {
+        return compact[point]*offsetStateCount*2+(targetVisited?offsetStateCount:0)+offset;
     };
-    const auto statePoint=[](std::int64_t state) {
-        return state/(offsetStateCount*2);
+    const auto statePoint=[&](std::int64_t state) {
+        return activePoints[state/(offsetStateCount*2)];
     };
-    const auto stateOffset=[](std::int64_t state) {
+    const auto stateOffset=[&](std::int64_t state) {
         return int(state%offsetStateCount);
     };
-    const auto targetVisited=[](std::int64_t state) {
+    const auto targetVisited=[&](std::int64_t state) {
         return (state/offsetStateCount)%2!=0;
     };
     const auto offsetPose=[&](std::int64_t point,int offset) {
         Waypoint pose=r.network.points[point].pose;
-        const double room=std::max(0.,std::min(
-            r.laneConfig.maximumLateralOffset,
-            r.network.points[point].width/2.-egoFootprint(world).width/2.-
-                r.laneConfig.minimumLaneEdgeClearance));
-        const double lateral=double(offset-1)*room;
+        const double lateral=lateralOffset(point,offset);
         pose.x-=lateral*std::sin(pose.yaw);
         pose.y+=lateral*std::cos(pose.yaw);
         return pose;
@@ -1267,14 +1381,14 @@ bool materializePrecomputedGatewayRouteStage(
     };
     using Item=std::pair<double,std::int64_t>;
     const std::size_t stateCount=
-        r.network.points.size()*offsetStateCount*2;
+        activePoints.size()*offsetStateCount*2;
     std::vector<signed char> blocked(stateCount,-1);
     const auto stateBlocked=[&](std::int64_t state) {
         auto& cached=blocked[state];
         if(cached>=0) return cached!=0;
         const auto pose=offsetPose(statePoint(state),stateOffset(state));
         const auto box=vehicleFootprintAt(egoFootprint(world),
-            {pose.x,pose.y,pose.yaw},r.laneConfig.latticeObstacleClearance);
+            {pose.x,pose.y,pose.yaw},clearance);
         cached=0;
         for(const auto& object:world.objects) {
             if(!isStationaryRouteObstacle(object)) continue;
@@ -1291,7 +1405,7 @@ bool materializePrecomputedGatewayRouteStage(
         const double value=r.gatewayCost[statePoint(state)];
         return std::isfinite(value)?value:0.;
     };
-    const auto edgeKey=[](const Parent& step) {
+    const auto edgeKey=[&](const Parent& step) {
         return std::pair<std::int64_t,std::int64_t>{
             step.fromState,
             step.edge.to*offsetStateCount+step.targetOffset};
@@ -1351,7 +1465,7 @@ bool materializePrecomputedGatewayRouteStage(
             lengthSquared*k0*std::cos(a.yaw),lengthSquared*k1*std::cos(b.yaw));
         const auto body=egoFootprint(world);
         const double radius=std::hypot(std::max(body.frontExtent(),body.rearExtent()),body.width/2.)+
-            std::sqrt(2.)*r.laneConfig.latticeObstacleClearance;
+            std::sqrt(2.)*clearance;
         bool nearStationary=false;
         for(const auto& object:world.objects) {
             if(!isStationaryRouteObstacle(object)) continue;
@@ -1368,7 +1482,7 @@ bool materializePrecomputedGatewayRouteStage(
             return true;
         }
         const bool clear=stationaryPathClear(
-                physical,world,r.laneConfig.latticeObstacleClearance,0,nullptr,&map);
+                physical,world,clearance,0,nullptr,&map);
         generatedCollisionCache[key]=clear;
         return clear;
     };
@@ -1406,7 +1520,10 @@ bool materializePrecomputedGatewayRouteStage(
             }
             const auto relax=[&](const CorridorEdge& edge,int targetOffset,
                                  bool generatedCurve,double penalty) {
-                if(edge.to<0 || !searchAllowed[edge.to]) return;
+                if(edge.to<0 || !searchAllowed[edge.to] || !offsetAllowed(edge.to,targetOffset)) return;
+                // A lane/section change must not teleport an adaptive offset.
+                if(expandedOffsets && !generatedCurve && currentOffset>=3 &&
+                   std::abs(lateralOffset(id,currentOffset)-lateralOffset(edge.to,targetOffset))>1e-5) return;
                 const auto targetState=stateId(edge.to,targetOffset,
                     targetVisited(currentState) ||
                     missionPointIsTarget(*leg,r.network.points[edge.to].pose));
@@ -1466,7 +1583,8 @@ bool materializePrecomputedGatewayRouteStage(
             // The same immutable lane walk used to allocate a set and scan
             // dozens of points for every expanded offset state and retry.
             // Its endpoints are now calculated once with the map at startup.
-            if(allowOffsets) for(const auto& shift:r.globalInLaneShift[id]) {
+            if(allowOffsets) for(const auto& shift:expandedOffsets
+                    ?expandedShifts[compact[id]]:r.globalInLaneShift[id]) {
                 if(shift.to<0) continue;
                 for(int targetOffset=0;targetOffset<offsetStateCount;
                     ++targetOffset) {
@@ -1512,8 +1630,12 @@ bool materializePrecomputedGatewayRouteStage(
                 physical={offsetPose(from,fromOffset),
                           offsetPose(step.edge.to,step.targetOffset)};
             }
+            if(expandedOffsets && !step.generatedCurve && fromOffset!=1 &&
+               !surfaceAndMarks(r,map,physical,world,failure,true,&rejectedPoint)) {
+                selectedRouteValid=false;failedStep=step;break;
+            }
             if(physical.empty() || !stationaryPathClear(
-                    physical,world,r.laneConfig.latticeObstacleClearance,0,nullptr,&map)) {
+                    physical,world,clearance,0,nullptr,&map)) {
                 failure="selected_edge_intersects_stationary_object";
                 selectedRouteValid=false;failedStep=step;break;
             }
@@ -1527,7 +1649,7 @@ bool materializePrecomputedGatewayRouteStage(
             ++rejectedSelected;
             std::ostringstream detail;
             detail<<"attempt="<<attempt
-                  <<" stage="<<(allowOffsets?"offset_fallback":"lane_centers")
+                  <<" stage="<<stage
                   <<" reason="<<failure
                   <<" from="
                   <<r.network.points[statePoint(failedStep.fromState)].pose.roadId
@@ -1562,10 +1684,10 @@ bool materializePrecomputedGatewayRouteStage(
         const auto beforeSmoothing=output;
         repairTrackingTangents(output);
         const bool joined=smoothSourceJoins(output,r,map,world,&failure,true,
-            r.laneConfig.latticeObstacleClearance,&rejectedPoint);
+            clearance,&rejectedPoint);
         int assembledBlocker=-1;
         const bool assembledClear=joined && stationaryPathClear(output,world,
-            r.laneConfig.latticeObstacleClearance,0,&assembledBlocker,&map,&rejectedPoint);
+            clearance,0,&assembledBlocker,&map,&rejectedPoint);
         if(!assembledClear) {
             std::size_t nearestSample=0;double closest=inf;
             for(std::size_t i=0;i<beforeSmoothing.size();++i) {
@@ -1576,7 +1698,7 @@ bool materializePrecomputedGatewayRouteStage(
             const auto key=edgeKey(invalid);
             std::ostringstream detail;
             detail<<"attempt="<<attempt
-                  <<" stage="<<(allowOffsets?"offset_fallback":"lane_centers")
+                  <<" stage="<<stage
                   <<" reason="<<(joined?"assembled_path_intersects_stationary_object":"source_join_unavailable")
                   <<" blocker="<<assembledBlocker<<" failed_x="<<rejectedPoint.x
                   <<" failed_y="<<rejectedPoint.y<<" nearest_sample_distance="<<closest
@@ -1604,7 +1726,7 @@ bool materializePrecomputedGatewayRouteStage(
     if(reachedState<0 || output.size()<2) {
         traceDecision(trace,"corridor_global_route",
                       "precomputed_gateway_unreachable",
-                      std::string("stage=")+(allowOffsets?"offset_fallback":"lane_centers")+
+                      std::string("stage=")+stage+
                       " expanded="+std::to_string(expandedTotal)+
                       " goals="+std::to_string(goalCount)+
                       " blocked_samples="+std::to_string(rejectedStatic)+
@@ -1615,7 +1737,7 @@ bool materializePrecomputedGatewayRouteStage(
         output.clear();return false;
     }
     std::ostringstream detail;
-    detail<<"stage="<<(allowOffsets?"offset_fallback":"lane_centers")
+    detail<<"clearance="<<clearance<<" stage="<<stage
           <<" revision="<<(r.routeRevision+1)
           <<" start="<<r.network.points[start].pose.roadId<<':'
           <<r.network.points[start].pose.sectionIndex<<':'
@@ -1634,21 +1756,21 @@ bool materializePrecomputedGatewayRouteStage(
     return true;
 }
 
-bool materializePrecomputedGatewayRoute(
+bool materializeGatewaySearchTier(
     std::vector<Waypoint>& output,CorridorRuntime& r,
     const PathGeneratorData& map,const WorldState& world,
     const MissionCorridorData& mission,std::int64_t start,
-    DecisionTraceData* trace) {
+    DecisionTraceData* trace,bool expanded,double clearance) {
     // First branch repeatedly through physical lane centres all the way to
     // the mandatory exit. Only an exhausted centre search opens offset
     // samples for narrow/staggered gaps. This is a feasibility priority,
     // not a centre attraction cost that can change the selected gateway.
-    if(materializePrecomputedGatewayRouteStage(
-           output,r,map,world,mission,start,trace,false)) return true;
+    if(!expanded && materializePrecomputedGatewayRouteStage(
+           output,r,map,world,mission,start,trace,false,false,false,clearance)) return true;
     traceDecision(trace,"corridor_global_route","offset_search_started",
                   "lane_center_gateway_route_unavailable=1");
     if(materializePrecomputedGatewayRouteStage(
-           output,r,map,world,mission,start,trace,true)) return true;
+           output,r,map,world,mission,start,trace,true,false,expanded,clearance)) return true;
 
     const auto* leg=activeMissionLeg(mission);
     if(!mission.topologyAuthority || !leg || leg->finalLeg ||
@@ -1674,8 +1796,9 @@ bool materializePrecomputedGatewayRoute(
                   "ordinary_frontier_unreachable=1 current_mission_unchanged=1");
     bool success=false;
     for(const bool offsets:{false,true}) {
+        if(expanded && !offsets) continue;
         if(!materializePrecomputedGatewayRouteStage(
-               output,r,map,world,mission,start,trace,offsets)) continue;
+               output,r,map,world,mission,start,trace,offsets,false,expanded,clearance)) continue;
         const bool nextGatewayPassed=nextLeg.gatewayLanes.empty() ||
             std::any_of(output.begin(),output.end(),[&](const Waypoint& point) {
                 return nextLeg.gatewayLanes.count(keyOf(point))!=0;
@@ -1691,19 +1814,42 @@ bool materializePrecomputedGatewayRoute(
     return success;
 }
 
+bool materializePrecomputedGatewayRoute(
+    std::vector<Waypoint>& output,CorridorRuntime& r,
+    const PathGeneratorData& map,const WorldState& world,
+    const MissionCorridorData& mission,std::int64_t start,
+    DecisionTraceData* trace,double* validatedClearance=nullptr) {
+    const double nominal=r.laneConfig.latticeObstacleClearance;
+    const double tight=std::min(nominal,r.laneConfig.latticeTightObstacleClearance);
+    for(int tier=0;tier<3;++tier) {
+        if(tier==2 && tight>=nominal) break;
+        const double clearance=tier==2?tight:nominal;
+        if(tier>0) traceDecision(trace,"corridor_global_route","expanded_search_started",
+            "tier="+std::to_string(tier)+" clearance="+std::to_string(clearance)+
+            " previous_tier_exhausted=1");
+        if(materializeGatewaySearchTier(output,r,map,world,mission,start,trace,tier>0,clearance)) {
+            if(validatedClearance) *validatedClearance=clearance;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool soleGatewayApproach(std::vector<Waypoint>& output,int& blocker,
     CorridorRuntime& r,const PathGeneratorData& map,const WorldState& world,
-    const MissionCorridorData& mission,std::int64_t start,DecisionTraceData* trace) {
+    const MissionCorridorData& mission,std::int64_t start,DecisionTraceData* trace,
+    std::vector<int>& queueBlockers,bool& inEntranceLane) {
+    queueBlockers.clear();
+    inEntranceLane=false;
     const auto* leg=activeMissionLeg(mission);
     if(!leg || leg->gatewayLanes.empty() ||
        leg->gatewayCheckpoint>=mission.checkpoints.size()) return false;
-    const auto& gate=mission.checkpoints[leg->gatewayCheckpoint].checkpoint;
     auto approachLanes=leg->gatewayLanes;
     // This fallback runs only after all full collision-free gateway searches.
     // With multiple blocked gateways, retain their alternatives in the same
     // graph: ordinary lateral-change/distance cost chooses the approach.
     // An empty parallel dead end is never a gateway alternative.
-    for(int pass=0;pass<12;++pass) {
+    for(std::size_t pass=0;pass<leg->allowedLanes.size();++pass) {
         const auto previous=approachLanes;
         for(const auto& entry:map.laneGraph) {
             if(!leg->allowedLanes.count(entry.first)) continue;
@@ -1718,9 +1864,7 @@ bool soleGatewayApproach(std::vector<Waypoint>& output,int& blocker,
     WorldState probe=world;std::vector<int> gateBlockers;
     probe.objects.erase(std::remove_if(probe.objects.begin(),probe.objects.end(),
         [&](const WorldObjectState& object) {
-            if(!isStationaryRouteObstacle(object) || objectMotionSpeed(object)>=.1 ||
-               std::hypot(object.raw.x-gate.x,object.raw.y-gate.y)>
-                   r.laneConfig.roadConnectionPrepareDistance) return false;
+            if(!isStationaryRouteObstacle(object) || objectMotionSpeed(object)>=.1) return false;
             // The outgoing gateway may turn 90 degrees from Ego. Testing
             // its object with Ego's heading would miss exactly that blocker.
             // Use occupancy on the directed approach samples instead.
@@ -1740,6 +1884,9 @@ bool soleGatewayApproach(std::vector<Waypoint>& output,int& blocker,
             return false;
         }),probe.objects.end());
     if(gateBlockers.empty()) return false;
+    // The full vehicle-footprint search has already failed. Distance to a
+    // stop line/checkpoint cannot override that feasibility result.
+    queueBlockers=gateBlockers;
     // Search TO the back of a queue on a longitudinal predecessor of the
     // declared gateway, with EVERY real obstacle present. Truncating a route
     // searched with blockers erased can stop before an unfinished lane change
@@ -1748,8 +1895,6 @@ bool soleGatewayApproach(std::vector<Waypoint>& output,int& blocker,
     r.globalSearchGoal.assign(r.network.points.size(),false);
     std::map<std::int64_t,int> queueGoals;
     const auto body=egoFootprint(world);
-    const double entranceWindow=std::max(8.,body.length+
-        r.laneConfig.latticeShortDistance+r.laneConfig.gatewayReserveDistance);
     for(const auto& key:approachLanes) {
         const auto lane=r.network.lanes.find(key);
         if(lane==r.network.lanes.end() || lane->second.pointIds.size()<2) continue;
@@ -1771,8 +1916,6 @@ bool soleGatewayApproach(std::vector<Waypoint>& output,int& blocker,
                 }
             }
             if(occupant<0) continue;
-            if(tail==ids.size() && !leg->gatewayLanes.count(key) &&
-               gap(p,r.network.points[ids.back()].pose)>entranceWindow) break;
             tail=j;tailBlocker=occupant;lastBlockedS=p.s;
         }
         if(tail==ids.size()) continue;
@@ -1798,6 +1941,7 @@ bool soleGatewayApproach(std::vector<Waypoint>& output,int& blocker,
     }
     r.globalSearchGoal=std::move(originalGoals);
     if(queueFound) {
+        inEntranceLane=true;
         traceDecision(trace,"sole_gateway","entrance_lane_queue_approach_built",
             "all_real_obstacles_checked=1 gateway_completed=0 blocker="+
             std::to_string(blocker)+" target_lane="+
@@ -1913,6 +2057,29 @@ bool recoveryRouteSlice(std::vector<Waypoint>& output,CorridorRuntime& r,
     return output.size()>=2;
 }
 
+bool queueApproachSlice(std::vector<Waypoint>& output,const CorridorRuntime& r,
+                        const WorldState& world,double horizon) {
+    output.clear();
+    const auto& route=r.soleGatewayApproachPath;
+    std::size_t near=0;double best=inf;
+    for(std::size_t i=0;i<route.size();++i) {
+        if(std::abs(normalizeAngle(route[i].yaw-world.ego.heading))>.8) continue;
+        const double distance=std::hypot(route[i].x-world.ego.x,route[i].y-world.ego.y);
+        if(distance<best) {best=distance;near=i;}
+    }
+    if(best>1.25 || near+1>=route.size()) return false;
+    // The caller creates a fresh Pure Pursuit planner each frame. Its bounded
+    // nearest-point search starts at index zero: returning the entire cached
+    // approach traps tracking in the first 35 m after Ego has driven past it.
+    // Keep the committed curve, but hand off only the current tracking slice.
+    const double offset=world.egoPathS-route[near].s;
+    for(std::size_t i=near>4?near-4:0;i<route.size();++i) {
+        auto point=route[i];point.s+=offset;append(output,point);
+        if(i>near && point.s>=world.egoPathS+horizon) break;
+    }
+    return output.size()>=2;
+}
+
 bool ensureObstacleAwareGlobalRoute(
     std::vector<Waypoint>& output,CorridorRuntime& r,
     const PathGeneratorData& map,const WorldState& world,
@@ -1925,10 +2092,10 @@ bool ensureObstacleAwareGlobalRoute(
         // Check only the unconsumed suffix.  An obstacle already passed must
         // not invalidate a route merely because its old point is still stored.
         retained=stationaryPathClear(
-            r.committedGlobalPath,world,r.laneConfig.latticeObstacleClearance,
+            r.committedGlobalPath,world,r.globalPathClearance(),
             r.committedGlobalPathProgress,nullptr,&map);
     }
-    if(retained) {output=std::move(current);return true;}
+    if(retained) {output=std::move(current);r.trackingPathValidatedClearance=r.globalPathClearance();return true;}
 
     if (r.budgetedSearch && mission.topologyAuthority && r.globalRouteWorker) {
         auto& worker = *r.globalRouteWorker;
@@ -1950,6 +2117,8 @@ bool ensureObstacleAwareGlobalRoute(
                 traceDecision(trace,"corridor_global_route","worker_completed",detail.str());
             }
             if (result.leg == r.activeLeg && result.revision == r.globalRouteRequestRevision) {
+                if(!result.exception && result.staticSignature==stationarySceneSignature(world))
+                    r.gatewayQueueBlockers=result.queueBlockers;
                 // The vehicle and observations have advanced while A* ran.
                 // Validate attachment and the remaining static-clear suffix
                 // against THIS frame before adopting the asynchronous result.
@@ -1963,7 +2132,7 @@ bool ensureObstacleAwareGlobalRoute(
                 }
                 int blocker=-1;
                 const bool observedSuffixClear=result.success &&
-                    stationaryPathClear(result.path,world,r.laneConfig.latticeObstacleClearance,
+                    stationaryPathClear(result.path,world,result.clearance,
                                         nearestIndex,&blocker,&map);
                 if(result.success && (best>1.25 || nearestIndex+1>=result.path.size() || !observedSuffixClear)) {
                     std::ostringstream detail;
@@ -1973,18 +2142,36 @@ bool ensureObstacleAwareGlobalRoute(
                 }
                 if (result.success && best <= 1.25 && nearestIndex+1 < result.path.size() && observedSuffixClear) {
                     if(result.approachOnly) {
-                        r.soleGatewayApproachPath=std::move(result.path);
-                        r.soleGatewayApproachBlocker=result.approachBlocker;
-                        r.soleGatewayApproachSignature=result.staticSignature;
+                        // A retry exists to discover an OPEN through-route.
+                        // Replacing an attached queue approach every second
+                        // repeatedly postpones its already chosen lane change.
+                        // Upgrade a parallel partial wait to the entrance lane,
+                        // but otherwise keep the same safe queue trajectory.
+                        const bool retainApproach=
+                            r.soleGatewayApproachSignature==result.staticSignature &&
+                            r.soleGatewayApproachBlocker==result.approachBlocker &&
+                            (r.soleGatewayApproachInEntranceLane || !result.approachInEntranceLane) &&
+                            corridorTrackingPathIsSafe(r.soleGatewayApproachPath,world,
+                                r.laneConfig.latticeObstacleClearance,nullptr,nullptr,&map);
+                        if(!retainApproach) {
+                            r.soleGatewayApproachPath=std::move(result.path);
+                            r.soleGatewayApproachBlocker=result.approachBlocker;
+                            r.soleGatewayApproachSignature=result.staticSignature;
+                            r.soleGatewayApproachInEntranceLane=result.approachInEntranceLane;
+                        }
                         r.globalRouteSearchFailed=true;r.globalRouteFailureLane=result.startLane;
                         r.globalRouteFailureRoadS=result.startRoadS;
                         r.globalRouteFailureStaticSignature=result.staticSignature;
                         r.globalRouteRetryAfter=world.receiveTime+1.;
-                        traceDecision(trace,"sole_gateway","safe_approach_adopted",
-                            "gateway_completed=0 actual_pose_and_obstacles_rechecked=1");
+                        traceDecision(trace,"sole_gateway",retainApproach?
+                            "safe_approach_retained":"safe_approach_adopted",
+                            "gateway_completed=0 actual_pose_and_obstacles_rechecked=1 entrance_lane="+
+                            std::to_string(r.soleGatewayApproachInEntranceLane));
                     } else {
                     r.committedGlobalPath = std::move(result.path);
+                    r.committedGlobalPathClearance=result.clearance;
                     r.soleGatewayApproachPath.clear();
+                    r.gatewayQueueBlockers.clear();
                     r.committedGlobalPathLeg = r.activeLeg;
                     r.committedGlobalPathProgress = nearestIndex;
                     r.committedGlobalPathReachesGateway = true;
@@ -1995,7 +2182,7 @@ bool ensureObstacleAwareGlobalRoute(
                     ++r.routeRevision;
                     traceDecision(trace,"corridor_global_route","async_route_adopted",
                                   "current_pose_and_observed_static_suffix_revalidated=1");
-                    if (globalRouteSlice(output,r,world,horizon)) return true;
+                    if (globalRouteSlice(output,r,world,horizon)) {r.trackingPathValidatedClearance=r.globalPathClearance();return true;}
                     }
                 } else if (!result.success) {
                     r.globalRouteSearchFailed = true;
@@ -2044,12 +2231,47 @@ bool ensureObstacleAwareGlobalRoute(
                         activate(*snapshot,mission);
                         snapshot->activeGatewayObserved=gatewayObserved;
                         const auto start = nearest(*snapshot,world);
-                        if (start>=0) result.success = materializePrecomputedGatewayRoute(
-                            result.path,*snapshot,*mapSnapshot,world,mission,start,&workerTrace);
+                        const auto attachCandidate=[&]() {
+                            if(result.path.empty()) return false;
+                            if(std::hypot(result.path.front().x-world.ego.x,
+                                          result.path.front().y-world.ego.y)<=.35 &&
+                               std::abs(normalizeAngle(result.path.front().yaw-world.ego.heading))<=.1)
+                                return true;
+                            std::vector<Waypoint> attached;
+                            bool valid=connectToReferencePath(attached,result.path,0,
+                                *snapshot,*mapSnapshot,world,inf,&workerTrace,true,result.clearance);
+                            if(valid) {
+                                const auto* leg=activeMissionLeg(mission);
+                                Waypoint actual;actual.roadId=world.egoRoadId;
+                                actual.sectionIndex=world.egoSectionIndex;
+                                actual.laneId=world.egoLaneId;actual.roadS=world.egoRoadS;
+                                if(!result.approachOnly && leg && !leg->gatewayLanes.empty() &&
+                                   !gatewayObserved && !missionPointIsTarget(*leg,actual) &&
+                                   std::none_of(attached.begin(),attached.end(),[&](const auto& p){
+                                       return leg->gatewayLanes.count(keyOf(p))!=0;
+                                   })) valid=false;
+                            }
+                            if(valid) result.path=std::move(attached);
+                            else {
+                                result.path.clear();
+                                traceDecision(&workerTrace,"corridor_global_route","snapshot_attachment_failed",
+                                    "measured_pose_requires_checked_reentry=1");
+                            }
+                            return valid;
+                        };
+                        // A full route includes attachment from the measured
+                        // pose. An unattached map route must not suppress an
+                        // otherwise reachable waiting approach.
+                        if(start>=0) result.success=materializePrecomputedGatewayRoute(
+                            result.path,*snapshot,*mapSnapshot,world,mission,start,&workerTrace,&result.clearance) &&
+                            attachCandidate();
                         if(start>=0 && !result.success) {
-                            result.approachOnly=soleGatewayApproach(result.path,result.approachBlocker,
-                                *snapshot,*mapSnapshot,world,mission,start,&workerTrace);
-                            result.success=result.approachOnly;
+                            result.approachOnly=true;
+                            result.clearance=snapshot->laneConfig.latticeObstacleClearance;
+                            result.success=soleGatewayApproach(result.path,result.approachBlocker,
+                                *snapshot,*mapSnapshot,world,mission,start,&workerTrace,result.queueBlockers,
+                                result.approachInEntranceLane) &&
+                                attachCandidate();
                         }
                         result.exitPreview=result.success && !result.approachOnly && snapshot->globalExitPreviewActive;
                     } catch (...) {result.success=false;result.exception=true;}
@@ -2075,17 +2297,17 @@ bool ensureObstacleAwareGlobalRoute(
         }
         // A newly checked approach must not be hidden by a blocked old route.
         if(sliceAvailable && stationaryPathClear(r.committedGlobalPath,world,
-               r.laneConfig.latticeObstacleClearance,r.committedGlobalPathProgress,nullptr,&map) &&
-           corridorTrackingPathIsSafe(current,world,r.laneConfig.latticeObstacleClearance,
+               r.globalPathClearance(),r.committedGlobalPathProgress,nullptr,&map) &&
+           corridorTrackingPathIsSafe(current,world,r.globalPathClearance(),
                                       nullptr,nullptr,&map)) {
-            output=std::move(current);return true;
+            output=std::move(current);r.trackingPathValidatedClearance=r.globalPathClearance();return true;
         }
-        if(!r.soleGatewayApproachPath.empty() &&
-           corridorTrackingPathIsSafe(r.soleGatewayApproachPath,world,r.laneConfig.latticeObstacleClearance,
+        if(queueApproachSlice(output,r,world,horizon) &&
+           corridorTrackingPathIsSafe(output,world,r.laneConfig.latticeObstacleClearance,
                                       nullptr,nullptr,&map)) {
-            output=r.soleGatewayApproachPath;r.soleGatewayApproachSelected=true;return true;
+            r.soleGatewayApproachSelected=true;return true;
         }
-        if (sliceAvailable) {output=std::move(current);return true;}
+        if (sliceAvailable) {output=std::move(current);r.trackingPathValidatedClearance=r.globalPathClearance();return true;}
         // The ordinary gateway-aware sampled path and bounded local avoidance
         // continue sending commands while the global worker is busy.
         return false;
@@ -2125,9 +2347,11 @@ bool ensureObstacleAwareGlobalRoute(
             std::abs(world.egoRoadS-r.globalRouteFailureRoadS)<8.0 &&
             world.receiveTime<r.globalRouteRetryAfter;
         std::vector<Waypoint> rebuilt;
+        double routeClearance=r.laneConfig.latticeObstacleClearance;
         if(!retrySuppressed && start>=0 && materializePrecomputedGatewayRoute(
-                rebuilt,r,map,world,mission,start,trace)) {
+                rebuilt,r,map,world,mission,start,trace,&routeClearance)) {
             r.committedGlobalPath=std::move(rebuilt);
+            r.committedGlobalPathClearance=routeClearance;
             r.committedGlobalPathLeg=r.activeLeg;
             r.committedGlobalPathProgress=0;
             r.committedGlobalPathReachesGateway=true;
@@ -2136,7 +2360,7 @@ bool ensureObstacleAwareGlobalRoute(
             r.globalRouteReplanRequested=false;
             r.recoveryTrackingPath.clear();
             ++r.routeRevision;
-            if(globalRouteSlice(output,r,world,horizon)) return true;
+            if(globalRouteSlice(output,r,world,horizon)) {r.trackingPathValidatedClearance=r.globalPathClearance();return true;}
         }
         if(!retrySuppressed) {
             r.globalRouteSearchFailed=true;
@@ -2180,6 +2404,7 @@ bool ensureObstacleAwareGlobalRoute(
        materializeObstacleAwareGlobalRoute(
             rebuilt,r,map,world,mission,start,trace)) {
         r.committedGlobalPath=std::move(rebuilt);
+        r.committedGlobalPathClearance=r.laneConfig.latticeObstacleClearance;
         r.committedGlobalPathLeg=r.activeLeg;
         r.committedGlobalPathProgress=0;
         r.committedGlobalPathReachesGateway=true;
@@ -2187,7 +2412,7 @@ bool ensureObstacleAwareGlobalRoute(
         r.globalRouteReplanRequested=false;
         r.recoveryTrackingPath.clear();
         ++r.routeRevision;
-        if(globalRouteSlice(output,r,world,horizon)) return true;
+        if(globalRouteSlice(output,r,world,horizon)) {r.trackingPathValidatedClearance=r.globalPathClearance();return true;}
     }
     if(!unchangedFailedSearch) {
         r.globalRouteSearchFailed=true;
@@ -2234,14 +2459,22 @@ bool recoverTrackingPath(std::vector<Waypoint>& output,const CorridorRuntime& r,
             if(cell==r.spatial.end()) continue;
             for(const auto id:cell->second) {
                 if(physicalNetwork?!visible(r.network,id):!r.trackingAllowed[id]) continue;
-                if(scope && (!r.allowed[id] || !std::isfinite(r.gatewayCost[id]))) continue;
+                if(scope && (!r.allowed[id] || !std::isfinite(r.gatewayCost[id]) ||
+                             r.gatewayLateralSteps[id]!=0)) continue;
                 const auto& p=r.network.points[id];
                 const double px=p.pose.x-world.ego.x,py=p.pose.y-world.ego.y;
                 const double ahead=px*c+py*s;
-                if(ahead<6. || ahead>35. || std::abs(-px*s+py*c)>10. ||
-                   p.width<egoFootprint(world).width || std::abs(normalizeAngle(p.pose.yaw-world.ego.heading))>1.) continue;
+                const double heading=std::abs(normalizeAngle(p.pose.yaw-world.ego.heading));
+                const double reach=scope?std::hypot(px,py):ahead;
+                // A missed turning connector can be beside the vehicle. Its
+                // return endpoint need not be six metres along Ego's old
+                // straight heading. Curvature and the complete body sweep,
+                // rather than that projection, decide physical feasibility.
+                if(ahead<(scope?0.:6.) || reach<6. || reach>35. ||
+                   std::abs(-px*s+py*c)>(scope?25.:10.) ||
+                   p.width<egoFootprint(world).width || heading>(scope?2.2:1.)) continue;
                 for(int bucket=0;bucket<int(recoveryLengths.size());++bucket) {
-                    const double score=std::abs(ahead-recoveryLengths[bucket]);
+                    const double score=std::abs(reach-recoveryLengths[bucket]);
                     const auto key=std::make_pair(keyOf(p.pose),bucket);
                     const auto old=choices.find(key);
                     if(old==choices.end() || score<old->second.first) choices[key]={score,id};
@@ -2257,7 +2490,7 @@ bool recoverTrackingPath(std::vector<Waypoint>& output,const CorridorRuntime& r,
             start.roadId=world.egoRoadId;start.sectionIndex=world.egoSectionIndex;
             start.laneId=world.egoLaneId;start.roadS=world.egoRoadS;
             std::vector<Waypoint> candidate;double maxK{};std::string reason;
-            if(!curve(candidate,start,r.curvature,target,&maxK)) continue;
+            if(!curve(candidate,start,r.curvature,target,&maxK,1.,scope?2.2:1.4)) continue;
             Waypoint rejected;
             if(!surfaceAndMarks(r,map,candidate,world,reason,!physicalNetwork,&rejected,
                                 scope?&scope->surface:nullptr)) {
@@ -2276,6 +2509,11 @@ bool recoverTrackingPath(std::vector<Waypoint>& output,const CorridorRuntime& r,
                                20.*maxK+(std::isfinite(r.gatewayCost[id])?0.:20.);
             if(score>=best) continue;
             for(const auto& p:tail) append(candidate,p);
+            // The consumer needs a settled, usable return. A cheaper short
+            // prefix in the same wrong entrance lane must not repeatedly
+            // win here and then fail adoption, starving the actual return.
+            if(scope && candidate.back().s-candidate.front().s<
+                std::max(8.,r.laneConfig.gatewayReserveDistance)+2.) continue;
             if(scope && (!mission || !corridorReentryPreservesMission(candidate,r,*mission,world,*scope))) continue;
             if(scope && !corridorTrackingPathIsSafe(candidate,world,r.laneConfig.latticeObstacleClearance,
                                                    nullptr,nullptr,&map)) continue;
@@ -2492,7 +2730,14 @@ bool connectToReferencePath(std::vector<Waypoint>& output,
                             const PathGeneratorData& map,
                             const WorldState& world,double horizon,
                             DecisionTraceData* trace,
-                            bool corridorOnly=true) {
+                            bool corridorOnly=true,double clearance) {
+    auto collisionConfig=r.laneConfig;
+    if(clearance<0.) clearance=&reference==&r.committedGlobalPath
+        ?r.globalPathClearance():r.laneConfig.latticeObstacleClearance;
+    collisionConfig.latticeObstacleClearance=clearance;
+    if(clearance<r.laneConfig.latticeObstacleClearance)
+        collisionConfig.maximumLaneChangeSpeed=std::min(
+            collisionConfig.maximumLaneChangeSpeed,collisionConfig.localFallbackSpeed);
     output.clear();
     if(reference.size()<2) return false;
     // A failed bridge to an unchanged, blocked global route used to consume
@@ -2530,8 +2775,8 @@ bool connectToReferencePath(std::vector<Waypoint>& output,
        failed.requestRevision==r.globalRouteRequestRevision &&
        failed.progress==referenceProgress && failed.pointCount==reference.size() &&
        failed.lane==lane && failed.horizon==horizon &&
-       failed.clearance==r.laneConfig.latticeObstacleClearance &&
-       failed.maneuverSpeed==r.laneConfig.maximumLaneChangeSpeed &&
+       failed.clearance==clearance &&
+       failed.maneuverSpeed==collisionConfig.maximumLaneChangeSpeed &&
        std::hypot(world.ego.x-failed.x,world.ego.y-failed.y)<.25 &&
        std::abs(world.ego.z-failed.z)<.1 &&
        std::abs(normalizeAngle(world.ego.heading-failed.yaw))<.02 &&
@@ -2590,7 +2835,7 @@ bool connectToReferencePath(std::vector<Waypoint>& output,
         }
         if(candidate.size()<2 ||
            !collisionFree(candidate,world,PlanningBehaviorConfig{},
-                          r.laneConfig,&map)) continue;
+                          collisionConfig,&map)) continue;
         const double score=std::abs(lateral)+20.*maxK+.01*ahead;
         if(score>=bestScore) continue;
         output=std::move(candidate);bestScore=score;
@@ -2605,8 +2850,8 @@ bool connectToReferencePath(std::vector<Waypoint>& output,
             failed.z=world.ego.z;failed.yaw=world.ego.heading;
             failed.speed=world.egoSpeed;failed.curvature=r.curvature;
             failed.horizon=horizon;failed.failedAt=world.receiveTime;
-            failed.clearance=r.laneConfig.latticeObstacleClearance;
-            failed.maneuverSpeed=r.laneConfig.maximumLaneChangeSpeed;
+            failed.clearance=clearance;
+            failed.maneuverSpeed=collisionConfig.maximumLaneChangeSpeed;
             failed.footprint=footprint;failed.observations=std::move(observations);
         }
         return false;
@@ -2769,7 +3014,10 @@ std::shared_ptr<CorridorReentryScope> makeReentryScope(
         // than one lane from the corridor. Admit only a short origin-lane
         // apron; the endpoint/whole return certificate still requires the
         // official gateway. Never add that lane to global mission authority.
-        if(relocalizing && keyOf(point.pose)==LaneKey{world.egoRoadId,world.egoSectionIndex,world.egoLaneId}) {
+        if(relocalizing && point.pose.roadId==world.egoRoadId &&
+           point.pose.sectionIndex==world.egoSectionIndex &&
+           point.pose.laneId*world.egoLaneId>0 &&
+           std::abs(point.pose.laneId-world.egoLaneId)<=1) {
             const double dx=point.pose.x-world.ego.x,dy=point.pose.y-world.ego.y;
             const double ahead=dx*std::cos(world.ego.heading)+dy*std::sin(world.ego.heading);
             if(ahead>=-egoFootprint(world).length && ahead<=40. && std::hypot(dx,dy)<=45. &&
@@ -3468,10 +3716,10 @@ bool prepareCorridorProgressRecovery(
         }
         const auto endId = containing(r, path.back().x, path.back().y, path.back().yaw, false);
         const bool reachable = endId >= 0 && std::isfinite(r.gatewayCost[endId]);
-        // Once the unique required approach is known, contact recovery must
-        // not escape onto a parallel lane that cannot reach that gateway.
-        if(!r.soleGatewayApproachPath.empty() &&
-           activeMissionLeg(mission)->gatewayLanes.size()==1 && !reachable) return;
+        // Recovery retains the required exit even before a queue approach
+        // exists. A timeout must not authorize an unreachable straight road.
+        if(!activeMissionLeg(mission)->gatewayLanes.empty() &&
+           !r.activeGatewayObserved && !reachable) return;
         // Clear exits dominate paths that finish inside a body. Among paths
         // that escape, minimize penetration and contact distance. An initial
         // overlap is not a rejection, so driving out of it remains possible.
@@ -3594,6 +3842,69 @@ bool prepareCorridorProgressRecovery(
     return true;
 }
 
+void prepareSimulationCreepFallback(PathPlannerData& output, const WorldState& world,
+    const PathGeneratorData& map, const MissionCorridorData& mission,
+    const std::vector<Waypoint>& reference, DecisionTraceData* trace) {
+    std::vector<Waypoint> guide;
+    double initialCurvature = 0.;
+    if (map.corridorRuntime && activeMissionLeg(mission)) {
+        auto& r = *map.corridorRuntime;
+        activate(r, mission);
+        auto id = nearest(r, world);
+        if (id < 0 || !std::isfinite(r.gatewayCost[id])) {
+            double best = inf;
+            for (const auto& point : r.network.points) {
+                if (!r.allowed[point.id] || !std::isfinite(r.gatewayCost[point.id])) continue;
+                const double cost = std::hypot(point.pose.x-world.ego.x, point.pose.y-world.ego.y) +
+                    3. * std::abs(normalizeAngle(point.pose.yaw-world.ego.heading));
+                if (cost < best) { best = cost; id = point.id; }
+            }
+        }
+        if (id >= 0) guide = forwardPath(r, id, 30., 0.);
+        if (std::isfinite(r.curvature)) initialCurvature = std::clamp(
+            r.curvature, -maximumCurvature, maximumCurvature);
+    }
+    if (guide.size() < 2) guide = reference;
+    double targetCurvature = 0.;
+    Waypoint start;
+    start.roadId = world.egoRoadId; start.sectionIndex = world.egoSectionIndex;
+    start.laneId = world.egoLaneId; start.roadS = world.egoRoadS;
+    if (!guide.empty()) {
+        const auto near = std::min_element(guide.begin(), guide.end(), [&](const auto& a, const auto& b) {
+            return std::hypot(a.x-world.ego.x,a.y-world.ego.y) <
+                   std::hypot(b.x-world.ego.x,b.y-world.ego.y);
+        });
+        const double preview = std::max(6., std::hypot(near->x-world.ego.x,near->y-world.ego.y));
+        auto aim = near;
+        double distance = 0.;
+        while (aim+1 != guide.end() && distance < preview) {
+            distance += gap(*aim, *(aim+1)); ++aim;
+        }
+        const double dx = aim->x-world.ego.x, dy = aim->y-world.ego.y;
+        const double forward = dx*std::cos(world.ego.heading)+dy*std::sin(world.ego.heading);
+        if (forward > .1) {
+            const double lateral = -dx*std::sin(world.ego.heading)+dy*std::cos(world.ego.heading);
+            targetCurvature = std::clamp(2.*lateral/std::max(1.,dx*dx+dy*dy),
+                                         -maximumCurvature, maximumCurvature);
+            start = *near;
+        }
+    }
+    start.x=world.ego.x; start.y=world.ego.y; start.yaw=world.ego.heading; start.s=0.;
+    output.waypoints.clear(); output.nearestIndex=0;
+    output.config.minLookahead=std::min(2.,output.config.minLookahead);
+    auto p=start; append(output.waypoints,p);
+    for (int step=1; step<=80; ++step) {
+        const double blend=std::min(1.,(step-.5)*.2/3.);
+        const double k=(1.-blend)*initialCurvature+blend*targetCurvature;
+        const double middle=p.yaw+.1*k;
+        p.x+=.2*std::cos(middle); p.y+=.2*std::sin(middle);
+        p.yaw=normalizeAngle(p.yaw+.2*k); append(output.waypoints,p);
+    }
+    traceDecision(trace,"progress_recovery","unchecked_creep_geometry",
+        "all_checked_candidates_failed=1 curvature="+std::to_string(targetCurvature)+
+        " collision_clearance_certified=0 surface_certified=0");
+}
+
 bool prepareLocalCorridorFallback(LaneChangeData& replacement,const LaneChangeConfig& config,
     const PlanningBehaviorConfig& safety,const WorldState& world,const PathGeneratorData& map,
     const MissionCorridorData& mission,const std::vector<Waypoint>& reference,DecisionTraceData* trace) {
@@ -3634,7 +3945,11 @@ bool prepareLocalCorridorFallback(LaneChangeData& replacement,const LaneChangeCo
     // it is never adopted as a route to an arbitrary successor. Infinite
     // free distance on a usable detour means CLEAR, not missing: scanning its
     // old lane would rediscover the obstacle that the detour already avoids.
-    if((!referenceUsable || r.soleGatewayApproachSelected) && !std::isfinite(freeDistance)) {
+    // A safe queue approach intentionally ends before its blocker. Looking
+    // past that endpoint on the old physical lane launches an unrelated
+    // local bypass while the global worker is already checking passage.
+    // Actual obstacles on the selected path and relocalization remain active.
+    if(!referenceUsable && !r.soleGatewayApproachSelected && !std::isfinite(freeDistance)) {
         const auto physical=containing(r,world.ego.x,world.ego.y,world.ego.heading,false);
         if(physical>=0) freeDistance=nearbyFreeDistance(
             forwardPath(r,physical,activation+1.,world.egoPathS,true));
@@ -3949,7 +4264,7 @@ static bool buildCorridorTrackingGeometry(PathPlannerData& output,const PathPlan
         const bool keep=!world.respawnDetected &&
             remainingAttachedPath(tail,r.pendingGatewayHandoffPath,world) &&
             surfaceAndMarks(r,map,tail,world,reason) &&
-            corridorTrackingPathIsSafe(tail,world,r.laneConfig.latticeObstacleClearance,
+            corridorTrackingPathIsSafe(tail,world,r.pendingGatewayHandoffClearance,
                                       nullptr,nullptr,&map);
         r.pendingGatewayHandoffPath.clear();
         if(keep) {
@@ -3957,7 +4272,7 @@ static bool buildCorridorTrackingGeometry(PathPlannerData& output,const PathPlan
             r.recoveryTrackingPathRelocalized=false;
             r.recoveryTrackingPathLeg=r.activeLeg;
             r.recoveryTrackingPathProgress=0;
-            r.recoveryTrackingPathClearance=r.laneConfig.latticeObstacleClearance;
+            r.recoveryTrackingPathClearance=r.pendingGatewayHandoffClearance;
             // Poll the next-leg global search while following this certified
             // overlap. It is not a claim to reach the NEXT gateway already.
             r.globalRouteReplanRequested=true;
@@ -4003,7 +4318,8 @@ static bool buildCorridorTrackingGeometry(PathPlannerData& output,const PathPlan
     // flag ever set, including past the required lane-change window.
     if(ensureObstacleAwareGlobalRoute(
             output.waypoints,r,map,world,mission,horizon,trace) &&
-       corridorTrackingPathIsSafe(output.waypoints,world,r.laneConfig.latticeObstacleClearance,
+       corridorTrackingPathIsSafe(output.waypoints,world,
+            r.trackingPathValidatedClearance>=0.?r.trackingPathValidatedClearance:r.laneConfig.latticeObstacleClearance,
                                  nullptr,nullptr,&map)) return true;
     if(recoveryRouteSlice(output.waypoints,r,world,horizon,map)) {
         r.trackingPathValidatedClearance=r.recoveryTrackingPathClearance;
@@ -4017,8 +4333,11 @@ static bool buildCorridorTrackingGeometry(PathPlannerData& output,const PathPlan
                               r.committedGlobalPathProgress,r,map,world,
                               horizon,trace)) {
         cacheCurrentOutput();
+        r.recoveryTrackingPathClearance=r.globalPathClearance();
+        r.trackingPathValidatedClearance=r.globalPathClearance();
         return true;
     }
+    r.trackingPathValidatedClearance=-1.;
     if(committedTransitionPath(output.waypoints,r,world,horizon,trace)) return true;
     const auto id=nearest(r,world,true);
     if(id<0) {
@@ -4039,6 +4358,14 @@ static bool buildCorridorTrackingGeometry(PathPlannerData& output,const PathPlan
     int selectedTransition=-1;
     output.waypoints=forwardPath(r,id,horizon,world.egoPathS,false,
                                  &selectedTransition);
+    if(!output.waypoints.empty() &&
+       output.waypoints.back().s-world.egoPathS<horizon-.5 &&
+       r.gatewayCost[id]>0.) {
+        r.trackingGatewayStopDistance=std::max(0.,output.waypoints.back().s-world.egoPathS);
+        traceDecision(trace,"corridor_lattice","gateway_prefix_endpoint",
+            "remaining="+std::to_string(r.trackingGatewayStopDistance)+
+            " start_cost="+std::to_string(r.gatewayCost[id]));
+    }
     if(selectedTransition>=0) {
         if(r.committedTransition!=selectedTransition) {
             r.committedTransitionProgress=0;
@@ -4137,6 +4464,7 @@ bool buildCorridorTrackingPath(PathPlannerData& output,const PathPlannerConfig& 
                               const MissionCorridorData& mission,double horizon,DecisionTraceData* trace) {
     auto& r=*map.corridorRuntime;
     r.trackingPathApproved=false;r.trackingPathBlockingObject=-1;
+    r.trackingGatewayStopDistance=inf;
     r.soleGatewayApproachSelected=false;
     r.trackingPathRelocalized=false;
     r.trackingPathValidatedClearance=-1.;
@@ -4145,7 +4473,10 @@ bool buildCorridorTrackingPath(PathPlannerData& output,const PathPlannerConfig& 
     // Recovery must run before the caller invalidates its active-path world.
     // Missing trajectory is itself a trigger, even with zero nearby objects.
     r.localFallbackRelocalizationRequested=!geometry ||
-        !remainingAttachedPath(attached,output.waypoints,world);
+        !remainingAttachedPath(attached,output.waypoints,world) ||
+        (std::isfinite(r.trackingGatewayStopDistance) &&
+         r.trackingGatewayStopDistance<std::max(20.,std::abs(world.egoSpeed)*
+             r.laneConfig.localFallbackTimeHeadway));
     if(r.localFallbackRelocalizationRequested) {
         LaneChangeData recovered;
         if(prepareLocalCorridorFallback(recovered,r.laneConfig,PlanningBehaviorConfig{},
@@ -4158,10 +4489,12 @@ bool buildCorridorTrackingPath(PathPlannerData& output,const PathPlannerConfig& 
             r.recoveryTrackingPathRelocalized=true;r.trackingPathRelocalized=true;
             r.trackingPathValidatedClearance=recovered.validatedObstacleClearance;
             r.localFallbackRelocalizationRequested=false;geometry=true;
+            r.trackingGatewayStopDistance=inf;
             traceDecision(trace,"corridor_lattice","lost_path_rejoined",
                 "checked_current_pose_bridge=1 official_gateway_reachable=1 mission_not_skipped=1");
         }
     }
+    if(!geometry) r.trackingGatewayStopDistance=0.;
     if(geometry) {
         const double clearance=r.trackingPathValidatedClearance>=0.
             ?r.trackingPathValidatedClearance:r.laneConfig.latticeObstacleClearance;
@@ -4174,7 +4507,8 @@ bool buildCorridorTrackingPath(PathPlannerData& output,const PathPlannerConfig& 
                 " points="+std::to_string(output.waypoints.size())+
                 " geometry_is_reference_only=1");
     }
-    if(r.trackingPathRelocalized) {
+    if(r.trackingPathRelocalized ||
+       (r.trackingPathApproved && r.trackingPathValidatedClearance<r.laneConfig.latticeObstacleClearance)) {
         // Low-speed return, not a new general cruising-speed policy.
         const double speed=r.laneConfig.localFallbackSpeed;
         output.config.straightSpeed=std::min(output.config.straightSpeed,speed);

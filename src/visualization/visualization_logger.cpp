@@ -537,6 +537,9 @@ void writeVisualizationFrame(
                << ",\"includes_exit_preview\":" << (runtime->committedGlobalPathHasExitPreview ? "true" : "false")
                << ",\"replan_requested\":" << (runtime->globalRouteReplanRequested ? "true" : "false")
                << ",\"search_failed\":" << (runtime->globalRouteSearchFailed ? "true" : "false")
+               << ",\"approach_point_count\":" << runtime->soleGatewayApproachPath.size()
+               << ",\"approach_selected\":" << (runtime->soleGatewayApproachSelected ? "true" : "false")
+               << ",\"reentry_selected\":" << (runtime->trackingPathRelocalized ? "true" : "false")
                << '}';
     }
     output << ",\"decision\":{\"target_speed\":"
@@ -566,6 +569,8 @@ void writeVisualizationFrame(
            << (planning.laneChange.bestProgressFallback ? "true" : "false")
            << ",\"progress_recovery_active\":"
            << (planning.result.progressRecoveryActive ? "true" : "false")
+           << ",\"progress_recovery_geometry_fallback\":"
+           << (planning.result.progressRecoveryGeometryFallback ? "true" : "false")
            << ",\"progress_recovery_contact_expected\":"
            << (planning.result.progressRecoveryContactExpected ? "true" : "false")
            << ",\"progress_recovery_emergency_overridden\":"
