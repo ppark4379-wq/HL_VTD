@@ -552,7 +552,7 @@ void testSchoolZoneReferencePointConfig() {
     assert(loadMapRuntimeConfig(config, "config/maps/living_lab.yaml"));
     assert(config.schoolZoneReferencePointsPath ==
            "config/maps/living_lab_school_zone_points.yaml");
-    assert(config.zones.schoolZoneReferencePoints.size() == 46);
+    assert(config.zones.schoolZoneReferencePoints.size() == 137);
     assert(std::abs(config.zones.schoolZoneReferenceSpeedLimit -
                     30.0 / 3.6) < 1e-9);
     const auto& first = config.zones.schoolZoneReferencePoints.front();

@@ -8,6 +8,22 @@ link_libraries(Threads::Threads)
 
 enable_testing()
 
+add_executable(field_diagnostics_tests tests/field_diagnostics_tests.cpp
+    src/logger/field_diagnostics.cpp src/logger/decision_trace.cpp
+    src/planning/global/reference_path_generator.cpp src/data/map/map_loader.cpp
+    src/utils/csv_utils.cpp src/utils/math_utils.cpp)
+target_compile_features(field_diagnostics_tests PRIVATE cxx_std_17)
+target_include_directories(field_diagnostics_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+if(MSVC)
+    target_compile_options(field_diagnostics_tests PRIVATE /W4 /permissive- /utf-8)
+else()
+    target_compile_options(field_diagnostics_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+if(WIN32)
+    target_compile_definitions(field_diagnostics_tests PRIVATE NOMINMAX)
+endif()
+add_test(NAME field_diagnostics_tests COMMAND field_diagnostics_tests)
+
 add_executable(corridor_surface_query_tests tests/corridor_surface_query_tests.cpp)
 target_compile_features(corridor_surface_query_tests PRIVATE cxx_std_17)
 target_include_directories(corridor_surface_query_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -184,6 +200,7 @@ add_executable(hl_vtd
     src/control/longitudinal/longitudinal_controller.cpp
     src/control/safety/safety_limiter.cpp
     src/logger/logger.cpp
+    src/logger/field_diagnostics.cpp
     src/logger/decision_trace.cpp
     src/visualization/visualization_logger.cpp
     src/utils/csv_utils.cpp

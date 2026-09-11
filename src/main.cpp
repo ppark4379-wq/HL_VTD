@@ -8,6 +8,7 @@
 #include "control/control_process.hpp"
 #include "logger/logger.hpp"
 #include "logger/decision_trace.hpp"
+#include "logger/field_diagnostics.hpp"
 #include "visualization/visualization_logger.hpp"
 #include "planning/planning_process.hpp"
 #include "data/gt/world_process.hpp"
@@ -20,6 +21,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -31,6 +33,12 @@
 #include <string>
 
 namespace {
+
+volatile std::sig_atomic_t diagnosticStopRequested = 0;
+
+void requestDiagnosticShutdown(int) {
+    diagnosticStopRequested = 1;
+}
 
 struct CliOptions {
     std::filesystem::path config_path = "config/network.yaml";
@@ -49,6 +57,7 @@ struct CliOptions {
     bool ignore_traffic_lights = false;
     bool decision_logging = false;
     std::filesystem::path decision_log_path;
+    std::filesystem::path diagnostic_directory;
     bool visualization_logging = false;
     std::filesystem::path visualization_directory;
     std::filesystem::path ready_file;
@@ -153,6 +162,9 @@ CliOptions parseOptions(int argc, char* argv[]) {
             }
             options.decision_log_path = argv[i];
             options.decision_logging = true;
+        } else if (argument == "--diagnostic-dir") {
+            if (++i >= argc) throw std::invalid_argument("--diagnostic-dir requires a directory");
+            options.diagnostic_directory = argv[i];
         } else if (argument == "--visualization-dir") {
             if (++i >= argc) {
                 throw std::invalid_argument(
@@ -175,6 +187,7 @@ CliOptions parseOptions(int argc, char* argv[]) {
                    "[--run-id ID] [--receive-only] [--debug-objects] "
                    "[--ignore-traffic-lights] "
                    "[--decision-log PATH] "
+                   "[--diagnostic-dir DIR] "
                    "[--visualization-dir DIR] "
                    "[--ready-file PATH] [--check-config]\n";
             std::exit(0);
@@ -338,8 +351,14 @@ void writeReadyFile(const std::filesystem::path& path) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
+    FieldDiagnosticData diagnostics;
+    std::size_t diagnosticFrame = 0;
     try {
         const auto options = parseOptions(argc, argv);
+        if (!options.diagnostic_directory.empty()) {
+            initializeFieldDiagnostics(diagnostics, options.diagnostic_directory);
+        }
+        writeFieldStage(diagnostics, "loading_config");
         const auto config = loadNetworkConfig(options.config_path);
 
         DrivingConfig drivingConfig;
@@ -378,6 +397,7 @@ int main(int argc, char* argv[]) {
         }
 
         PathGeneratorData mapData;
+        writeFieldStage(diagnostics, "loading_map");
         if (!loadMap(mapData, mapConfig.xodrPath)) {
             throw std::runtime_error("cannot load XODR map: " +
                                      mapConfig.xodrPath);
@@ -386,6 +406,7 @@ int main(int argc, char* argv[]) {
             throw std::invalid_argument("--mission-start-leg requires --checkpoints");
         }
         if (!options.checkpoint_path.empty()) {
+            writeFieldStage(diagnostics, "preparing_mission");
             std::string networkError;
             if(!initializeCorridorRuntime(mapData,"output/precomputed_lane_network",
                                           drivingConfig.laneChange,&networkError))
@@ -457,6 +478,7 @@ int main(int argc, char* argv[]) {
 
         if (options.check_config_only) {
             std::cout << "[config] all configured files and values are valid\n";
+            writeFieldStage(diagnostics, "config_check_complete");
             return 0;
         }
 
@@ -477,7 +499,7 @@ int main(int argc, char* argv[]) {
 
         DecisionTraceData decisionTrace;
         const bool decisionLogging = options.decision_logging ||
-                                     options.visualization_logging;
+                                     options.visualization_logging || diagnostics.enabled;
         if (options.decision_logging) {
             initializeDecisionTrace(decisionTrace,
                                     options.decision_log_path);
@@ -488,9 +510,23 @@ int main(int argc, char* argv[]) {
             // 루프에서 판단 로그를 매 이벤트마다 flush하지 않는다.
             decisionTrace.enabled = true;
         }
+        if (diagnostics.enabled) {
+            initializeRepairTrace(decisionTrace,
+                                  options.diagnostic_directory / "repair_decision.log");
+            // Drain the asynchronous evidence queue on operator interruption.
+            // No file operation or control command is performed in the handler.
+            std::signal(SIGINT, requestDiagnosticShutdown);
+            std::signal(SIGTERM, requestDiagnosticShutdown);
+#ifdef SIGBREAK
+            std::signal(SIGBREAK, requestDiagnosticShutdown);
+#endif
+        }
 
         auto receiver = makeGtReceiver(config.vtd);
+        writeFieldStage(diagnostics, "connecting_gt", 0,
+                        config.vtd.host_ip + ":" + std::to_string(config.vtd.tcp_port));
         connectGtReceiver(receiver);
+        writeFieldStage(diagnostics, "gt_connected");
         writeReadyFile(options.ready_file);
         setVtdReceiveTimeout(receiver.client,
                              drivingConfig.runtime.inputTimeout);
@@ -517,22 +553,30 @@ int main(int argc, char* argv[]) {
             std::cout << "[timing-log] output: " << timingPath << '\n';
         }
         const auto timingNow = [&]() {
-            return options.decision_logging ? LogClock::now() : LogClock::time_point{};
+            return (options.decision_logging || diagnostics.enabled)
+                ? LogClock::now() : LogClock::time_point{};
         };
         const auto timingMilliseconds = [](const auto& begin, const auto& end) {
             return std::chrono::duration<double, std::milli>(end - begin).count();
         };
 
+        LogClock::time_point previousSend{};
         bool waitingForGt = false;
-        while (true) {
+        while (!diagnosticStopRequested) {
+            diagnosticFrame = frameCount;
+            writeFieldStage(diagnostics, "waiting_gt", frameCount);
+            const auto receiveStart = timingNow();
             if (!receiveGtFrame(receiver)) {
                 if (!didVtdReceiveTimeOut(receiver.client)) break;
                 if (!waitingForGt) {
+                    writeFieldStage(diagnostics, "gt_timeout", frameCount);
                     if (!options.receive_only) {
                         ControlCommand timeoutCommand{};
                         timeoutCommand.targetAccel = static_cast<float>(
                             drivingConfig.controller.minAcceleration);
                         sendControlCommand(receiver.client, timeoutCommand);
+                        writeFieldStage(diagnostics, "timeout_brake_sent", frameCount,
+                                        "accel=" + std::to_string(timeoutCommand.targetAccel));
                     }
                     std::cerr << "[safety] GT receive timeout; waiting for fresh input to resume\n";
                 }
@@ -547,6 +591,8 @@ int main(int argc, char* argv[]) {
                 waitingForGt = false;
             }
             const auto loopStart = timingNow();
+            writeFieldStage(diagnostics, "gt_received", frameCount);
+            writeFieldReceived(diagnostics, receiver, frameCount);
             const GtFrame& gt = getLatestGtFrame(receiver);
             if (!isRdbClockConnected(rdbClock) &&
                 frameCount >= nextRdbConnectionAttemptFrame) {
@@ -554,10 +600,13 @@ int main(int argc, char* argv[]) {
                 // 준비되지 않을 수 있으므로 5초 간격으로 재시도한다.
                 nextRdbConnectionAttemptFrame = frameCount + 100;
                 try {
+                    writeFieldStage(diagnostics, "connecting_rdb", frameCount,
+                                    config.vtd.host_ip + ":" + std::to_string(config.vtd.rdb_port));
                     connectRdbClock(rdbClock);
                     setVtdReceiveTimeout(rdbClock.client, 0.002);
                     std::cout << "[network] RDB simulation clock connected\n";
                 } catch (const std::exception& error) {
+                    writeFieldStage(diagnostics, "rdb_unavailable", frameCount, error.what());
                     disconnectRdbClock(rdbClock);
                     std::cerr
                         << "[network-warning] RDB simulation clock unavailable; "
@@ -571,6 +620,7 @@ int main(int argc, char* argv[]) {
                     pollRdbClock(rdbClock);
                     simulationTime = matchRdbSimulationTime(rdbClock, gt.ego);
                 } catch (const std::exception& error) {
+                    writeFieldStage(diagnostics, "rdb_lost", frameCount, error.what());
                     disconnectRdbClock(rdbClock);
                     nextRdbConnectionAttemptFrame = frameCount + 100;
                     std::cerr
@@ -602,10 +652,12 @@ int main(int argc, char* argv[]) {
                 simulationClockAnnounced = true;
             }
             const auto worldStart = timingNow();
+            writeFieldStage(diagnostics, "world", frameCount);
             runWorldProcess(world, gt, getLatestGtReceiveTime(receiver), clock.dt,
                             mapData, planning.pathPlanner.waypoints, vehicle,
                             &planning.missionCorridor);
             const auto worldEnd = timingNow();
+            writeFieldStage(diagnostics, "planning", frameCount);
             runPlanningProcess(planning, gt, world.state, mapData, clock.dt,
                                trace);
             const auto planningEnd = timingNow();
@@ -619,11 +671,38 @@ int main(int argc, char* argv[]) {
             }
             const auto visualizationEnd = timingNow();
 
+            FieldDiagnosticFrame diagnosticInput{
+                frameCount, elapsedWallTime, simulationTime, clock.dt,
+                timingMilliseconds(receiveStart, loopStart),
+                timingMilliseconds(loopStart, worldStart),
+                timingMilliseconds(worldStart, worldEnd),
+                timingMilliseconds(worldEnd, planningEnd),
+                timingMilliseconds(planningEnd, controlEnd),
+                options.receive_only, receiver, world.state, planning, control, mapData};
             const auto sendStart = timingNow();
             if (!options.receive_only) {
-                sendControlCommand(receiver.client, control.safeCommand);
+                try {
+                    sendControlCommand(receiver.client, control.safeCommand);
+                } catch (const std::exception& error) {
+                    diagnosticInput.sendMs = timingMilliseconds(sendStart, timingNow());
+                    writeFieldFrame(diagnostics, diagnosticInput);
+                    writeFieldStage(diagnostics, "send_failed", frameCount, error.what());
+                    throw;
+                }
             }
             const auto sendEnd = timingNow();
+            // Send FIRST. Only bounded memory copies here; JSON and all repair
+            // file I/O run on the writers. A full queue never delays a command.
+            diagnosticInput.sendCompleted = !options.receive_only;
+            diagnosticInput.sendMs = timingMilliseconds(sendStart, sendEnd);
+            diagnosticInput.receiveToSendMs = timingMilliseconds(loopStart, sendEnd);
+            if (!options.receive_only) {
+                if (previousSend != LogClock::time_point{}) {
+                    diagnosticInput.sendIntervalMs = timingMilliseconds(previousSend, sendEnd);
+                }
+                previousSend = sendEnd;
+            }
+            writeFieldFrame(diagnostics, diagnosticInput);
 
             if (options.logging) {
                 const LogFrameInput logInput{
@@ -671,8 +750,12 @@ int main(int argc, char* argv[]) {
 
         disconnectGtReceiver(receiver);
         disconnectRdbClock(rdbClock);
+        writeFieldStage(diagnostics, "process_end", frameCount,
+                        diagnosticStopRequested ? "operator_interrupt" :
+                        planning.result.goalReached ? "controller_goal_reached" : "receive_loop_ended");
         return 0;
     } catch (const std::exception& error) {
+        writeFieldStage(diagnostics, "error", diagnosticFrame, error.what());
         std::cerr << "[error] " << error.what() << '\n';
         return 1;
     }
