@@ -182,6 +182,9 @@ const WorldObjectState* findBlockingObstacle(
                << " section=" << result->sectionIndex
                << " lane=" << result->laneId;
         traceDecision(trace, "obstacle_scan", "blocker_selected", detail.str());
+        traceRepairDecision(trace, "obstacle_scan", "selected_distance",
+                            "object=" + std::to_string(result->raw.id) +
+                            " distance=" + std::to_string(resultDistance));
     }
     return result;
 }
@@ -216,6 +219,10 @@ bool targetLaneHasSafeGap(const WorldState& world,
                << " object_longitudinal_speed=" << objectLongitudinalSpeed
                << " closing_speed=" << closingSpeed
                << " ttc=" << ttc;
+        traceRepairDecision(trace, "target_lane", "gap_ttc_thresholds",
+            "minimum_ahead_gap=" + std::to_string(config.minimumTargetAheadGap) +
+            " minimum_behind_gap=" + std::to_string(config.minimumTargetBehindGap) +
+            " minimum_ttc=" + std::to_string(config.minimumTargetTTC));
         // 정지 객체는 현재 15 m 안에 있더라도 Ego가 그 객체를 지난 뒤
         // 빈 차선으로 들어갈 수 있다. 고정 간격으로 미리 탈락시키지 않고
         // 아래에서 생성한 전체 경로와 실제 OBB 충돌로 판정한다.
@@ -292,7 +299,8 @@ int sectionIndexAt(const Road& road, double roadS) {
 
 std::optional<int> adjacentDrivingLaneOnSide(
     const Road& road, const LaneSection& section, int sourceLaneId,
-    double roadS, double drivingYaw, bool targetOnLeft) {
+    double roadS, double drivingYaw, bool targetOnLeft,
+    DecisionTraceData* trace = nullptr) {
     const auto source = section.lanes.find(sourceLaneId);
     if (source == section.lanes.end() || source->second.type != "driving") {
         return std::nullopt;
@@ -303,10 +311,21 @@ std::optional<int> adjacentDrivingLaneOnSide(
     const double sourceY = reference.y + sourceOffset * std::cos(reference.yaw);
     for (const int candidateId : {sourceLaneId + 1, sourceLaneId - 1}) {
         if (candidateId == 0 ||
-            (candidateId > 0) != (sourceLaneId > 0)) continue;
+            (candidateId > 0) != (sourceLaneId > 0)) {
+            traceRepairDecision(trace, "lane_topology", "adjacent_rejected",
+                "road=" + std::to_string(road.id) + " source_lane=" + std::to_string(sourceLaneId) +
+                " candidate_lane=" + std::to_string(candidateId) +
+                " reason=centerline_or_opposite_direction");
+            continue;
+        }
         const auto candidate = section.lanes.find(candidateId);
         if (candidate == section.lanes.end() ||
-            candidate->second.type != "driving") continue;
+            candidate->second.type != "driving") {
+            traceRepairDecision(trace, "lane_topology", "adjacent_rejected",
+                "road=" + std::to_string(road.id) + " candidate_lane=" + std::to_string(candidateId) +
+                " reason=missing_or_non_driving_lane");
+            continue;
+        }
         const double candidateOffset =
             laneOffset(road, section, candidateId, roadS);
         const double candidateX =
@@ -324,12 +343,13 @@ std::optional<int> adjacentDrivingLaneOnSide(
 
 std::optional<int> drivingLaneOnSide(
     const Road& road, const LaneSection& section, int sourceLaneId,
-    double roadS, double drivingYaw, bool targetOnLeft, int laneHops) {
+    double roadS, double drivingYaw, bool targetOnLeft, int laneHops,
+    DecisionTraceData* trace = nullptr) {
     if (laneHops < 1) return std::nullopt;
     int laneId = sourceLaneId;
     for (int hop = 0; hop < laneHops; ++hop) {
         const auto next = adjacentDrivingLaneOnSide(
-            road, section, laneId, roadS, drivingYaw, targetOnLeft);
+            road, section, laneId, roadS, drivingYaw, targetOnLeft, trace);
         if (!next) return std::nullopt;
         laneId = *next;
     }
@@ -1410,6 +1430,11 @@ bool buildKeepTargetPath(std::vector<Waypoint>& output,
     std::vector<LaneKey> forwardRoute;
     LaneKey reachedLane;
     if (requiredForwardLane != nullptr) {
+        traceRepairDecision(trace, "target_lane", "required_forward_goal",
+            "from=" + std::to_string(completedTarget.roadId) + "/" +
+            std::to_string(completedTarget.sectionIndex) + "/" + std::to_string(completedTarget.laneId) +
+            " target=" + std::to_string(requiredForwardLane->roadId) + "/" +
+            std::to_string(requiredForwardLane->sectionIndex) + "/" + std::to_string(requiredForwardLane->laneId));
         // 먼 미래 road의 장애물을 보고 현재 road에서 미리 횟이동할
         // 때는 '같은 방향의 옆 차선'만으로는 부족하다. 중간
         // connector의 lane 번호가 바뀌기 때문에, 완료 차선이 장애물
@@ -1440,12 +1465,21 @@ bool buildKeepTargetPath(std::vector<Waypoint>& output,
             reconnectLaneValid = findMissionForwardRoute(
                 map, *mission, completedTarget, forwardRoute, reachedLane);
         } else {
-            reconnectLaneValid = findNextGlobalRoadLane(
+            const bool nextGlobalLaneFound = findNextGlobalRoadLane(
                 requestedRoadLane, reconnectGlobalIndex, globalPath, map,
-                nearestGlobalIndex, world.egoRoadId) &&
+                nearestGlobalIndex, world.egoRoadId);
+            reconnectLaneValid = nextGlobalLaneFound &&
                 findForwardLaneRoute(
                     map, completedTarget, requestedRoadLane.roadId,
                     forwardRoute, reachedLane);
+            if (trace != nullptr && trace->repairWriter) {
+                std::ostringstream detail;
+                detail << "goal_valid=" << nextGlobalLaneFound
+                       << " goal=" << requestedRoadLane.roadId << '/' << requestedRoadLane.sectionIndex
+                       << '/' << requestedRoadLane.laneId << " global_index=" << reconnectGlobalIndex
+                       << " forward_connection=" << reconnectLaneValid;
+                traceRepairDecision(trace, "target_lane", "next_global_goal", detail.str());
+            }
         }
         if (reconnectLaneValid) {
             reconnectLane = reachedLane;
@@ -1495,8 +1529,20 @@ bool buildKeepTargetPath(std::vector<Waypoint>& output,
     }
     updateCandidateGeometry(output, world.egoPathS);
     shiftCompleteRouteS = output[shiftCompletionIndex].s;
-    return output.size() >= 3 &&
+    const bool valid = output.size() >= 3 &&
            validateMissionPathTopology(output, map, mission, trace);
+    if (trace != nullptr && trace->repairWriter) {
+        std::ostringstream detail;
+        detail << "completed=" << completedTarget.roadId << '/' << completedTarget.sectionIndex
+               << '/' << completedTarget.laneId
+               << " reconnect_valid=" << reconnectLaneValid
+               << " reconnect=" << reconnectLane.roadId << '/' << reconnectLane.sectionIndex
+               << '/' << reconnectLane.laneId << " global_index=" << reconnectGlobalIndex
+               << " await_exact=" << awaitExactReconnect
+               << " result=" << (valid ? "pass" : "reject");
+        traceRepairDecision(trace, "target_lane", "keep_route_connection_result", detail.str());
+    }
+    return valid;
 }
 
 
@@ -2962,7 +3008,16 @@ bool tryPrepareObstacleLaneChange(
             const auto lane = drivingLaneOnSide(
                 obstacleRoad, obstacleSection, obstacleLaneId,
                 obstacle->roadS, obstacleDrivingYaw, targetOnLeft,
-                laneHops);
+                laneHops, trace);
+            if (trace != nullptr && trace->repairWriter) {
+                std::ostringstream detail;
+                detail << "road=" << obstacle->roadId << " section=" << obstacle->sectionIndex
+                       << " source_lane=" << obstacleLaneId
+                       << " side=" << (targetOnLeft ? "left" : "right")
+                       << " hops=" << laneHops << " target=" << (lane ? *lane : 0)
+                       << " result=" << (lane ? "candidate" : "no_legal_adjacent_lane");
+                traceRepairDecision(trace, "lane_topology", "side_scanned", detail.str());
+            }
             if (lane) {
                 const LaneKey targetLane{
                     obstacle->roadId, obstacle->sectionIndex, *lane};
@@ -3175,6 +3230,8 @@ bool tryPrepareObstacleLaneChange(
                     requiredForwardLane,
                     config, world, map, globalPath, nearestGlobalIndex,
                     trace, mission)) {
+                traceRepairDecision(trace, "target_lane", "keep_route_build_failed",
+                              "variant=" + variant.name + " reason=see_preceding_topology_or_geometry_events");
                 continue;
             }
             // 현재 회피와 안착 접선까지만 이 후보의 '충돌'을
