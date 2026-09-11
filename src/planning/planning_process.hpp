@@ -26,7 +26,9 @@ std::vector<int> updateCrosswalkStationaryRelease(const Crosswalk& crossing,
     const WorldState& world, const StopDecision& previousStop,
     const std::vector<StationaryObjectState>& history,
     const PlanningBehaviorConfig& config, double dt,
-    std::vector<CrosswalkObjectWaitState>& waits);
+    std::vector<CrosswalkObjectWaitState>& waits,
+    double stoppedDynamicConfirmationTime = .75,
+    bool allowInitiallyStationaryRelease = true);
 double settledStraightManeuverSpeedCap(const LaneChangeData& maneuver,
     const WorldState& world, const std::vector<Waypoint>& path,
     double cruiseSpeed, double clearance, const LaneChangeConfig& laneConfig,

@@ -296,6 +296,8 @@ add_test(NAME simulation_contact_progress COMMAND controller_logic_tests --conta
 add_test(NAME simulation_recovery_stop_edges COMMAND controller_logic_tests --recovery-stop-edges)
 add_test(NAME consumed_path_steering COMMAND controller_logic_tests --consumed-path)
 add_test(NAME signal_stop_policy COMMAND controller_logic_tests --signal-stop-policy)
+add_test(NAME driving_model_baseline COMMAND controller_logic_tests --driving-model-baseline)
+add_test(NAME traffic_signal_model COMMAND controller_logic_tests --traffic-signal-model)
 add_test(NAME recovery_signal_approach COMMAND controller_logic_tests --recovery-signal-approach)
 add_test(NAME unmarked_crossing_yield COMMAND controller_logic_tests --unmarked-crossing-yield)
 set_tests_properties(crosswalk_indicator_regression PROPERTIES

@@ -107,6 +107,11 @@ struct PlanningBehaviorConfig {
     // 신호 정지선을 찾는 최대 전방 거리.
     // GT trafficLight.id(= XODR controller id)가 일치하는 정지선만 본다.
     double signalStopSearchDistance{80.0};
+    // 0: original signal behavior; 1: physical bumper crossing on green and
+    // stop at the signal line itself, independently of crosswalk geometry.
+    double trafficSignalModel{0.0};
+    // false preserves d42fd708; true enables the subsequent local changes.
+    bool changedDefaultModel{false};
     // 횡단보도 진입/점유가 예상되는 객체가 있을 때만 적용하는 접근속도.
     // 처음부터 빈 횡단보도는 전역경로의 원래 목표속도로 통과한다.
     double crosswalkApproachSpeed{5.5};      // [m/s]

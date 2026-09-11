@@ -46,7 +46,7 @@
             <Description Driver="DefaultDriver" Control="external" AdaptDriverToVehicleType="true" Type="HyundaiIoniq6_23_White" Name="Ego"/>
             <Init>
                 <Speed Value="0.0000000000000000e+00"/>
-                <PosAbsolute X="7.5709104173194123e+02" Y="-2.4609907608784169e+02" Z="4.6899999999999999e+01" Direction="5.9381059678031145e-01" AlignToRoad="true"/>
+                <PosAbsolute X="8.5557651536475373e+02" Y="5.8138331596484477e+01" Z="5.5428603918591939e+01" Direction="4.7135246422327466e+00" AlignToRoad="true"/>
             </Init>
         </Player>
         <Player>
@@ -255,18 +255,18 @@
         <PlayerActions Player="New Player03">
             <Action Name="">
                 <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.1000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="1.1000000000000000e+01" X="7.5709104173194123e+02" Y="-2.4609907608784169e+02"/>
+                <EditorPos Radius="1.1000000000000000e+01" X="8.5557651536475373e+02" Y="5.8138331596484477e+01"/>
                 <LaneChange Direction="1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00" Time="2.0000000000000000e+00"/>
                 <Autonomous Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="0.0000000000000000e+00"/>
             </Action>
             <Action Name="">
                 <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.1000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="1.1000000000000000e+01" X="7.5709104173194123e+02" Y="-2.4609907608784169e+02"/>
+                <EditorPos Radius="1.1000000000000000e+01" X="8.5557651536475373e+02" Y="5.8138331596484477e+01"/>
                 <LaneChange Direction="-1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="2.0000000000000000e+00" Time="2.0000000000000000e+00"/>
             </Action>
             <Action Name="">
                 <PosRelative CounterID="" CounterComp="COMP_EQ" NetDist="false" Distance="1.1000000000000000e+01" CounterVal="0" Pivot="Ego"/>
-                <EditorPos Radius="1.1000000000000000e+01" X="7.5709104173194123e+02" Y="-2.4609907608784169e+02"/>
+                <EditorPos Radius="1.1000000000000000e+01" X="8.5557651536475373e+02" Y="5.8138331596484477e+01"/>
                 <LaneChange Direction="1" Force="true" ExecutionTimes="1" ActiveOnEnter="true" DelayTime="4.0000000000000000e+00" Time="2.0000000000000000e+00"/>
             </Action>
         </PlayerActions>

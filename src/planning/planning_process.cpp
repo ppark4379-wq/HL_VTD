@@ -180,7 +180,8 @@ bool corridorGeometryContinuityUsable(const PathPlannerData& planner,
 const StopLine* findActiveStopLine(const WorldState& world,
                                    const StaticZoneData& zones,
                                    double behindWindow,
-                                   double aheadWindow) {
+                                   double aheadWindow,
+                                   const std::vector<GreenPassedStopLine>& passedLines) {
     // 같은 road/lane에 있는 정지선을 우선하되, 못 찾으면 controller만 맞는
     // 정지선을 쓴다.
     //
@@ -199,6 +200,10 @@ const StopLine* findActiveStopLine(const WorldState& world,
         if (!line.routeRelevant) continue;
         if (line.controllerId < 0) continue;
         if (line.controllerId != world.trafficLight.id) continue;
+        if (std::any_of(passedLines.begin(), passedLines.end(), [&](const auto& passed) {
+                return passed.stopLineId == line.id && passed.roadId == line.roadId &&
+                       passed.controllerId == line.controllerId;
+            })) continue;
         const double distance = line.routeS - world.frontBumperPathS;
         if (distance < -behindWindow || distance > aheadWindow) continue;
 
@@ -219,6 +224,62 @@ const StopLine* findActiveStopLine(const WorldState& world,
         }
     }
     return laneMatched != nullptr ? laneMatched : controllerMatched;
+}
+
+void updateGreenPassedStopLines(PlanningProcessData& data, const WorldState& world,
+    const StaticZoneData& zones, double dt, DecisionTraceData* trace) {
+    auto& manager = data.stopManager;
+    if (world.respawnDetected) {
+        manager.greenPassedLines.clear();
+        manager.previousFrontBumperValid = false;
+    }
+    if (!world.inputValid || !std::isfinite(dt) || dt <= 0. ||
+        !std::isfinite(world.ego.x) || !std::isfinite(world.ego.y) ||
+        !std::isfinite(world.ego.heading)) {
+        manager.previousFrontBumperValid = false;
+        return;
+    }
+    const double c = std::cos(world.ego.heading), s = std::sin(world.ego.heading);
+    const double x = world.ego.x + world.frontBumperOffset * c;
+    const double y = world.ego.y + world.frontBumperOffset * s;
+    manager.greenPassedLines.erase(std::remove_if(manager.greenPassedLines.begin(),
+        manager.greenPassedLines.end(), [&](const auto& passed) {
+            const double dx = x-passed.centerX, dy = y-passed.centerY;
+            // A later approach/backing up needs a new green crossing.
+            return dx*passed.normalX + dy*passed.normalY < -1. ||
+                std::hypot(dx,dy) > data.config.signalStopSearchDistance + 20.;
+        }), manager.greenPassedLines.end());
+    const double dx = x-manager.previousFrontBumperX, dy = y-manager.previousFrontBumperY;
+    const bool green = world.trafficLight.state == 3 || world.trafficLight.state == 5;
+    if (manager.previousFrontBumperValid && green && dx*c+dy*s > 1e-5) {
+        for (const auto& line : zones.stopLines) {
+            if (!line.routeRelevant || line.controllerId < 0 ||
+                line.controllerId != world.trafficLight.id) continue;
+            const double lx = line.end.x-line.begin.x, ly = line.end.y-line.begin.y;
+            const double length = std::hypot(lx,ly);
+            if (length < 1e-3) continue;
+            double nx = -ly/length, ny = lx/length;
+            if (nx*c+ny*s < 0.) { nx=-nx; ny=-ny; }
+            const double before = (manager.previousFrontBumperX-line.begin.x)*nx +
+                                  (manager.previousFrontBumperY-line.begin.y)*ny;
+            const double after = (x-line.begin.x)*nx + (y-line.begin.y)*ny;
+            if (before > 0. || after < 0. || after-before <= 1e-6) continue;
+            const double u = -before/(after-before);
+            const double ix = manager.previousFrontBumperX+u*dx;
+            const double iy = manager.previousFrontBumperY+u*dy;
+            const double along = ((ix-line.begin.x)*lx+(iy-line.begin.y)*ly)/length;
+            if (along < 0. || along > length) continue;
+            if (std::any_of(manager.greenPassedLines.begin(), manager.greenPassedLines.end(),
+                    [&](const auto& passed) { return passed.stopLineId==line.id &&
+                        passed.roadId==line.roadId && passed.controllerId==line.controllerId; })) continue;
+            manager.greenPassedLines.push_back({line.id,line.roadId,line.controllerId,
+                .5*(line.begin.x+line.end.x),.5*(line.begin.y+line.end.y),nx,ny});
+            traceDecision(trace,"signal","front_bumper_crossed_on_green",
+                "stop_line="+std::to_string(line.id)+" controller="+std::to_string(line.controllerId));
+        }
+    }
+    manager.previousFrontBumperX=x; manager.previousFrontBumperY=y;
+    manager.previousFrontBumperValid=true;
 }
 
 void addStopRequest(StopManagerData& manager, StopReason reason,
@@ -481,7 +542,8 @@ double soleGatewayQueueDistance(const WorldState& world,
     return closestQueue;
 }
 
-std::vector<int> updateCrosswalkStationaryRelease(const Crosswalk& crossing,
+// Preserved from d42fd708 for the named default model.
+static std::vector<int> updateBaselineCrosswalkStationaryRelease(const Crosswalk& crossing,
     const WorldState& world, const StopDecision& previousStop,
     const std::vector<StationaryObjectState>& history,
     const PlanningBehaviorConfig& config, double dt,
@@ -527,6 +589,81 @@ std::vector<int> updateCrosswalkStationaryRelease(const Crosswalk& crossing,
             // After one completed stop at this crossing, later static IDs
             // need observation confirmation, not another complete stop.
             // Never apply this to an actor that has moved, even if now still.
+            wait->released=wait->stoppedWait>=config.crosswalkStaticConfirmationTime ||
+                (crossingYieldCompleted &&
+                 wait->stationaryObservation>=config.crosswalkStaticConfirmationTime);
+        }
+        if (wait->released) result.push_back(static_cast<int>(object.raw.id));
+    }
+    return result;
+}
+
+std::vector<int> updateCrosswalkStationaryRelease(const Crosswalk& crossing,
+    const WorldState& world, const StopDecision& previousStop,
+    const std::vector<StationaryObjectState>& history,
+    const PlanningBehaviorConfig& config, double dt,
+    std::vector<CrosswalkObjectWaitState>& waits,
+    double stoppedDynamicConfirmationTime, bool allowInitiallyStationaryRelease) {
+    if (!config.changedDefaultModel)
+        return updateBaselineCrosswalkStationaryRelease(crossing,world,previousStop,history,config,dt,waits);
+    std::vector<int> result;
+    if (config.simulationCrosswalkStaticRelease != 1.) { waits.clear(); return result; }
+    const bool waitingHere = world.inputValid && world.egoSpeed <= config.stoppedSpeedThreshold &&
+        previousStop.valid && previousStop.reason == StopReason::CrosswalkBlocked &&
+        previousStop.sourceId == crossing.id &&
+        std::isfinite(previousStop.distanceToStop) &&
+        previousStop.distanceToStop <= config.trafficStopPositionMargin + .5;
+    // A dropped frame/large dt must not instantly complete a three-second wait.
+    const double elapsed = std::isfinite(dt) ? std::clamp(dt,0.,.1) : 0.;
+    // The 30-object stream may temporarily omit a cone. Absence is not
+    // motion and must not erase a completed yield or a pedestrian's history.
+    // These records are scoped to this crossing and removed after passing it.
+    const bool crossingYieldCompleted=std::any_of(waits.begin(),waits.end(),
+        [&](const auto& wait){return wait.crosswalkId==crossing.id && wait.released;});
+    for (auto& wait : waits) {
+        if (wait.crosswalkId == crossing.id && std::none_of(world.objects.begin(), world.objects.end(),
+                [&](const auto& object) { return object.raw.id == wait.objectId; })) {
+            wait.stationaryObservation = 0.; // missing observations never complete confirmation
+            wait.hasPosition = false;
+        }
+    }
+    for (const auto& object : world.objects) {
+        const bool inside=intersects(crossing.polygon,object.obb);
+        auto wait=std::find_if(waits.begin(),waits.end(),[&](const CrosswalkObjectWaitState& s){
+            return s.crosswalkId==crossing.id && s.objectId==object.raw.id;});
+        if (wait==waits.end()) {
+            waits.push_back({crossing.id,object.raw.id});wait=waits.end()-1;
+        }
+        const auto tracked = std::find_if(history.begin(), history.end(),
+            [&](const StationaryObjectState& state) { return state.id == object.raw.id; });
+        const bool stationary=std::abs(object.raw.speed)<.1 && objectMotionSpeed(object)<.1;
+        const bool displaced=wait->hasPosition &&
+            std::hypot(object.raw.x-wait->lastX,object.raw.y-wait->lastY)>.15;
+        wait->hasEverMoved = wait->hasEverMoved || !stationary || displaced ||
+            (tracked!=history.end() && tracked->hasEverMoved);
+        wait->hasPosition=true;
+        wait->lastX=object.raw.x;wait->lastY=object.raw.y;
+        wait->stationaryObservation=stationary && !displaced &&
+            tracked!=history.end() && tracked->hasPosition && tracked->stationaryDuration>0.
+            ? wait->stationaryObservation+elapsed : 0.;
+        if (!inside) continue; // remember approach motion, but never time out an approaching actor
+        if (!stationary || displaced || tracked==history.end() || !tracked->hasPosition ||
+            tracked->stationaryDuration<=0.) {
+            wait->released=false;wait->stoppedWait=0.;continue;
+        }
+        if (wait->hasEverMoved) {
+            // A paused crossing actor becomes a stationary avoidance obstacle;
+            // prior motion is not a permanent full-crosswalk stop latch.
+            wait->released = std::min(wait->stationaryObservation, tracked->stationaryDuration) + 1e-9 >=
+                stoppedDynamicConfirmationTime;
+            wait->stoppedWait = 0.;
+        } else if (!allowInitiallyStationaryRelease) {
+            wait->released=false;wait->stoppedWait=0.;
+        } else if (!wait->released) {
+            wait->stoppedWait=waitingHere ? wait->stoppedWait+elapsed : 0.;
+            // After one completed stop at this crossing, later static IDs
+            // need observation confirmation, not another complete stop.
+            // Previously moving actors use the confirmation branch above.
             wait->released=wait->stoppedWait>=config.crosswalkStaticConfirmationTime ||
                 (crossingYieldCompleted &&
                  wait->stationaryObservation>=config.crosswalkStaticConfirmationTime);
@@ -659,11 +796,12 @@ void updateCrosswalkStates(PlanningProcessData& data,
         const bool requireClearCrosswalk =
             world.trafficLight.state == 6 ||
             (state != nullptr && state->waitUntilClear);
-        // A completed flashing-red stop never authorizes passing through a
-        // pedestrian who is still on the crossing, even if initially still.
-        const auto staticProps = requireClearCrosswalk ? std::vector<int>{} :
-            updateCrosswalkStationaryRelease(crosswalk,world,previousStop,
-                data.stationaryObjects,data.config,dt,data.crosswalkObjectWaits);
+        // Flashing-red still requires its signal stop. A crossing actor that
+        // stops moving can independently transition to stationary avoidance.
+        const auto staticProps = !data.config.changedDefaultModel && requireClearCrosswalk
+            ? std::vector<int>{} : updateCrosswalkStationaryRelease(crosswalk,world,previousStop,
+            data.stationaryObjects,data.config,dt,data.crosswalkObjectWaits,
+            data.laneChangeConfig.stoppedDynamicConfirmationTime, !requireClearCrosswalk);
         const bool occupied = crosswalkHasRiskObject(
             crosswalk, world, data.config.crosswalkPedestrianPrediction, staticProps);
         if (occupied) {
@@ -684,8 +822,8 @@ void updateCrosswalkStates(PlanningProcessData& data,
         if (state == nullptr) continue;
         if (state->occupied) {
             state->occupied = false;
-            state->clearanceHoldRemaining =
-                data.config.crosswalkClearanceHoldTime;
+            state->clearanceHoldRemaining = !data.config.changedDefaultModel || staticProps.empty()
+                ? data.config.crosswalkClearanceHoldTime : 0.;
             std::ostringstream detail;
             detail << "crosswalk=" << crosswalk.id
                    << " stationary_yield_released=" << staticProps.size()
@@ -889,9 +1027,15 @@ void updateStopRequests(PlanningProcessData& data,
                         double dt,
                         DecisionTraceData* trace) {
     data.stopManager.requests.clear();
+    if (data.config.trafficSignalModel == 1.) {
+        updateGreenPassedStopLines(data, world, zones, dt, trace);
+    } else {
+        data.stopManager.greenPassedLines.clear();
+        data.stopManager.previousFrontBumperValid = false;
+    }
     const StopLine* line =
         findActiveStopLine(world, zones, data.config.stopLineBehindWindow,
-                           data.config.signalStopSearchDistance);
+                           data.config.signalStopSearchDistance, data.stopManager.greenPassedLines);
     const int signalState = static_cast<int>(world.trafficLight.state);
     if ((signalState != 6 && signalState != 0) || world.respawnDetected)
         data.stopManager.hold = {};
@@ -955,6 +1099,11 @@ void updateStopRequests(PlanningProcessData& data,
     // 정지 목표가 횡단보도 안이면, 아직 진입하지 않은 경우에 한해 앞범퍼
     // 목표를 횡단보도 입구로 당긴다. 이미 진입했다면 안전 정지를 우선한다.
     for (auto& request : data.stopManager.requests) {
+        // Signal compliance is measured at the actual stop line. A mapped
+        // crosswalk beginning earlier must not move that target backwards.
+        if (data.config.trafficSignalModel == 1. &&
+            (request.reason == StopReason::RedLight || request.reason == StopReason::FlashingRed))
+            continue;
         for (const auto& crosswalk : zones.crosswalks) {
             if (!crosswalk.routeRelevant) continue;
             const bool targetInside =
@@ -1162,10 +1311,13 @@ bool updateSpeedConstraints(PlanningProcessData& data,
 }
 
 bool recoveryProtectedObject(const WorldObjectState& object,
-                             const std::vector<int>& confirmedStationaryObjectIds) {
+                             const std::vector<int>& confirmedStationaryObjectIds,
+                             bool changedDefaultModel) {
     const bool vulnerable = object.raw.length <= 2.5 && object.raw.width <= 1.5 &&
         object.raw.height >= 1.;
-    return vulnerable || std::find(confirmedStationaryObjectIds.begin(),
+    if (!changedDefaultModel && vulnerable) return true;
+    // The changed simulation policy follows observed motion, independent of shape.
+    return std::find(confirmedStationaryObjectIds.begin(),
         confirmedStationaryObjectIds.end(), static_cast<int>(object.raw.id)) ==
         confirmedStationaryObjectIds.end();
 }
@@ -1181,12 +1333,12 @@ bool recoveryHasDynamicRisk(const WorldState& world, const LocalPathData& path,
     // Most static-obstacle recovery frames have no protected actor. Avoid
     // copying the whole object vector just to erase every element from it.
     if (std::none_of(world.objects.begin(), world.objects.end(), [&](const auto& object) {
-            return recoveryProtectedObject(object, confirmedStationaryObjectIds);
+            return recoveryProtectedObject(object, confirmedStationaryObjectIds, config.changedDefaultModel);
         })) return false;
     WorldState protectedWorld = world;
     protectedWorld.objects.erase(std::remove_if(protectedWorld.objects.begin(),
         protectedWorld.objects.end(), [&](const auto& object) {
-            return !recoveryProtectedObject(object, confirmedStationaryObjectIds);
+            return !recoveryProtectedObject(object, confirmedStationaryObjectIds, config.changedDefaultModel);
         }), protectedWorld.objects.end());
     if (protectedWorld.objects.empty()) return false;
     PathSafetyResult safety;
@@ -1231,7 +1383,7 @@ bool applySimulationProgressRecovery(
     const bool unconfirmedBlocker = stationaryPathStop && std::any_of(
         world.objects.begin(), world.objects.end(), [&](const auto& object) {
             return static_cast<int>(object.raw.id) == stationaryBlocker &&
-                recoveryProtectedObject(object, confirmedStationaryObjectIds);
+                recoveryProtectedObject(object, confirmedStationaryObjectIds, data.config.changedDefaultModel);
         });
     const bool dynamicRisk = unconfirmedBlocker || recoveryHasDynamicRisk(world,
         data.frame.localPath, map, data.config, confirmedStationaryObjectIds, dynamicRiskObject);
@@ -1244,7 +1396,12 @@ bool applySimulationProgressRecovery(
             traceDecision(trace, "progress_recovery", "waiting_for_dynamic_risk",
                 "object=" + std::to_string(unconfirmedBlocker ? stationaryBlocker : dynamicRiskObject) +
                 " recovery_timer_reset=1 emergency_preserved=1");
+        const auto cursor = state.searchCursor;
         state = {};
+        if (data.config.changedDefaultModel) {
+            state.searchCursor = cursor;
+            state.missionLeg = data.missionCorridor.activeLegIndex;
+        }
         return false;
     }
     // A paused simulator or one delayed frame must not expire the timer.
@@ -1288,7 +1445,9 @@ bool applySimulationProgressRecovery(
     }
 
     if (!state.active) {
-        if (state.blockedTime < data.config.progressRecoveryStopTimeout) return false;
+        if (state.blockedTime < data.config.progressRecoveryStopTimeout &&
+            !(data.config.changedDefaultModel && blocked &&
+              state.noMotionTime >= data.config.progressRecoveryStopTimeout)) return false;
         state.active = true;
         state.startX = sensedWorld.ego.x; state.startY = sensedWorld.ego.y;
         state.retryRemaining = 0.;
@@ -1408,7 +1567,12 @@ bool applySimulationProgressRecovery(
             confirmedStationaryObjectIds, dynamicRiskObject)) {
         traceDecision(trace, "progress_recovery", "cancelled_for_dynamic_risk",
             "object=" + std::to_string(dynamicRiskObject) + " recovery_timer_reset=1");
+        const auto cursor = state.searchCursor;
         state = {};
+        if (data.config.changedDefaultModel) {
+            state.searchCursor = cursor;
+            state.missionLeg = data.missionCorridor.activeLegIndex;
+        }
         emergency = true;
         data.emergencyBrakeHoldRemaining = data.config.emergencyMinimumHoldTime;
         return false;
@@ -3190,7 +3354,8 @@ void runPlanningProcess(PlanningProcessData& data,
             const bool vulnerableRoadUserSized =
                 risk->raw.length <= 2.5 && risk->raw.width <= 1.5 &&
                 risk->raw.height >= 1.0;
-            confirmedStaticCollision = !vulnerableRoadUserSized &&
+            confirmedStaticCollision = ((data.config.changedDefaultModel &&
+                data.config.simulationProgressRecovery == 1.) || !vulnerableRoadUserSized) &&
                 std::find(confirmedStationaryObjectIds.begin(),
                           confirmedStationaryObjectIds.end(),
                           static_cast<int>(risk->raw.id)) !=

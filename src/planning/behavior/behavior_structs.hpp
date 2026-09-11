@@ -70,10 +70,20 @@ struct StopHoldState {
     int stopLineId{-1};
 };
 
+// Permission belongs to one physically crossed stop line, never its whole
+// controller (which may also control the next line).
+struct GreenPassedStopLine {
+    int stopLineId{-1}, roadId{-1}, controllerId{-1};
+    double centerX{}, centerY{}, normalX{}, normalY{};
+};
+
 // 프레임 간 유지하는 정지 관리 상태.
 struct StopManagerData {
     std::vector<StopRequest> requests;
     StopHoldState hold;
+    std::vector<GreenPassedStopLine> greenPassedLines;
+    bool previousFrontBumperValid{};
+    double previousFrontBumperX{}, previousFrontBumperY{};
 };
 
 // 모든 후보에 항상 적용되는 제약.

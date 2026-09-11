@@ -368,6 +368,13 @@ int main(int argc, char* argv[]) {
                 "cannot load control config: " +
                 options.control_config_path.string());
         }
+        const char* modelName = drivingConfig.model==DrivingModel::Default ? "default" :
+            drivingConfig.model==DrivingModel::ChangeDefault ? "change_default" :
+            drivingConfig.model==DrivingModel::TrafficLight ? "traffic_light" :
+            drivingConfig.model==DrivingModel::SpeedDefault ? "speed_default" : "speed_traffic_light";
+        std::cout << "[model] " << modelName
+                  << " behavior=" << (drivingConfig.behavior.changedDefaultModel ? "working_changes" : "d42fd708")
+                  << '\n';
         drivingConfig.behavior.ignoreTrafficLights =
             options.ignore_traffic_lights;
 

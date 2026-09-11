@@ -3104,13 +3104,14 @@ void testDetachedStoredPlanArmsRecovery() {
     assert(!planning.progressRecovery.active && planning.progressRecovery.blockedTime==0.);
 }
 
-void testSimulationRecoveryStopEdgeCases() {
+void testSimulationRecoveryStopEdgeCases(bool changed=true) {
     // Vary independent blockers through the production planner AND final
     // actuator limiter; a positive planner speed alone is insufficient.
-    for(int variant=0;variant<8;++variant) {
+    for(int variant=0;variant<(changed?10:8);++variant) {
         auto map=makeRecoveryRuntimeMap();
         PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
         planning.config.simulationProgressRecovery=1.;
+        planning.config.changedDefaultModel=changed;
         planning.config.progressRecoveryStopTimeout=.2;
         auto& mission=planning.missionCorridor;
         mission.valid=mission.initialized=mission.topologyAuthority=true;
@@ -3123,9 +3124,15 @@ void testSimulationRecoveryStopEdgeCases() {
         WorldObjectState car;car.raw.id=91;car.raw.x=11.;car.raw.y=-1.75;
         car.raw.length=8.;car.raw.width=8.;car.raw.height=1.5;
         if(variant==1) car.raw.speed=1.; // moving-actor EBS must never time out
-        if(variant==2) {car.raw.length=1.;car.raw.width=1.;car.raw.height=1.8;}
+        if(variant==2) {car.raw.length=1.;car.raw.width=1.;car.raw.height=1.8;car.raw.speed=changed?1.:0.;}
         car.obb=makeObb2D(car.raw.x,car.raw.y,0.,car.raw.length,car.raw.width);
         world.objects={car};
+        if(variant==8) world.egoSpeed=.2; // fixed position despite nonzero speed estimate
+        if(variant==9) { // confirmed small stationary object, same policy as a parked car
+            world.objects[0].raw.length=2.22;world.objects[0].raw.width=.2;
+            world.objects[0].raw.height=1.15;
+            world.objects[0].obb=makeObb2D(11.,-1.75,0.,2.22,.2);
+        }
         if(variant==3) { // no lane-network geometry at all
             map.corridorRuntime.reset();map.laneSegments.clear();
             world.inputValid=world.egoLaneValid=world.egoPathValid=false;
@@ -3345,7 +3352,7 @@ void testGatewayHandoffChecksAttachedConnectorAndFullTail() {
 
 }  // namespace
 
-void testCrosswalkUsersAndStopDistanceGuard() {
+void testCrosswalkUsersAndStopDistanceGuard(bool changed=true) {
     Crosswalk crossing;
     crossing.polygon={{20,-8},{26,-8},{26,8},{20,8}};
     WorldState world;
@@ -3377,7 +3384,7 @@ void testCrosswalkUsersAndStopDistanceGuard() {
 
     // Simulator timeout starts only at the selected crossing stop, not when
     // a stationary actor is first seen on approach. No shape classification.
-    PlanningBehaviorConfig propConfig;
+    PlanningBehaviorConfig propConfig;propConfig.changedDefaultModel=changed;
     propConfig.simulationCrosswalkStaticRelease=1.;
     actor.raw.x=23;actor.raw.y=0;actor.raw.length=1.2;
     actor.raw.width=1.2;actor.raw.height=1.28;
@@ -3419,9 +3426,17 @@ void testCrosswalkUsersAndStopDistanceGuard() {
     world.objects[0].velocityValid=false;
     previousStop.valid=true;previousStop.reason=StopReason::CrosswalkBlocked;
     previousStop.sourceId=77;previousStop.distanceToStop=1.;world.egoSpeed=0.;
-    for(int i=0;i<200;++i)assert(step().empty()); // stopping again never clears the moved latch
-    world.objects.clear();assert(step().empty());world.objects={actor};
-    for(int i=0;i<100;++i)assert(step().empty()); // preserve moving latch across packet loss
+    if (changed) {
+        for(int i=0;i<14;++i)assert(step().empty());
+        assert(step().size()==1);
+        world.objects.clear();assert(step().empty());world.objects={actor};
+        for(int i=0;i<14;++i)assert(step().empty());
+        assert(step().size()==1);
+    } else {
+        for(int i=0;i<200;++i)assert(step().empty());
+        world.objects.clear();assert(step().empty());world.objects={actor};
+        for(int i=0;i<100;++i)assert(step().empty());
+    }
     waits.clear();
     actor.raw.length=.45;actor.raw.width=.55;actor.raw.height=1.1;
     actor.obb=makeObb2D(23,0,0,.45,.55);world.objects={actor};
@@ -3866,6 +3881,40 @@ void testUnmarkedCrossingMotionAndStationaryAvoidance() {
     assert(detour); // stationary means avoid the body, never ignore it
     actor.velocityY=-1.3;stopped.step();stopped.assertYield();
 
+    // The same motion transition must work INSIDE a signalized crossing,
+    // including flashing red after its mandatory stop, with the body retained.
+    for (int signal : {3,6}) {
+        Scene marked;
+        marked.planning.config.simulationCrosswalkStaticRelease=1.;
+        marked.planning.config.changedDefaultModel=true;
+        Crosswalk cross;cross.id=77;cross.roadId=1;cross.entryRouteS=20.;cross.exitRouteS=35.;
+        cross.polygon={{20,-8},{35,-8},{35,8},{20,8}};marked.map.staticZones.crosswalks={cross};
+        StopLine line;line.id=88;line.controllerId=42;line.roadId=1;line.laneIds={-1};
+        line.routeS=15.;line.begin={15,-3.5};line.end={15,0};marked.map.staticZones.stopLines={line};
+        marked.world.trafficLight.id=42;marked.world.trafficLight.state=signal;
+        marked.world.egoSpeed=0.;
+        for(int i=0;i<35;++i) {marked.step();marked.assertYield();}
+        auto& body=marked.world.objects[0];body.raw.y=-1.75;body.velocityY=0.;
+        marked.step();
+        for(int i=0;i<13;++i) {marked.step();marked.assertYield();}
+        for(int i=0;i<40;++i)marked.step();
+        assert(marked.planning.crossingObjectYields.empty());
+        assert(marked.planning.result.stopReason!=StopReason::CrosswalkBlocked);
+        assert(!marked.planning.result.emergencyBrake && marked.planning.result.targetSpeed>.05);
+        assert(corridorTrackingPathIsSafe(marked.planning.result.localPath.points,
+            marked.world,0.,nullptr,&marked.planning.config,&marked.map));
+        bool bypass=false;
+        for(const auto& p:marked.planning.result.localPath.points)bypass=bypass || std::abs(p.y+1.75)>.5;
+        assert(bypass);
+        for(int red : {1,2}) {
+            marked.world.trafficLight.state=red;
+            for(int i=0;i<25;++i)marked.step();
+            assert(marked.planning.result.stopReason==StopReason::RedLight);
+            assert(marked.planning.result.targetSpeed==0. && marked.control.latestCommand.targetAccel<0.);
+        }
+        marked.world.trafficLight.state=3;body.velocityY=-1.3;marked.step();marked.assertYield();
+    }
+
     Scene multiple;auto second=multiple.world.objects[0];second.raw.id=92;second.raw.x=32.;
     multiple.world.objects.push_back(second);multiple.step();multiple.world.egoSpeed=0.;
     multiple.world.objects[0].velocityY=0.;
@@ -3886,10 +3935,11 @@ void testUnmarkedCrossingMotionAndStationaryAvoidance() {
     delayed.world.objects[0].velocityY=0.;delayed.step(3.);delayed.assertYield();
 }
 
-void testStationaryCrosswalkWaitReleasesOnlyYield() {
+void testStationaryCrosswalkWaitReleasesOnlyYield(bool changed=true) {
     auto map=makeStraightTwoLaneMap();
     PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
     planning.config.simulationCrosswalkStaticRelease=1.;
+    planning.config.changedDefaultModel=changed;
     auto world=makeWorldWithObstacle();world.objects.clear();world.egoSpeed=0.;
     world.frontBumperOffset=3.8;world.frontBumperPathS=13.8;
     Crosswalk crossing;crossing.id=77;crossing.roadId=2;
@@ -3914,14 +3964,133 @@ void testStationaryCrosswalkWaitReleasesOnlyYield() {
     pedestrian.raw.width=.6;pedestrian.raw.height=1.7;
     pedestrian.raw.speed=.2;
     pedestrian.obb=makeObb2D(23,7.9,0,.5,.6);world.objects.push_back(pedestrian);
-    for(int i=0;i<120;++i) {
+    for(int i=0;i<40;++i) {
         step();assert(planning.result.stopReason==StopReason::CrosswalkBlocked);
         assert(planning.result.targetSpeed==0.);
-        world.objects.back().raw.speed=0.; // once seen moving, wait even if it pauses
+    }
+    world.objects.back().raw.speed=0.;
+    if (!changed) {
+        for(int i=0;i<120;++i) {
+            step();assert(planning.result.stopReason==StopReason::CrosswalkBlocked);
+            assert(planning.result.targetSpeed==0.);
+        }
+        return;
+    }
+    for(int i=0;i<14;++i) {step();assert(planning.result.stopReason==StopReason::CrosswalkBlocked);}
+    step();assert(planning.result.stopReason!=StopReason::CrosswalkBlocked);
+    for(int i=0;i<20;++i)step();
+    assert(planning.result.targetSpeed>0.);
+    world.objects.back().raw.speed=.2;step();
+    assert(planning.result.stopReason==StopReason::CrosswalkBlocked);
+}
+
+void testSelectableTrafficSignalModel() {
+    struct Scene {
+        PathGeneratorData map{makeStraightTwoLaneMap()};
+        PlanningProcessData planning;
+        WorldState world{makeWorldWithObstacle()};
+        ControlProcessData control;
+        explicit Scene(int model) {
+            planning.pathPlanner=makeStraightGlobalPath();
+            planning.config.trafficSignalModel=model;
+            planning.config.changedDefaultModel=model!=0;
+            world.objects.clear();world.egoSpeed=0.;world.frontBumperOffset=3.8;
+            world.trafficLight.id=42;world.trafficLight.state=3;
+            StopLine line;line.id=88;line.controllerId=42;line.roadId=1;line.laneIds={-1};
+            line.routeS=30.;line.begin={30.,-3.5};line.end={30.,0.};map.staticZones.stopLines={line};
+        }
+        void distance(double d) {
+            world.ego.x=map.staticZones.stopLines.front().routeS-world.frontBumperOffset-d;
+            world.egoRoadS=world.egoPathS=world.ego.x;
+            world.frontBumperPathS=world.ego.x+world.frontBumperOffset;
+            world.egoObb=makeObb2D(world.ego.x+1.3725,-1.75,0.,4.855,1.88);
+        }
+        void step(double dt=.05) {
+            world.receiveTime+=dt;GtFrame gt;gt.ego=world.ego;
+            runPlanningProcess(planning,gt,world,map,dt);
+            runControlProcess(control,world,planning.result,dt);
+        }
+    };
+    for(int model:{0,1}) {
+        Scene scene(model);scene.distance(.1);scene.step();
+        scene.distance(-.1);scene.step();
+        // The BUMPER crossed; the front axle is still before the line.
+        assert(scene.world.ego.x+scene.planning.pathPlanner.config.wheelbase<30.);
+        scene.world.trafficLight.state=2;scene.step();
+        if(model==0) {
+            assert(scene.planning.result.stopReason==StopReason::RedLight);
+            assert(scene.planning.result.targetSpeed==0.);
+        } else {
+            assert(scene.planning.stopManager.greenPassedLines.size()==1);
+            assert(scene.planning.result.stopReason==StopReason::None);
+            assert(scene.planning.result.targetSpeed>0.);
+            scene.world.trafficLight.state=1;scene.step();
+            assert(scene.planning.result.stopReason==StopReason::None);
+            auto next=scene.map.staticZones.stopLines.front();next.id=89;
+            next.routeS=40.;next.begin.x=next.end.x=40.;scene.map.staticZones.stopLines.push_back(next);
+            scene.step();assert(scene.planning.frame.stop.sourceId==89);
+            scene.map.staticZones.stopLines.pop_back();
+            scene.world.respawnDetected=true;scene.step();
+            assert(scene.planning.stopManager.greenPassedLines.empty());
+            assert(scene.planning.result.stopReason==StopReason::RedLight);
+        }
+        Scene overlap(model);overlap.distance(10.);overlap.world.trafficLight.state=2;
+        Crosswalk cross;cross.id=77;cross.roadId=1;cross.entryRouteS=25.;cross.exitRouteS=35.;
+        cross.polygon={{25,-8},{35,-8},{35,8},{25,8}};overlap.map.staticZones.crosswalks={cross};
+        overlap.step();assert(std::abs(overlap.planning.result.stopDistance-(model==1?10.:5.))<1e-5);
+    }
+    Scene yellow(1);yellow.distance(.1);yellow.step();
+    yellow.world.trafficLight.state=2;yellow.distance(-.1);yellow.step();
+    assert(yellow.planning.stopManager.greenPassedLines.empty());
+    assert(yellow.planning.result.stopReason==StopReason::RedLight);
+    Scene cold(1);cold.distance(-.1);cold.step();cold.world.trafficLight.state=2;cold.step();
+    assert(cold.planning.stopManager.greenPassedLines.empty());
+    assert(cold.planning.result.stopReason==StopReason::RedLight);
+    Scene remap(1);remap.distance(.1);remap.step();
+    remap.world.egoPathS+=50.;remap.world.frontBumperPathS+=50.;remap.step();
+    assert(remap.planning.stopManager.greenPassedLines.empty());
+    Scene switched(1);switched.distance(.1);switched.step();switched.distance(-.1);switched.step();
+    switched.planning.config.trafficSignalModel=0.;switched.world.trafficLight.state=2;switched.step();
+    assert(switched.planning.stopManager.greenPassedLines.empty());
+    assert(switched.planning.result.stopReason==StopReason::RedLight);
+
+    // Production planner + controller, filtered measured speed, actual motion.
+    // A signal stop must finish inside 2m, never settle farther away.
+    for(int signal:{1,2}) for(double initial:{2.78,5.56,8.33,13.89}) {
+        Scene approach(1);approach.planning.config.comfortableDeceleration=1.5;
+        approach.world.trafficLight.state=signal;
+        double speed=initial, measured=initial, distance=70.;
+        approach.planning.pathPlanner.config.straightSpeed=initial;
+        auto& stop=approach.map.staticZones.stopLines.front();
+        stop.routeS=80.;stop.begin.x=stop.end.x=80.;
+        for(int i=0;i<1400;++i) {
+            approach.distance(distance);approach.world.egoSpeed=measured;approach.step();
+            assert(approach.planning.result.stopReason==StopReason::RedLight);
+            assert(approach.planning.result.valid);
+            if(distance>2.) assert(approach.planning.result.targetSpeed>.05);
+            const double next=std::max(0.,speed+approach.control.latestCommand.targetAccel*.05);
+            distance-=.025*(speed+next);speed=next;measured=.25*speed+.75*measured;
+            if(speed<=.005 && approach.planning.result.targetSpeed<=.05)break;
+        }
+        std::cout<<"signal model state="<<signal<<" initial_kph="<<initial*3.6<<" bumper_margin="<<distance<<'\n';
+        assert(speed<=.005 && distance>=0. && distance<2.);
     }
 }
 
 int main(int argc, char** argv) {
+    if(argc==2 && std::string(argv[1])=="--driving-model-baseline") {
+        testSimulationRecoveryStopEdgeCases(false);
+        testCrosswalkUsersAndStopDistanceGuard(false);
+        testStationaryCrosswalkWaitReleasesOnlyYield(false);
+        std::cout<<"d42fd708 baseline recovery and crosswalk behavior PASS\n";
+        return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--traffic-signal-model") {
+        testSelectableTrafficSignalModel();
+        std::cout<<"default / bumper green crossing / independent next line / signal stop position PASS\n";
+        return 0;
+    }
+
     if(argc==2 && std::string(argv[1])=="--unmarked-crossing-yield") {
         testUnmarkedCrossingMotionAndStationaryAvoidance();
         std::cout<<"unmarked crossing / full-body clearance / stationary avoidance / restart PASS\n";

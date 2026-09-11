@@ -2,6 +2,7 @@
 
 #include "utils/csv_utils.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -15,7 +16,8 @@ std::string removeYamlComment(const std::string& line) {
 }
 
 // section/key 형태의 간단한 숫자 YAML을 map으로 읽는다.
-bool readYamlNumbers(const std::string& yamlPath, std::map<std::string, double>& values) {
+bool readYamlNumbers(const std::string& yamlPath, std::map<std::string, double>& values,
+                     DrivingModel& model, bool& namedModel) {
     std::ifstream input(yamlPath);
     if (!input) return false;
 
@@ -30,6 +32,21 @@ bool readYamlNumbers(const std::string& yamlPath, std::map<std::string, double>&
         const std::string key = trim(line.substr(0, colon));
         const std::string text = trim(line.substr(colon + 1));
 
+        if (key == "model" || key == "모델") {
+            if (namedModel || rawLine.empty() || rawLine.front()==' ' || rawLine.front()=='\t') return false;
+            std::string name=text;
+            if (name.size()>=2 && ((name.front()=='\"' && name.back()=='\"') ||
+                                  (name.front()=='\'' && name.back()=='\'')))
+                name=name.substr(1,name.size()-2);
+            if (name=="default") model=DrivingModel::Default;
+            else if (name=="change_default") model=DrivingModel::ChangeDefault;
+            else if (name=="traffic_light") model=DrivingModel::TrafficLight;
+            else if (name=="speed_default") model=DrivingModel::SpeedDefault;
+            else if (name=="speed_traffic_light") model=DrivingModel::SpeedTrafficLight;
+            else { std::cerr<<"[config-error] unknown model: "<<name<<'\n'; return false; }
+            namedModel=true;
+            continue;
+        }
         if (text.empty()) {
             section = key;
             continue;
@@ -73,6 +90,10 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
     const auto positiveFinite = [](double value) {
         return std::isfinite(value) && value > 0.0;
     };
+    if (config.behavior.trafficSignalModel != 0. && config.behavior.trafficSignalModel != 1.) return false;
+    if (config.behavior.trafficSignalModel == 1. &&
+        (!positiveFinite(config.behavior.trafficStopPositionMargin) ||
+         config.behavior.trafficStopPositionMargin >= 2.)) return false;
     if (!positiveFinite(config.behavior.crosswalkStaticConfirmationTime) ||
         (config.behavior.simulationCrosswalkStaticRelease != 0.0 &&
          config.behavior.simulationCrosswalkStaticRelease != 1.0)) return false;
@@ -201,11 +222,14 @@ bool isDrivingConfigValid(const DrivingConfig& config) {
 bool loadDrivingConfig(DrivingConfig& config,
                        const std::string& yamlPath) {
     std::map<std::string, double> values;
-    if (!readYamlNumbers(yamlPath, values)) return false;
+    DrivingModel model=DrivingModel::Default;
+    bool namedModel=false;
+    if (!readYamlNumbers(yamlPath, values, model, namedModel)) return false;
 
-    config.behavior.simulationCrosswalkStaticRelease = 0.0;
+    // Reloading a normal model after a speed model must not retain its overrides.
+    config = DrivingConfig{};
 
-    return
+    const bool loaded =
         setConfigValue(values, "pure_pursuit.wheelbase",
                        config.planner.wheelbase) &&
         setConfigValue(values, "pure_pursuit.straight_lookahead",
@@ -245,6 +269,8 @@ bool loadDrivingConfig(DrivingConfig& config,
                        config.behavior.comfortableDeceleration) &&
         setConfigValue(values, "planning.stop_safety_margin",
                        config.behavior.stopSafetyMargin) &&
+        setOptionalConfigValue(values, "planning.traffic_signal_model",
+                       config.behavior.trafficSignalModel) &&
         setOptionalConfigValue(values, "planning.traffic_stop_position_margin",
                        config.behavior.trafficStopPositionMargin) &&
         setConfigValue(values, "planning.stop_hold_time",
@@ -428,6 +454,32 @@ bool loadDrivingConfig(DrivingConfig& config,
         setSpeedConfigValue(values, "runtime.max_valid_position_speed_kph",
                        config.runtime.maxValidPositionSpeed) &&
         setConfigValue(values, "runtime.input_timeout",
-                       config.runtime.inputTimeout) &&
-        isDrivingConfigValid(config);
+                       config.runtime.inputTimeout);
+    if (!loaded) return false;
+    // The named selector is authoritative. Numeric selection remains readable
+    // only for old configurations that do not yet contain a model name.
+    if (namedModel) {
+        config.behavior.trafficSignalModel =
+            (model==DrivingModel::TrafficLight || model==DrivingModel::SpeedTrafficLight) ? 1. : 0.;
+    } else if (config.behavior.trafficSignalModel==1.) {
+        model=DrivingModel::TrafficLight;
+    }
+    config.model=model;
+    config.behavior.changedDefaultModel = model!=DrivingModel::Default;
+    if (!isDrivingConfigValid(config)) return false;
+    if (model==DrivingModel::SpeedDefault || model==DrivingModel::SpeedTrafficLight) {
+        const double floor=std::min(10./3.6,config.planner.straightSpeed);
+        // Change configured low-speed operation, never clamp the final command:
+        // signal/queue braking, EBS and curvature/map speed limits stay effective.
+        config.planner.sharpCurveSpeed=std::min(config.planner.curveSpeed,
+            std::max(config.planner.sharpCurveSpeed,floor));
+        const double maneuverFloor=std::min({floor,config.laneChange.maximumLaneChangeSpeed,
+                                             config.laneChange.localFallbackOpenSpeed});
+        config.laneChange.localFallbackSpeed=std::max(config.laneChange.localFallbackSpeed,maneuverFloor);
+        config.behavior.progressRecoverySpeed=std::max(config.behavior.progressRecoverySpeed,floor);
+        // This is the local recovery guard, not the road/cruise speed ceiling.
+        config.behavior.progressRecoveryMaxSpeed=std::max(config.behavior.progressRecoveryMaxSpeed,
+                                                          config.behavior.progressRecoverySpeed);
+    }
+    return isDrivingConfigValid(config);
 }

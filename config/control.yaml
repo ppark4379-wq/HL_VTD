@@ -1,3 +1,11 @@
+model: default
+# default: d42fd708 (보도 밖 보행자 미리 감속)
+# change_default: 현재 변경본
+# traffic_light
+# speed_default
+# speed_traffic_light
+# 스피드 모델: 저속 회피·복구 5→10km/h, 급커브 목표 6→10km/h. 최고속도·정지/제동·곡률 제한 유지.
+
 # Pure Pursuit 경로추종 설정
 pure_pursuit:
   wheelbase: 2.944                 # [m] Hyundai IONIQ 6
@@ -128,7 +136,7 @@ lane_change:
   obstacle_mandatory_avoidance_distance: 15.0 # [m] 현재 경로의 정적 장애물: 통과하지 못하는 직진/지연 후보 제외
   # 끼어들어 정지한 차량은 잠깐 정지/추종한 뒤 정적 회피 대상으로 전환한다.
   # 처음부터 정지해 있던 장애물은 이 대기 없이 즉시 회피를 검토한다.
-  stopped_dynamic_confirmation_time: 0.75 # [s] 이동 객체의 연속 정지 확인 후 회피; 횡단보도 밖 보행자 포함
+  stopped_dynamic_confirmation_time: 0.75 # [s] 이동 객체의 연속 정지 확인 후 회피; 신호 횡단보도와 보도 밖 모두 적용
   road_connection_prepare_distance: 45.0 # [m] 다음 road 연결 차선으로 정렬하는 도로 마지막 구간
   transition_length: 15.0                 # [m] 곡률/조향 급변을 낮춘 횡이동 길이
   obstacle_clearance: 10.0                # [m] 장애물 통과 뒤 복귀 여유

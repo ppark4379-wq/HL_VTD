@@ -1,0 +1,4141 @@
+#include "data/map/static_zones.hpp"
+#include "data/map/map_matcher.hpp"
+#include "data/gt/gt_processor.hpp"
+#include "control/control_process.hpp"
+#include "control/longitudinal/longitudinal_controller.hpp"
+#include "network/receive/rdb_clock.hpp"
+#include "network/send/control_sender.hpp"
+#include "planning/behavior/behavior_planner.hpp"
+#include "planning/collision/collision_checker.hpp"
+#include "planning/global/reference_path_generator.hpp"
+#include "planning/global/mission_corridor.hpp"
+#include "planning/planning_process.hpp"
+#include "planning/local/lane_change_planner.hpp"
+#include "planning/local/corridor_lattice.hpp"
+#include "planning/local/path_planner.hpp"
+#include "utils/geometry.hpp"
+#include "utils/math_utils.hpp"
+
+#include <cassert>
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <limits>
+
+namespace {
+
+static_assert(CONTROL_PACKET_SIZE == 9,
+              "VTD control command must be exactly 9 bytes");
+
+void testRecoveryDoesNotCommandAStop() {
+    BehaviorState state;
+    state.health = SystemHealth::Recovery;
+    BehaviorDecision output;
+    ConstraintSet constraints;
+    constraints.speedLimit = 45.0 / 3.6;
+    StopDecision stop;
+    WorldState world;
+    world.egoSpeed = 3.0;
+    PlanningBehaviorConfig config;
+    updateBehavior(state, output, constraints, stop, world,
+                   30.0 / 3.6, config, 0.05);
+    if (output.health == SystemHealth::Recovery ||
+        output.targetSpeed <= 0.0 || output.longitudinal == LonMode::Stop) {
+        std::cerr << "Recovery still commanded a non-emergency stop\n";
+        std::abort();
+    }
+}
+
+void testEmergencyBrakingLatchesEntrySteering() {
+    ControlProcessData control;
+    control.controller.config.maxSteering = 0.48;
+    control.controller.config.maxSteeringRate = 10.0;
+    WorldState world;
+    world.inputValid = true;
+    PlanningResult planning;
+    planning.valid = true;
+    planning.targetSpeed = 5.0;
+    planning.trackingPlan.valid = true;
+    planning.trackingPlan.steering = 0.08;
+    runControlProcess(control, world, planning, 0.05);
+    const float beforeEmergency = control.latestCommand.steering;
+
+    planning.emergencyBrake = true;
+    planning.targetSpeed = 0.0;
+    planning.trackingPlan.steering = -0.48;
+    runControlProcess(control, world, planning, 0.05);
+    if (std::abs(control.latestCommand.steering - beforeEmergency) > 1e-6 ||
+        !control.safety.emergencyBrakeApplied) {
+        std::cerr << "EBS changed steering after brake entry\n";
+        std::abort();
+    }
+
+    planning.trackingPlan.steering = 0.48;
+    runControlProcess(control, world, planning, 0.05);
+    if (std::abs(control.latestCommand.steering - beforeEmergency) > 1e-6) {
+        std::cerr << "EBS steering latch changed while braking\n";
+        std::abort();
+    }
+}
+
+void testPositiveCrawlTargetDoesNotLatchStop() {
+    ControllerData controller;
+    controller.config.stopHoldSpeedThreshold = 0.8;
+    controller.config.maxAccelerationRate = 100.0;
+    ControlCommand command;
+
+    // Sharp connectors can legitimately request less than the measured-speed
+    // threshold used to decide that the car has stopped.  A positive target
+    // must therefore remain a drive command, not the zero-target hold branch.
+    runLongitudinalControl(controller, command, 0.0, 0.35, 0.05);
+    if (command.targetAccel <= 0.0) {
+        std::cerr << "Positive crawl target was classified as a stop\n";
+        std::abort();
+    }
+
+    // Preserve the intended behavior for a real zero-speed request.
+    controller = {};
+    controller.config.maxAccelerationRate = 100.0;
+    command = {};
+    runLongitudinalControl(controller, command, 0.2, 0.0, 0.05);
+    if (command.targetAccel >= 0.0) {
+        std::cerr << "Zero target no longer holds the stop\n";
+        std::abort();
+    }
+}
+
+void testTrafficControllerParsing() {
+    XmlElement root;
+    XmlElement controller;
+    controller.attributes["id"] = "11";
+    controller.attributes["name"] = "ctrl011";
+    for (const char* signal : {"54", "55", "58"}) {
+        XmlElement control;
+        control.attributes["signalId"] = signal;
+        controller.children.emplace_back("control", std::move(control));
+    }
+    root.children.emplace_back("controller", std::move(controller));
+    PathGeneratorData map;
+    parseTrafficControllers(map, root);
+    assert(map.trafficControllers.at(11).signalIds.size() == 3);
+    assert(map.signalToController.at(54) == 11);
+    assert(map.signalToController.at(55) == 11);
+    assert(map.signalToController.at(58) == 11);
+}
+
+template <typename T>
+void writeNative(std::vector<std::uint8_t>& bytes,
+                 std::size_t offset,
+                 const T& value) {
+    std::memcpy(bytes.data() + offset, &value, sizeof(value));
+}
+
+std::vector<std::uint8_t> makeRdbClockMessage(std::uint32_t frameNo,
+                                              double simulationTime,
+                                              double egoX,
+                                              double egoY) {
+    constexpr std::size_t headerSize = 24;
+    constexpr std::size_t entryHeaderSize = 16;
+    constexpr std::size_t objectSize = 112;
+    std::vector<std::uint8_t> message(
+        headerSize + entryHeaderSize + objectSize, 0);
+    writeNative(message, 0, std::uint16_t{35712});
+    writeNative(message, 2, std::uint16_t{0x011A});
+    writeNative(message, 4, std::uint32_t{headerSize});
+    writeNative(message, 8,
+                std::uint32_t{entryHeaderSize + objectSize});
+    writeNative(message, 12, frameNo);
+    writeNative(message, 16, simulationTime);
+
+    writeNative(message, headerSize, std::uint32_t{entryHeaderSize});
+    writeNative(message, headerSize + 4, std::uint32_t{objectSize});
+    writeNative(message, headerSize + 8, std::uint32_t{objectSize});
+    writeNative(message, headerSize + 12, std::uint16_t{9});
+    const std::size_t objectOffset = headerSize + entryHeaderSize;
+    std::memcpy(message.data() + objectOffset + 8, "Ego", 4);
+    writeNative(message, objectOffset + 64, egoX);
+    writeNative(message, objectOffset + 72, egoY);
+    return message;
+}
+
+void testRdbSimulationTimeMatchesGtInFrameOrder() {
+    RdbClockData clock;
+    const auto first = makeRdbClockMessage(20, 1.0, 10.0, 20.0);
+    const auto second = makeRdbClockMessage(21, 1.05, 10.0, 20.0);
+    clock.streamBuffer.insert(clock.streamBuffer.end(),
+                              first.begin(), first.end());
+    clock.streamBuffer.insert(clock.streamBuffer.end(),
+                              second.begin(), second.end());
+    extractRdbClockSamples(clock);
+    assert(clock.samples.size() == 2);
+
+    EgoState ego;
+    ego.x = 10.0F;
+    ego.y = 20.0F;
+    const auto firstMatch = matchRdbSimulationTime(clock, ego);
+    const auto secondMatch = matchRdbSimulationTime(clock, ego);
+    assert(firstMatch.has_value() &&
+           std::abs(*firstMatch - 1.0) < 1e-12);
+    assert(secondMatch.has_value() &&
+           std::abs(*secondMatch - 1.05) < 1e-12);
+    assert(clock.samples.empty());
+
+    // 새 RDB 샘플 없이 같은 GT가 반복되면 같은 simTime을 재사용한다.
+    const auto duplicateMatch = matchRdbSimulationTime(clock, ego);
+    assert(duplicateMatch.has_value() &&
+           std::abs(*duplicateMatch - 1.05) < 1e-12);
+}
+
+Polynomial constantWidth(double width) {
+    Polynomial value;
+    value.a = width;
+    return value;
+}
+
+PathGeneratorData makeStraightTwoLaneMap() {
+    PathGeneratorData map;
+    Road road;
+    road.id = 1;
+    road.length = 100.0;
+    Geometry geometry;
+    geometry.type = GeometryType::Line;
+    geometry.length = road.length;
+    road.geometries.push_back(geometry);
+    LaneSection section;
+    LaneDefinition source;
+    source.id = -1;
+    source.type = "driving";
+    source.widths.push_back(constantWidth(3.5));
+    source.roadMarks.push_back({0.0, "both", "standard"});
+    LaneDefinition target = source;
+    target.id = -2;
+    section.lanes.emplace(source.id, source);
+    section.lanes.emplace(target.id, target);
+    road.sections.push_back(section);
+    map.roads.emplace(road.id, road);
+    map.laneGraph[{1, 0, -2}].push_back({1, 0, -1});
+    map.laneGraph[{1, 0, -1}].push_back({1, 0, -2});
+    for (int laneId : {-1, -2}) {
+        LaneSegment segment;
+        segment.key = {1, 0, laneId};
+        segment.startS = 0.0;
+        segment.endS = 100.0;
+        for (int index = 0; index <= 100; ++index) {
+            Waypoint point;
+            point.x = static_cast<double>(index);
+            point.y = laneId == -1 ? -1.75 : -5.25;
+            point.yaw = 0.0;
+            point.roadS = static_cast<double>(index);
+            point.roadId = 1;
+            point.laneId = laneId;
+            point.sectionIndex = 0;
+            segment.points.push_back(point);
+        }
+        map.laneSegments.emplace(segment.key, std::move(segment));
+    }
+    return map;
+}
+
+PathGeneratorData makeStraightThreeLaneMap() {
+    PathGeneratorData map = makeStraightTwoLaneMap();
+    Road& road = map.roads.at(1);
+    LaneDefinition lane = road.sections.front().lanes.at(-2);
+    lane.id = -3;
+    road.sections.front().lanes.emplace(-3, lane);
+    map.laneGraph[{1, 0, -2}].push_back({1, 0, -3});
+    map.laneGraph[{1, 0, -3}].push_back({1, 0, -2});
+
+    LaneSegment segment;
+    segment.key = {1, 0, -3};
+    segment.startS = 0.0;
+    segment.endS = 100.0;
+    for (int index = 0; index <= 100; ++index) {
+        Waypoint point;
+        point.x = static_cast<double>(index);
+        point.y = -8.75;
+        point.yaw = 0.0;
+        point.roadS = static_cast<double>(index);
+        point.roadId = 1;
+        point.laneId = -3;
+        point.sectionIndex = 0;
+        segment.points.push_back(point);
+    }
+    map.laneSegments.emplace(segment.key, std::move(segment));
+    return map;
+}
+
+PathPlannerData makeStraightGlobalPath() {
+    PathPlannerData planner;
+    for (int index = 0; index <= 90; ++index) {
+        Waypoint point;
+        point.x = static_cast<double>(index);
+        point.y = -1.75;
+        point.yaw = 0.0;
+        point.s = static_cast<double>(index);
+        point.roadS = point.s;
+        point.roadId = 1;
+        point.laneId = -1;
+        planner.waypoints.push_back(point);
+    }
+    return planner;
+}
+
+PathPlannerData makeGlobalPathWithNextRoad(PathGeneratorData& map) {
+    PathPlannerData planner = makeStraightGlobalPath();
+    Road nextRoad;
+    nextRoad.id = 2;
+    nextRoad.length = 50.0;
+    Geometry geometry;
+    geometry.type = GeometryType::Line;
+    geometry.x = 100.0;
+    geometry.y = -3.5;
+    geometry.length = 50.0;
+    nextRoad.geometries.push_back(geometry);
+    LaneSection section;
+    LaneDefinition lane;
+    lane.id = -1;
+    lane.type = "driving";
+    lane.widths.push_back(constantWidth(3.5));
+    section.lanes.emplace(-1, lane);
+    nextRoad.sections.push_back(section);
+    map.roads.emplace(2, nextRoad);
+
+    LaneSegment segment;
+    segment.key = {2, 0, -1};
+    segment.startS = 0.0;
+    segment.endS = 50.0;
+    for (int index = 0; index <= 50; ++index) {
+        Waypoint point;
+        point.x = 100.0 + index;
+        point.y = -5.25;
+        point.yaw = 0.0;
+        point.roadS = static_cast<double>(index);
+        point.roadId = 2;
+        point.laneId = -1;
+        point.sectionIndex = 0;
+        segment.points.push_back(point);
+        point.s = 100.0 + index;
+        planner.waypoints.push_back(point);
+    }
+    map.laneSegments.emplace(segment.key, std::move(segment));
+    map.laneGraph[{1, 0, -2}].push_back({2, 0, -1});
+    map.laneGraph[{1, 0, -1}].push_back({2, 0, -1});
+    return planner;
+}
+
+WorldState makeWorldWithObstacle() {
+    WorldState world;
+    world.ego.x = 10.0F;
+    world.ego.y = -1.75F;
+    world.ego.heading = 0.0F;
+    world.egoSpeed = 5.0;
+    world.egoLaneValid = true;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoRoadId = 1;
+    world.egoLaneId = -1;
+    world.egoSectionIndex = 0;
+    world.egoRoadS = 10.0;
+    world.egoPathS = 10.0;
+    world.frontBumperPathS = 13.8;
+    world.egoObb = makeObb2D(11.4, -1.75, 0.0, 4.8, 1.9);
+
+    WorldObjectState obstacle;
+    obstacle.raw.id = 7;
+    obstacle.raw.x = 35.0F;
+    obstacle.raw.y = -1.75F;
+    obstacle.raw.length = 4.0F;
+    obstacle.raw.width = 2.0F;
+    obstacle.obb = makeObb2D(35.0, -1.75, 0.0, 4.0, 2.0);
+    obstacle.laneValid = true;
+    obstacle.roadId = 1;
+    obstacle.laneId = -1;
+    obstacle.sectionIndex = 0;
+    obstacle.pathValid = true;
+    obstacle.pathS = 35.0;
+    obstacle.relativeS = 25.0;
+    obstacle.isAhead = true;
+    obstacle.isOnEgoPath = true;
+    world.objects.push_back(obstacle);
+    return world;
+}
+
+void testLaneChangeAcrossRenumberedLaneSection() {
+    PathGeneratorData map;
+    Road road;
+    road.id = 418;
+    road.length = 100.0;
+    Geometry geometry;
+    geometry.type = GeometryType::Line;
+    geometry.length = road.length;
+    road.geometries.push_back(geometry);
+    road.laneOffsets.push_back({0.0, 0.0, 0.0, 0.0, 0.0});
+    road.laneOffsets.push_back({50.0, 3.5, 0.0, 0.0, 0.0});
+
+    LaneSection before;
+    before.s = 0.0;
+    for (int laneId : {-1, -2}) {
+        LaneDefinition lane;
+        lane.id = laneId;
+        lane.type = "driving";
+        lane.widths.push_back(constantWidth(3.5));
+        lane.roadMarks.push_back({0.0, "both", "standard"});
+        before.lanes.emplace(laneId, lane);
+    }
+    before.lanes.at(-1).successor = -2;
+    before.lanes.at(-2).successor = -3;
+
+    LaneSection after;
+    after.s = 50.0;
+    for (int laneId : {-1, -2, -3}) {
+        LaneDefinition lane;
+        lane.id = laneId;
+        lane.type = "driving";
+        lane.widths.push_back(constantWidth(3.5));
+        lane.roadMarks.push_back({50.0, "both", "standard"});
+        after.lanes.emplace(laneId, lane);
+    }
+    after.lanes.at(-2).predecessor = -1;
+    after.lanes.at(-3).predecessor = -2;
+    road.sections.push_back(before);
+    road.sections.push_back(after);
+    map.roads.emplace(road.id, road);
+    map.laneGraph[{418, 0, -1}].push_back({418, 1, -2});
+    map.laneGraph[{418, 0, -2}].push_back({418, 1, -3});
+    map.laneGraph[{418, 1, -2}].push_back({418, 1, -3});
+    map.laneGraph[{418, 1, -3}].push_back({418, 1, -2});
+
+    PathPlannerData globalPath;
+    for (int index = 0; index <= 100; ++index) {
+        Waypoint point;
+        point.x = static_cast<double>(index);
+        point.y = -1.75;
+        point.yaw = 0.0;
+        point.s = static_cast<double>(index);
+        point.roadS = point.s;
+        point.roadId = 418;
+        point.sectionIndex = index < 50 ? 0 : 1;
+        point.laneId = index < 50 ? -1 : -2;
+        globalPath.waypoints.push_back(point);
+    }
+
+    WorldState world;
+    world.ego.x = 35.0F;
+    world.ego.y = -1.75F;
+    world.ego.heading = 0.0F;
+    world.egoSpeed = 5.0;
+    world.egoLaneValid = true;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoRoadId = 418;
+    world.egoLaneId = -1;
+    world.egoSectionIndex = 0;
+    world.egoRoadS = 35.0;
+    world.egoPathS = 35.0;
+    world.frontBumperPathS = 38.8;
+    world.egoObb = makeObb2D(36.4, -1.75, 0.0, 4.8, 1.9);
+
+    WorldObjectState obstacle;
+    obstacle.raw.id = 4;
+    obstacle.raw.x = 60.0F;
+    obstacle.raw.y = -1.75F;
+    obstacle.raw.length = 4.0F;
+    obstacle.raw.width = 2.0F;
+    obstacle.obb = makeObb2D(60.0, -1.75, 0.0, 4.0, 2.0);
+    obstacle.laneValid = true;
+    obstacle.roadId = 418;
+    obstacle.laneId = -2;
+    obstacle.sectionIndex = 1;
+    obstacle.roadS = 60.0;
+    obstacle.pathValid = true;
+    obstacle.pathS = 60.0;
+    obstacle.relativeS = 25.0;
+    obstacle.isAhead = true;
+    obstacle.isOnEgoPath = true;
+    world.objects.push_back(obstacle);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    safetyConfig.collisionPredictionHorizon = 5.0;
+    assert(tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 35));
+    assert(laneChange.routeMode == LaneChangeRouteMode::ReturnToSource);
+    assert(laneChange.targetLaneId == -2);
+    const auto nearObstacle = std::min_element(
+        laneChange.path.begin(), laneChange.path.end(),
+        [](const Waypoint& left, const Waypoint& right) {
+            return std::abs(left.s - 60.0) < std::abs(right.s - 60.0);
+        });
+    assert(nearObstacle != laneChange.path.end());
+    assert(nearObstacle->sectionIndex == 1);
+    assert(nearObstacle->laneId == -3);
+    assert(nearObstacle->y < -4.0);
+}
+
+void testLimitedLateralOffsetAvoidance() {
+    PathGeneratorData map = makeStraightTwoLaneMap();
+    PathPlannerData globalPath = makeStraightGlobalPath();
+    WorldState world = makeWorldWithObstacle();
+    world.objects.front().raw.width = 5.8F;
+    world.objects.front().obb = makeObb2D(35.0, -1.75, 0.0, 4.0, 5.8);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    config.maximumObstacleLaneIntrusion = 1.25;
+    config.lateralOffsetStep = 0.2;
+    config.maximumLateralOffset = 0.8;
+    config.minimumLaneEdgeClearance = 0.0;
+    PlanningBehaviorConfig safetyConfig;
+    safetyConfig.collisionPredictionHorizon = 5.0;
+    assert(tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 10));
+    const auto nearObstacle = std::min_element(
+        laneChange.path.begin(), laneChange.path.end(),
+        [](const Waypoint& left, const Waypoint& right) {
+            return std::abs(left.s - 35.0) < std::abs(right.s - 35.0);
+        });
+    assert(nearObstacle != laneChange.path.end());
+    assert(nearObstacle->y < -5.55);
+
+    WorldState impossible = makeWorldWithObstacle();
+    impossible.objects.front().raw.width = 7.0F;
+    impossible.objects.front().obb =
+        makeObb2D(35.0, -1.75, 0.0, 4.0, 7.0);
+    LaneChangeData rejected;
+    assert(!tryPrepareObstacleLaneChange(
+        rejected, config, safetyConfig, impossible, map, globalPath, 10));
+}
+
+void testStaticZoneRouteAlignment() {
+    StaticZoneData zones;
+    StopLine line;
+    line.begin = {20.0, -2.0};
+    line.end = {20.0, 2.0};
+    zones.stopLines.push_back(line);
+    Crosswalk crosswalk;
+    crosswalk.polygon = {{30.0, -2.0}, {34.0, -2.0},
+                         {34.0, 2.0}, {30.0, 2.0}};
+    zones.crosswalks.push_back(crosswalk);
+    StopLine farLine;
+    farLine.id = 9998;
+    farLine.begin = {20.0, 100.0};
+    farLine.end = {24.0, 100.0};
+    zones.stopLines.push_back(farLine);
+    Crosswalk farCrosswalk;
+    farCrosswalk.id = 9999;
+    farCrosswalk.polygon = {{30.0, 100.0}, {34.0, 100.0},
+                            {34.0, 104.0}, {30.0, 104.0}};
+    zones.crosswalks.push_back(farCrosswalk);
+    const auto path = makeStraightGlobalPath().waypoints;
+    if (!alignStaticZonesToRoute(zones, path)) {
+        std::cerr << "failed to align static zones\n";
+        std::abort();
+    }
+    if (zones.stopLines.size() != 2 || zones.crosswalks.size() != 2 ||
+        !zones.stopLines.front().routeRelevant ||
+        zones.stopLines.back().routeRelevant ||
+        !zones.crosswalks.front().routeRelevant ||
+        zones.crosswalks.back().routeRelevant) {
+        std::cerr << "route alignment deleted or activated wrong static data\n";
+        std::abort();
+    }
+    assert(std::abs(zones.stopLines.front().routeS - 20.0) < 1e-6);
+    assert(std::abs(zones.crosswalks.front().entryRouteS - 30.0) < 1e-6);
+    assert(std::abs(zones.crosswalks.front().exitRouteS - 34.0) < 1e-6);
+}
+
+void testSchoolZoneReferencePointConfig() {
+    MapRuntimeConfig config;
+    assert(loadMapRuntimeConfig(config, "config/maps/living_lab.yaml"));
+    assert(config.schoolZoneReferencePointsPath ==
+           "config/maps/living_lab_school_zone_points.yaml");
+    assert(config.zones.schoolZoneReferencePoints.size() == 137);
+    assert(std::abs(config.zones.schoolZoneReferenceSpeedLimit -
+                    30.0 / 3.6) < 1e-9);
+    const auto& first = config.zones.schoolZoneReferencePoints.front();
+    assert(first.id == "SZP_01");
+    assert(std::abs(first.position.x - 359.584) < 1e-9);
+    assert(std::abs(first.position.y + 71.227) < 1e-9);
+    assert(first.trackId == 420);
+    assert(first.laneId == -1);
+    assert(std::abs(first.trackS - 0.084) < 1e-9);
+}
+
+void testScenarioRoutesKeepTheirOwnCrosswalksAndSchoolZone() {
+    struct Case {
+        const char* routePath;
+        int expectedCrosswalkId;
+        bool expectsSchoolZone;
+    };
+    for (const Case testCase : {
+             Case{"scenario/mixed/M03/route.csv", 6289, false},
+             Case{"scenario/mixed/M04/route.csv", 1090, true},
+             // M09는 교차로 sibling connector 1784를 타지만
+             // 물리적으로는 road 1781의 횟단보도 1692를 관통한다.
+             Case{"scenario/mixed/M09/route.csv", 1692, true}}) {
+        MapRuntimeConfig config;
+        std::vector<Waypoint> route;
+        if (!loadMapRuntimeConfig(config, "config/maps/living_lab.yaml") ||
+            !loadWaypointsCsv(route, testCase.routePath)) {
+            std::cerr << "failed to align static zones for "
+                      << testCase.routePath << '\n';
+            std::abort();
+        }
+        const std::size_t loadedStopLineCount =
+            config.zones.stopLines.size();
+        const std::size_t loadedCrosswalkCount =
+            config.zones.crosswalks.size();
+        if (!alignStaticZonesToRoute(config.zones, route) ||
+            config.zones.stopLines.size() != loadedStopLineCount ||
+            config.zones.crosswalks.size() != loadedCrosswalkCount) {
+            std::cerr << "route alignment removed loaded static data for "
+                      << testCase.routePath << '\n';
+            std::abort();
+        }
+        const bool hasExpectedCrosswalk = std::any_of(
+            config.zones.crosswalks.begin(), config.zones.crosswalks.end(),
+            [&](const Crosswalk& crosswalk) {
+                return crosswalk.id == testCase.expectedCrosswalkId &&
+                       crosswalk.routeRelevant;
+            });
+        const bool hasSchoolZone = std::any_of(
+            config.zones.speedZones.begin(), config.zones.speedZones.end(),
+            [](const SpeedZone& zone) {
+                return zone.schoolZone && zone.routeRelevant;
+            });
+        if (!hasExpectedCrosswalk ||
+            hasSchoolZone != testCase.expectsSchoolZone) {
+            std::cerr << "route-specific static zone regression for "
+                      << testCase.routePath << '\n';
+            std::abort();
+        }
+    }
+}
+
+void testPredictedCollisionIsNotCurrentCollision() {
+    WorldState world = makeWorldWithObstacle();
+    world.objects.front().raw.x = 20.0F;
+    world.objects.front().pathS = 20.0;
+    world.objects.front().relativeS = 10.0;
+    world.objects.front().obb = makeObb2D(20.0, -1.75, 0.0, 4.0, 2.0);
+    LocalPathData path;
+    path.valid = true;
+    path.points = makeStraightGlobalPath().waypoints;
+    PathSafetyResult safety;
+    resetPathSafety(safety);
+    checkCurrentCollisions(safety, world.egoObb, world.objects);
+    checkPredictedCollisions(safety, world, path, 3.0, 0.1);
+    assert(!safety.collision);
+    assert(safety.predictedCollision);
+    assert(safety.predictedCollisionTTC > 0.0);
+}
+
+void testConvergingOncomingVehicleIsPredictedOutsideNarrowCorridor() {
+    WorldState world;
+    world.inputValid = true;
+    world.ego.x = 332.961761F;
+    world.ego.y = -70.869301F;
+    world.ego.heading = 5.508448F;
+    world.egoSpeed = 7.650285;
+    world.egoPathValid = true;
+    world.egoPathS = 0.0;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    WorldObjectState object;
+    object.raw.id = 12;
+    object.raw.x = 357.352661F;
+    object.raw.y = -100.225708F;
+    object.raw.heading = 2.150659F;
+    object.raw.speed = 18.055555F;
+    object.raw.length = 4.394F;
+    object.raw.width = 1.808F;
+    object.pathValid = true;
+    object.isAhead = true;
+    object.relativeS = 37.965;
+    object.relativeD = -3.916;  // 기존 2 m 맞은편 회랑 밖
+    object.obb = makeObb2D(
+        object.raw.x, object.raw.y, object.raw.heading,
+        object.raw.length, object.raw.width);
+    world.objects.push_back(object);
+
+    LocalPathData path;
+    path.valid = true;
+    for (int index = 0; index <= 50; ++index) {
+        const double distance = static_cast<double>(index);
+        Waypoint point;
+        point.x = world.ego.x + distance * std::cos(world.ego.heading);
+        point.y = world.ego.y + distance * std::sin(world.ego.heading);
+        point.yaw = world.ego.heading;
+        point.s = distance;
+        path.points.push_back(point);
+    }
+
+    PathSafetyResult safety;
+    resetPathSafety(safety);
+    checkPredictedCollisions(safety, world, path, 3.0, 0.1);
+    if (!safety.predictedCollision || safety.riskObjectId != 12) {
+        std::cerr << "converging oncoming vehicle was filtered out\n";
+        std::abort();
+    }
+
+    // 같은 속도/방향이어도 정상 맞은편 차선 간격을 유지하면 예측 후보가
+    // 되지 않아 곡선도로 오제동 방지 필터를 보존한다.
+    world.ego.x = 0.0F;
+    world.ego.y = 0.0F;
+    world.ego.heading = 0.0F;
+    world.egoSpeed = 8.0;
+    world.egoObb = makeObb2D(0.0, 0.0, 0.0, 4.8, 1.9);
+    world.objects.front().raw.x = 30.0F;
+    world.objects.front().raw.y = 3.5F;
+    world.objects.front().raw.heading = static_cast<float>(M_PI);
+    world.objects.front().raw.speed = 15.0F;
+    world.objects.front().relativeD = 3.5;
+    world.objects.front().obb = makeObb2D(
+        30.0, 3.5, M_PI, 4.394, 1.808);
+    path.points.clear();
+    for (int index = 0; index <= 50; ++index) {
+        Waypoint point;
+        point.x = static_cast<double>(index);
+        point.y = 0.0;
+        point.yaw = 0.0;
+        point.s = static_cast<double>(index);
+        path.points.push_back(point);
+    }
+    resetPathSafety(safety);
+    checkPredictedCollisions(safety, world, path, 3.0, 0.1);
+    if (safety.predictedCollision) {
+        std::cerr << "separated oncoming lane caused false collision\n";
+        std::abort();
+    }
+}
+
+void testBlockedReturnUsesWaitingSpeedUntilCollisionIsUrgent() {
+    PathSafetyResult safety;
+    resetPathSafety(safety);
+    safety.predictedCollision = true;
+    safety.predictedCollisionTTC = 3.0;
+    safety.minimumTTC = 3.0;
+
+    // 복귀 경로 멀리의 점유는 복귀 보류/감속 사유이지만,
+    // 즉시 비상제동 사유는 아니다.
+    assert(!requiresEmergencyBrake(safety, 1.5));
+
+    safety.predictedCollisionTTC = 1.4;
+    safety.minimumTTC = 1.4;
+    assert(requiresEmergencyBrake(safety, 1.5));
+
+    safety.predictedCollision = false;
+    safety.predictedCollisionTTC =
+        std::numeric_limits<double>::infinity();
+    safety.minimumTTC = std::numeric_limits<double>::infinity();
+    safety.collision = true;
+    assert(requiresEmergencyBrake(safety, 1.5));
+}
+
+void testMovingReturnConflictCanClearAtWaitingSpeed() {
+    WorldState world = makeWorldWithObstacle();
+    WorldObjectState& object = world.objects.front();
+    object.raw.x = 20.0F;
+    object.raw.speed = 4.0F;
+    object.raw.heading = 0.0F;
+    object.pathS = 20.0;
+    object.relativeS = 10.0;
+    object.relativeD = 0.0;
+    object.isAhead = true;
+    object.isOnEgoPath = true;
+    object.obb = makeObb2D(20.0, -1.75, 0.0, 4.0, 2.0);
+
+    LocalPathData path;
+    path.valid = true;
+    path.points = makeStraightGlobalPath().waypoints;
+
+    PathSafetyResult fastSafety;
+    resetPathSafety(fastSafety);
+    world.egoSpeed = 6.0;
+    checkPredictedCollisions(fastSafety, world, path, 5.0, 0.1);
+    assert(fastSafety.predictedCollision);
+
+    // 같은 경로도 2 m/s로 감속하면 4 m/s 앞차가 먼저
+    // 멀어진다. 이 경우는 멈추지 말고 느린 복귀가 안전하다.
+    PathSafetyResult waitingSafety;
+    resetPathSafety(waitingSafety);
+    world.egoSpeed = 2.0;
+    checkPredictedCollisions(waitingSafety, world, path, 5.0, 0.1);
+    assert(!waitingSafety.predictedCollision);
+}
+
+void testObstacleLaneChange() {
+    PathGeneratorData map = makeStraightTwoLaneMap();
+    PathPlannerData globalPath = makeStraightGlobalPath();
+    WorldState world = makeWorldWithObstacle();
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    safetyConfig.collisionPredictionHorizon = 5.0;
+    assert(tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 10));
+    assert(laneChange.phase == LaneChangePhase::Prepare);
+    assert(laneChange.targetLaneId == -2);
+    assert(laneChange.routeMode == LaneChangeRouteMode::KeepTargetLane);
+    assert(!laneChange.reconnectLaneValid);
+    assert(laneChange.path.back().laneId == -2);
+    assert(laneChange.turnSignal != 0);
+    const auto nearObstacle = std::min_element(
+        laneChange.path.begin(), laneChange.path.end(),
+        [](const Waypoint& left, const Waypoint& right) {
+            return std::abs(left.s - 35.0) < std::abs(right.s - 35.0);
+        });
+    assert(nearObstacle != laneChange.path.end());
+    assert(nearObstacle->y < -4.0);
+    advanceLaneChangePhase(laneChange, config, world,
+                           config.prepareTime, false, true, true);
+    assert(laneChange.phase == LaneChangePhase::Execute);
+    advanceLaneChangePhase(laneChange, config, world, 0.1,
+                           false, true, false);
+    assert(!laneChange.waitingForReturn);
+
+    WorldObjectState targetVehicle;
+    targetVehicle.raw.id = 8;
+    targetVehicle.raw.x = 20.0F;
+    targetVehicle.raw.y = -5.25F;
+    targetVehicle.raw.length = 4.0F;
+    targetVehicle.raw.width = 2.0F;
+    targetVehicle.obb = makeObb2D(20.0, -5.25, 0.0, 4.0, 2.0);
+    targetVehicle.laneValid = true;
+    targetVehicle.roadId = 1;
+    targetVehicle.laneId = -2;
+    targetVehicle.sectionIndex = 0;
+    targetVehicle.pathValid = true;
+    targetVehicle.pathS = 20.0;
+    WorldState blockedWorld = makeWorldWithObstacle();
+    blockedWorld.objects.push_back(targetVehicle);
+    LaneChangeData blocked;
+    assert(!tryPrepareObstacleLaneChange(
+        blocked, config, safetyConfig, blockedWorld, map, globalPath, 10));
+
+    // 목표 차선의 더 먼 장애물은 첫 회피를 폐기시키지 않는다.
+    // 현재 장애물보다 여유가 크면 먼저 안착한 뒤 새 차선에서
+    // 후속 장애물을 다시 계획한다.
+    targetVehicle.raw.x = 45.0F;
+    targetVehicle.pathS = 45.0;
+    targetVehicle.obb = makeObb2D(45.0, -5.25, 0.0, 4.0, 2.0);
+    WorldState farBlockedWorld = makeWorldWithObstacle();
+    farBlockedWorld.objects.push_back(targetVehicle);
+    LaneChangeData farBlocked;
+    if (!tryPrepareObstacleLaneChange(
+            farBlocked, config, safetyConfig, farBlockedWorld,
+            map, globalPath, 10) ||
+        farBlocked.routeMode != LaneChangeRouteMode::KeepTargetLane ||
+        farBlocked.rejoinRouteS >= targetVehicle.pathS) {
+        std::cerr << "far target obstacle incorrectly rejected first avoidance\n";
+        std::abort();
+    }
+
+    // 정지 이력을 기다리지 않고 현재 프레임에 정적인 객체면 즉시
+    // 짧은 횡이동 경로를 OBB 검사한 뒤 회피한다.
+    WorldState stoppedBehind = makeWorldWithObstacle();
+    stoppedBehind.egoSpeed = 0.0;
+    stoppedBehind.objects.front().raw.x = 29.0F;
+    stoppedBehind.objects.front().pathS = 29.0;
+    stoppedBehind.objects.front().relativeS = 19.0;
+    stoppedBehind.objects.front().obb =
+        makeObb2D(29.0, -1.75, 0.0, 4.0, 2.0);
+    LaneChangeData immediateAvoidance;
+    assert(tryPrepareObstacleLaneChange(
+        immediateAvoidance, config, safetyConfig, stoppedBehind,
+        map, globalPath, 10));
+
+    // 이전에 움직이던 끼어들기 차량은 정지 확인 전에는 회피
+    // 기동을 시작하지 않고, 확인된 ID가 되면 같은 경로를 생성한다.
+    const std::vector<int> noConfirmedObjects;
+    LaneChangeData unconfirmedStoppedVehicle;
+    assert(!tryPrepareObstacleLaneChange(
+        unconfirmedStoppedVehicle, config, safetyConfig, stoppedBehind,
+        map, globalPath, 10, nullptr, &noConfirmedObjects));
+    const std::vector<int> confirmedObjects{7};
+    LaneChangeData confirmedStoppedVehicle;
+    assert(tryPrepareObstacleLaneChange(
+        confirmedStoppedVehicle, config, safetyConfig, stoppedBehind,
+        map, globalPath, 10, nullptr, &confirmedObjects));
+
+    // 교차로나 중첩 도로에서 객체의 독립 최근접 차선 매칭이 다른 road를
+    // 선택해도, Ego 참조경로 위 장애물은 경로 차선으로 회피해야 한다.
+    WorldState mismatchedLane = makeWorldWithObstacle();
+    mismatchedLane.objects.front().roadId = 72;
+    mismatchedLane.objects.front().sectionIndex = 0;
+    mismatchedLane.objects.front().laneId = -3;
+    mismatchedLane.objects.front().roadS = 44.0;
+    LaneChangeData rematchedAvoidance;
+    assert(tryPrepareObstacleLaneChange(
+        rematchedAvoidance, config, safetyConfig, mismatchedLane,
+        map, globalPath, 10));
+    assert(rematchedAvoidance.targetLaneId == -2);
+}
+
+void testBlockedAdjacentLanesPreferFartherObstacle() {
+    PathGeneratorData map = makeStraightThreeLaneMap();
+    PathPlannerData globalPath = makeStraightGlobalPath();
+    WorldState world = makeWorldWithObstacle();
+
+    const auto addLaneBlocker = [&](int id, int laneId, double x,
+                                    double y) {
+        WorldObjectState object;
+        object.raw.id = id;
+        object.raw.x = static_cast<float>(x);
+        object.raw.y = static_cast<float>(y);
+        object.raw.length = 4.0F;
+        object.raw.width = 2.0F;
+        object.obb = makeObb2D(x, y, 0.0, 4.0, 2.0);
+        object.laneValid = true;
+        object.roadId = 1;
+        object.laneId = laneId;
+        object.sectionIndex = 0;
+        object.pathValid = true;
+        object.pathS = x;
+        object.relativeS = x - world.egoPathS;
+        object.isAhead = true;
+        world.objects.push_back(object);
+    };
+    // 접근 가능한 두 회피 차선이 모두 막혀 있지만
+    // 2회 횡이동인 -3 차선의 장애물이 더 멀리 있다.
+    // 단순히 가까운 차선(-2)을 고르지 않고 전방 여유가
+    // 큰 차선을 선택해 후속 회피 공간을 확보해야 한다.
+    addLaneBlocker(8, -2, 42.0, -5.25);
+    addLaneBlocker(9, -3, 55.0, -8.75);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    if (!tryPrepareObstacleLaneChange(
+            laneChange, config, safetyConfig, world, map, globalPath, 10) ||
+        laneChange.targetLaneId != -3 ||
+        laneChange.routeMode != LaneChangeRouteMode::KeepTargetLane) {
+        std::cerr << "all-blocked lane ranking did not choose most clearance\n";
+        std::abort();
+    }
+}
+
+void testSolidLineForbidsObstacleLaneChange() {
+    PathGeneratorData map = makeStraightTwoLaneMap();
+    Road& road = map.roads.at(1);
+    road.sections[0].lanes.at(-1).roadMarks = {
+        {0.0, "none", "standard"}};
+
+    const PathPlannerData globalPath = makeStraightGlobalPath();
+    const WorldState world = makeWorldWithObstacle();
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    assert(!tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 10));
+    assert(laneChange.phase == LaneChangePhase::None);
+
+    // 시작점이 점선이어도 실제 경계를 넘는 위치가 실선이면 금지한다.
+    road.sections[0].lanes.at(-1).roadMarks = {
+        {0.0, "both", "standard"},
+        {15.0, "none", "standard"}};
+    LaneChangeData crossingOnSolid;
+    assert(!tryPrepareObstacleLaneChange(
+        crossingOnSolid, config, safetyConfig, world, map, globalPath, 10));
+}
+
+void testAvoidanceLaneMustConnectToNextRoad() {
+    PathGeneratorData map = makeStraightTwoLaneMap();
+    const PathPlannerData globalPath = makeGlobalPathWithNextRoad(map);
+    map.laneGraph[{1, 0, -2}].clear();
+
+    const WorldState world = makeWorldWithObstacle();
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    if (!tryPrepareObstacleLaneChange(
+            laneChange, config, safetyConfig, world, map, globalPath, 10)) {
+        std::cerr << "obstacle avoidance was rejected only because target lane "
+                     "does not connect to the next road\n";
+        std::abort();
+    }
+    if (laneChange.routeMode != LaneChangeRouteMode::KeepTargetLane ||
+        laneChange.reconnectLaneValid) {
+        std::cerr << "obstacle avoidance did not keep the free current-road lane\n";
+        std::abort();
+    }
+}
+
+void testRoadIdTrackingKeepsCurrentLaneInsideRoad() {
+    const PathGeneratorData map = makeStraightTwoLaneMap();
+    const PathPlannerData globalPath = makeStraightGlobalPath();
+    WorldState world = makeWorldWithObstacle();
+    world.objects.clear();
+    world.ego.y = -5.25F;
+    world.egoLaneId = -2;
+    world.egoPathD = -3.5;
+
+    PathPlannerData selected;
+    if (!buildRoadIdTrackingPath(
+            selected, globalPath.config, world, map, globalPath, 10, 80.0)) {
+        std::cerr << "road-ID tracking path was not generated\n";
+        std::abort();
+    }
+    for (const Waypoint& point : selected.waypoints) {
+        if (point.roadId == 1 && std::abs(point.y + 5.25) > 1e-6) {
+            std::cerr << "road-ID tracking pulled the ego back to global lane\n";
+            std::abort();
+        }
+    }
+}
+
+void testStaticObstacleFollowNeverCommandsZero() {
+    WorldState world = makeWorldWithObstacle();
+    world.egoSpeed = 5.0;
+    world.objects.front().relativeS = 5.5;
+    world.objects.front().raw.speed = 0.0F;
+    BehaviorState state;
+    BehaviorDecision behavior;
+    ConstraintSet constraints;
+    constraints.speedLimit = 45.0 / 3.6;
+    StopDecision noLegalStop;
+    PlanningBehaviorConfig config;
+    config.minimumObjectResponseSpeed = 15.0 / 3.6;
+    updateBehavior(state, behavior, constraints, noLegalStop, world,
+                   45.0 / 3.6, config, 0.05);
+    if (behavior.targetSpeed + 1e-9 < config.minimumObjectResponseSpeed) {
+        std::cerr << "static obstacle ACC commanded below 15 km/h\n";
+        std::abort();
+    }
+
+    // 서행 차량이 느려도 급정지/끼어들기 비상제동은 외부
+    // safety 단계에서 처리하고, 일반 ACC 목표는 15 km/h를 지킨다.
+    world.objects.front().raw.speed = 2.0F;
+    updateBehavior(state, behavior, constraints, noLegalStop, world,
+                   45.0 / 3.6, config, 0.05);
+    if (behavior.targetSpeed + 1e-9 < config.minimumObjectResponseSpeed) {
+        std::cerr << "dynamic object ACC commanded below 15 km/h\n";
+        std::abort();
+    }
+
+    // 적신호/횡단보도 정지는 정적 장애물 최저속도의 예외다.
+    StopDecision redLight;
+    redLight.valid = true;
+    redLight.reason = StopReason::RedLight;
+    redLight.distanceToStop = 0.0;
+    updateBehavior(state, behavior, constraints, redLight, world,
+                   45.0 / 3.6, config, 0.05);
+    if (behavior.targetSpeed != 0.0) {
+        std::cerr << "legal stop was incorrectly overridden by static floor\n";
+        std::abort();
+    }
+}
+
+void testLaneChangeWhenAdjacentLaneStartsAhead() {
+    PathGeneratorData map = makeStraightTwoLaneMap();
+
+    Road approach;
+    approach.id = 550;
+    approach.length = 20.0;
+    Geometry geometry;
+    geometry.type = GeometryType::Line;
+    geometry.x = -20.0;
+    geometry.length = 20.0;
+    approach.geometries.push_back(geometry);
+    LaneSection approachSection;
+    LaneDefinition approachLane;
+    approachLane.id = -1;
+    approachLane.type = "driving";
+    approachLane.widths.push_back(constantWidth(3.5));
+    approachSection.lanes.emplace(-1, approachLane);
+    approach.sections.push_back(approachSection);
+    map.roads.emplace(550, approach);
+    map.laneGraph[{550, 0, -1}].push_back({1, 0, -1});
+
+    const auto addTwoLaneRoad = [&](int roadId, double x, double length) {
+        Road road;
+        road.id = roadId;
+        road.length = length;
+        Geometry roadGeometry;
+        roadGeometry.type = GeometryType::Line;
+        roadGeometry.x = x;
+        roadGeometry.length = length;
+        road.geometries.push_back(roadGeometry);
+        LaneSection section;
+        for (int laneId : {-1, -2}) {
+            LaneDefinition lane;
+            lane.id = laneId;
+            lane.type = "driving";
+            lane.widths.push_back(constantWidth(3.5));
+            lane.roadMarks.push_back({0.0, "both", "standard"});
+            section.lanes.emplace(laneId, lane);
+        }
+        road.sections.push_back(section);
+        map.roads.emplace(roadId, std::move(road));
+    };
+    addTwoLaneRoad(2, 20.0, 5.0);
+    addTwoLaneRoad(3, 25.0, 75.0);
+    for (int laneId : {-1, -2}) {
+        map.laneGraph[{1, 0, laneId}].push_back({2, 0, laneId});
+        map.laneGraph[{2, 0, laneId}].push_back({3, 0, laneId});
+    }
+
+    PathPlannerData globalPath;
+    for (int index = 0; index <= 20; ++index) {
+        Waypoint point;
+        point.x = -20.0 + index;
+        point.y = -1.75;
+        point.yaw = 0.0;
+        point.s = static_cast<double>(index);
+        point.roadS = static_cast<double>(index);
+        point.roadId = 550;
+        point.laneId = -1;
+        point.sectionIndex = 0;
+        globalPath.waypoints.push_back(point);
+    }
+    for (int index = 1; index <= 20; ++index) {
+        Waypoint point;
+        point.x = static_cast<double>(index);
+        point.y = -1.75;
+        point.yaw = 0.0;
+        point.s = 20.0 + index;
+        point.roadS = static_cast<double>(index);
+        point.roadId = 1;
+        point.laneId = -1;
+        point.sectionIndex = 0;
+        globalPath.waypoints.push_back(point);
+    }
+    for (int index = 1; index <= 5; ++index) {
+        Waypoint point;
+        point.x = 20.0 + index;
+        point.y = -1.75;
+        point.yaw = 0.0;
+        point.s = 40.0 + index;
+        point.roadS = static_cast<double>(index);
+        point.roadId = 2;
+        point.laneId = -1;
+        point.sectionIndex = 0;
+        globalPath.waypoints.push_back(point);
+    }
+    for (int index = 1; index <= 60; ++index) {
+        Waypoint point;
+        point.x = 25.0 + index;
+        point.y = -1.75;
+        point.yaw = 0.0;
+        point.s = 45.0 + index;
+        point.roadS = static_cast<double>(index);
+        point.roadId = 3;
+        point.laneId = -1;
+        point.sectionIndex = 0;
+        globalPath.waypoints.push_back(point);
+    }
+
+    WorldState world;
+    world.ego.x = -15.0F;
+    world.ego.y = -1.75F;
+    world.ego.heading = 0.0F;
+    world.egoSpeed = 5.0;
+    world.egoLaneValid = true;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoRoadId = 550;
+    world.egoLaneId = -1;
+    world.egoSectionIndex = 0;
+    world.egoRoadS = 5.0;
+    world.egoPathS = 5.0;
+    world.frontBumperPathS = 8.8;
+    world.egoObb = makeObb2D(-13.6, -1.75, 0.0, 4.8, 1.9);
+
+    WorldObjectState obstacle;
+    obstacle.raw.id = 10;
+    obstacle.raw.x = 19.0F;
+    obstacle.raw.y = -1.75F;
+    obstacle.raw.length = 4.0F;
+    obstacle.raw.width = 2.0F;
+    obstacle.obb = makeObb2D(19.0, -1.75, 0.0, 4.0, 2.0);
+    obstacle.laneValid = true;
+    obstacle.roadId = 1;
+    obstacle.laneId = -1;
+    obstacle.sectionIndex = 0;
+    obstacle.roadS = 19.0;
+    obstacle.pathValid = true;
+    obstacle.pathS = 39.0;
+    obstacle.pathD = 0.0;
+    obstacle.relativeS = 34.0;
+    obstacle.isAhead = true;
+    obstacle.isOnEgoPath = true;
+    world.objects.push_back(obstacle);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    safetyConfig.collisionPredictionHorizon = 5.0;
+    assert(tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 5));
+    assert(laneChange.phase == LaneChangePhase::Prepare);
+    assert(laneChange.routeMode == LaneChangeRouteMode::ReturnToSource);
+}
+
+void testO01ObstacleRoadLaneMerge() {
+    PathGeneratorData map;
+    assert(loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr"));
+    PathPlannerData globalPath;
+    assert(loadWaypointsCsv(
+        globalPath.waypoints,
+        "scenario/obstacle/O01_front_obstacle/route.csv"));
+
+    WorldState world;
+    world.ego.x = 13.719388F;
+    world.ego.y = 34.4014091F;
+    world.ego.heading = 0.229751557F;
+    world.egoSpeed = 0.0123493145;
+    world.egoLaneValid = true;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoRoadId = 550;
+    world.egoLaneId = -1;
+    world.egoSectionIndex = 0;
+    world.egoRoadS = 22.93;
+    world.egoPathS = 62.1160052;
+    world.frontBumperPathS = 65.9160052;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    WorldObjectState obstacle;
+    obstacle.raw.id = 10;
+    obstacle.raw.x = 35.957691F;
+    obstacle.raw.y = 40.611736F;
+    obstacle.raw.heading = 0.509310F;
+    obstacle.raw.speed = 0.0F;
+    obstacle.raw.length = 0.63F;
+    obstacle.raw.width = 0.58F;
+    obstacle.obb = makeObb2D(obstacle.raw.x, obstacle.raw.y,
+                             obstacle.raw.heading,
+                             obstacle.raw.length, obstacle.raw.width);
+    obstacle.laneValid = true;
+    obstacle.roadId = 72;
+    obstacle.laneId = -3;
+    obstacle.sectionIndex = 0;
+    obstacle.roadS = 19.26407407;
+    obstacle.pathValid = true;
+    obstacle.pathS = 85.29596487;
+    obstacle.pathD = -0.04;
+    obstacle.relativeS = obstacle.pathS - world.egoPathS;
+    obstacle.relativeD = -0.04;
+    obstacle.isAhead = true;
+    obstacle.isOnEgoPath = true;
+    world.objects.push_back(obstacle);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    assert(tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 133));
+    assert(laneChange.phase == LaneChangePhase::Prepare);
+    assert(laneChange.routeMode == LaneChangeRouteMode::ReturnToSource);
+    assert(laneChange.targetLaneId == -2);
+}
+
+void testO04RouteSectionComesFromMapRoadS() {
+    PathGeneratorData map;
+    assert(loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr"));
+    PathPlannerData globalPath;
+    assert(loadWaypointsCsv(
+        globalPath.waypoints,
+        "scenario/obstacle/O04_lane_obstacle/route.csv"));
+
+    // Exact O04 state from the first avoidance-trigger frame.  route.csv has
+    // no section_index column: its waypoint's zero-initialized section must
+    // never overwrite the GT/map match (road 2626, section 7).
+    WorldState world;
+    world.ego.x = 1109.31445F;
+    world.ego.y = 33.0897446F;
+    world.ego.heading = 0.657545447F;
+    world.egoSpeed = 7.84728318;
+    world.egoLaneValid = true;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoRoadId = 2626;
+    world.egoLaneId = 2;
+    world.egoSectionIndex = 8;
+    world.egoRoadS = 249.63;
+    world.egoPathS = 16.4731802;
+    world.frontBumperPathS = world.egoPathS + 3.8;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    WorldObjectState obstacle;
+    obstacle.raw.id = 2;
+    obstacle.raw.x = 1144.37573F;
+    obstacle.raw.y = 60.792263F;
+    obstacle.raw.heading = 0.502082288F;
+    obstacle.raw.speed = 0.0F;
+    obstacle.raw.length = 0.15F;
+    obstacle.raw.width = 1.28999996F;
+    obstacle.obb = makeObb2D(
+        obstacle.raw.x, obstacle.raw.y, obstacle.raw.heading,
+        obstacle.raw.length, obstacle.raw.width);
+    obstacle.laneValid = true;
+    obstacle.roadId = 2626;
+    obstacle.laneId = 2;
+    obstacle.sectionIndex = 7;
+    obstacle.roadS = 204.98;
+    obstacle.pathValid = true;
+    obstacle.pathS = 61.1588;
+    obstacle.pathD = 0.167337;
+    obstacle.relativeS = obstacle.pathS - world.egoPathS;
+    obstacle.relativeD = 0.1595;
+    obstacle.isAhead = true;
+    obstacle.isOnEgoPath = true;
+    world.objects.push_back(obstacle);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    assert(tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 33));
+    assert(laneChange.phase == LaneChangePhase::Prepare);
+    assert(laneChange.obstacleId == 2);
+}
+
+void testO02RouteSectionComesFromMapRoadS() {
+    PathGeneratorData map;
+    assert(loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr"));
+    PathPlannerData globalPath;
+    assert(loadWaypointsCsv(
+        globalPath.waypoints,
+        "scenario/obstacle/O02_obstacle_ver2/route.csv"));
+
+    WorldState world;
+    world.ego.x = 344.229279F;
+    world.ego.y = -110.288513F;
+    world.ego.heading = 5.29004002F;
+    world.egoSpeed = 0.0;
+    world.egoLaneValid = true;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoRoadId = 418;
+    world.egoLaneId = 3;
+    world.egoSectionIndex = 2;
+    world.egoRoadS = 107.0;
+    world.egoPathS = 0.0;
+    world.frontBumperPathS = 3.8;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    WorldObjectState obstacle;
+    obstacle.raw.id = 5;
+    obstacle.raw.x = 358.513824F;
+    obstacle.raw.y = -133.437737F;
+    obstacle.raw.heading = 0.0F;
+    obstacle.raw.speed = 0.0F;
+    obstacle.raw.length = 0.6F;
+    obstacle.raw.width = 0.6F;
+    obstacle.obb = makeObb2D(
+        obstacle.raw.x, obstacle.raw.y, obstacle.raw.heading,
+        obstacle.raw.length, obstacle.raw.width);
+    obstacle.laneValid = true;
+    obstacle.roadId = 418;
+    obstacle.laneId = 4;
+    obstacle.sectionIndex = 1;
+    obstacle.roadS = 81.1;
+    obstacle.pathValid = true;
+    obstacle.pathS = 25.5688;
+    obstacle.pathD = -0.0717227;
+    obstacle.relativeS = 25.5688;
+    obstacle.relativeD = -1.70554;
+    obstacle.isAhead = true;
+    obstacle.isOnEgoPath = true;
+    world.objects.push_back(obstacle);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    // 다음 도로의 연결 차선으로 복귀하려면 실선을 넘어야 하는 배치다.
+    // section rematch가 맞더라도 불법 후보를 만들면 안 된다.
+    assert(!tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 0));
+    assert(laneChange.phase == LaneChangePhase::None);
+}
+
+void testLaneChangeExecutionBlockedByTrafficStops() {
+    StopManagerData stops;
+    StopDecision decision;
+    selectStopDecision(decision, stops, 0.0);
+    assert(!decision.valid);
+
+    // 장애물 정지 요청은 만들지 않지만 교통법규 정지는 그대로 지킨다.
+    stops.requests.push_back(
+        {StopReason::RedLight, true, 30.0, 0.0, 11});
+    assert(hasLaneChangeExecutionBlocker(stops));
+    assert(!hasLaneChangeExecutionBlocker(stops, 20.0));
+    assert(hasLaneChangeExecutionBlocker(stops, 29.0));
+    selectStopDecision(decision, stops, 0.0);
+    assert(decision.valid);
+    assert(decision.reason == StopReason::RedLight);
+    stops.requests.back().active = false;
+    stops.requests.push_back(
+        {StopReason::CrosswalkBlocked, true, 31.0, 0.0, 12});
+    assert(hasLaneChangeExecutionBlocker(stops));
+
+    // 정지선을 침범하는 경로는 녹색불까지 보관하지 않는다.
+    // 정지 요청이 풀린 현재 위치에서 다시 생성해야 한다.
+    LaneChangeData prepared;
+    prepared.phase = LaneChangePhase::Prepare;
+    prepared.obstacleId = 12;
+    prepared.path = makeStraightGlobalPath().waypoints;
+    LaneChangeConfig laneChangeConfig;
+    WorldState world;
+    advanceLaneChangePhase(prepared, laneChangeConfig, world, 0.1,
+                           true, true, true);
+    assert(prepared.phase == LaneChangePhase::None);
+    assert(prepared.path.empty());
+
+    // gateway는 정지 중 버렸다가 프레임마다 다시 고르면 분기 선택이
+    // 흔들린다. 같은 경로를 보관하고 정지가 풀린 뒤 실행해야 한다.
+    prepared.phase = LaneChangePhase::Prepare;
+    prepared.roadConnectionManeuver = true;
+    prepared.path = makeStraightGlobalPath().waypoints;
+    advanceLaneChangePhase(prepared, laneChangeConfig, world, 0.1,
+                           true, true, true);
+    assert(prepared.phase == LaneChangePhase::Prepare);
+    assert(!prepared.path.empty());
+}
+
+void testActivePathProjectionDoesNotRequireGuideRoute() {
+    WorldState world;
+    world.ego.x = 50.0F;
+    world.ego.y = 20.0F;
+    world.ego.heading = 0.0F;
+    world.egoSpeed = 5.0;
+    world.egoLaneWidth = 3.5;
+    world.egoLaneValid = true;
+    world.inputValid = true;
+    world.egoPathValid = false;  // guide route 투영은 의도적으로 실패
+
+    WorldObjectState object;
+    object.raw.id = 7;
+    object.raw.x = 60.0F;
+    object.raw.y = 20.0F;
+    object.raw.heading = 0.0F;
+    object.raw.length = 4.0F;
+    object.raw.width = 2.0F;
+    object.obb = makeObjectObb(object.raw);
+    world.objects.push_back(object);
+
+    std::vector<Waypoint> activePath;
+    for (int x = 40; x <= 90; ++x) {
+        Waypoint point;
+        point.x = static_cast<double>(x);
+        point.y = 20.0;
+        point.yaw = 0.0;
+        point.s = 100.0 + static_cast<double>(x - 40);
+        activePath.push_back(point);
+    }
+    if (!projectWorldToActivePath(world, activePath, 3.8) ||
+        !world.egoPathValid || std::abs(world.egoPathS - 110.0) > 0.1 ||
+        !world.objects.front().isAhead ||
+        !world.objects.front().isOnEgoPath ||
+        std::abs(world.objects.front().relativeS - 10.0) > 0.1) {
+        std::cerr << "active path still depended on guide route projection\n";
+        std::abort();
+    }
+}
+
+void testPreviousLocalPathBridgesOneFrameSectionRebuildFailure() {
+    PlanningProcessData planning;
+    planning.pathPlanner.config = {};
+    planning.roadLanePlanner.config = planning.pathPlanner.config;
+    planning.config = {};
+    planning.laneChangeConfig = {};
+    planning.roadLanePlannerMissionLegValid = true;
+    planning.roadLanePlannerMissionLeg = 0;
+
+    // 직전 프레임에 정상적으로 생성되어 아직 30 m 이상 남은
+    // local path. 현재 프레임의 map에서는 의도적으로 새 경로를
+    // 만들 수 없게 해 section 경계의 한 프레임 생성 실패를 재현한다.
+    for (int x = 0; x <= 50; ++x) {
+        Waypoint point;
+        point.x = static_cast<double>(x);
+        point.y = -1.75;
+        point.yaw = 0.0;
+        point.s = static_cast<double>(x);
+        point.roadS = static_cast<double>(x);
+        point.roadId = 10;
+        point.sectionIndex = x < 20 ? 0 : 1;
+        point.laneId = -1;
+        planning.roadLanePlanner.waypoints.push_back(point);
+    }
+
+    planning.missionCorridor.valid = true;
+    planning.missionCorridor.minimumTargetDistance =
+        std::numeric_limits<double>::infinity();
+    for (int index = 0; index < 3; ++index) {
+        MissionCheckpointData checkpoint;
+        checkpoint.checkpoint.sequence = index + 1;
+        checkpoint.checkpoint.x = 1000.0 + index * 100.0;
+        checkpoint.checkpoint.y = 1000.0;
+        checkpoint.roadIds.push_back(100 + index);
+        planning.missionCorridor.checkpoints.push_back(std::move(checkpoint));
+    }
+    MissionLegData leg;
+    leg.fromCheckpoint = 0;
+    leg.gatewayCheckpoint = 1;
+    leg.toCheckpoint = 2;
+    leg.valid = true;
+    planning.missionCorridor.legs.push_back(leg);
+
+    GtFrame gt;
+    gt.ego.x = 20.2F;
+    gt.ego.y = -1.75F;
+    gt.ego.heading = 0.0F;
+    WorldState world;
+    world.ego = gt.ego;
+    world.egoSpeed = 5.0;
+    world.inputValid = true;
+    world.egoLaneValid = true;
+    world.egoRoadId = 10;
+    world.egoSectionIndex = 1;
+    world.egoLaneId = -1;
+    world.egoLaneWidth = 3.5;
+    world.frontBumperOffset = 3.8;
+    world.egoObb = makeObb2D(20.2, -1.75, 0.0, 4.8, 1.9);
+
+    PathGeneratorData temporarilyUnavailableMap;
+    runPlanningProcess(planning, gt, world, temporarilyUnavailableMap, 0.05);
+    if (!planning.result.valid ||
+        planning.result.health == SystemHealth::Recovery ||
+        planning.result.targetSpeed <= 0.0 ||
+        planning.roadLanePlanner.waypoints.size() != 51) {
+        std::cerr << "one-frame section rebuild failure discarded the valid "
+                     "previous local path\n";
+        std::abort();
+    }
+
+    // 반대로 정상 경로에서 크게 이탈한 경우는 이전 경로를 붙잡지
+    // 않되, Recovery 상태 자체가 정지를 추가로 유지해서도 안 된다.
+    gt.ego.y = 20.0F;
+    world.ego = gt.ego;
+    world.egoObb = makeObb2D(20.2, 20.0, 0.0, 4.8, 1.9);
+    runPlanningProcess(planning, gt, world, temporarilyUnavailableMap, 0.05);
+    if (planning.result.valid ||
+        planning.result.health == SystemHealth::Recovery) {
+        std::cerr << "large local-path departure retained a stale path or "
+                     "latched Recovery\n";
+        std::abort();
+    }
+}
+
+void testKeepTargetLaneWhenItRejoinsNextRoad() {
+    PathGeneratorData map = makeStraightTwoLaneMap();
+    PathPlannerData globalPath = makeGlobalPathWithNextRoad(map);
+    WorldState world = makeWorldWithObstacle();
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    safetyConfig.collisionPredictionHorizon = 5.0;
+    assert(tryPrepareObstacleLaneChange(
+        laneChange, config, safetyConfig, world, map, globalPath, 10));
+    assert(laneChange.routeMode == LaneChangeRouteMode::KeepTargetLane);
+    const LaneKey expectedReconnect{2, 0, -1};
+    assert(laneChange.reconnectLane == expectedReconnect);
+
+    advanceLaneChangePhase(laneChange, config, world,
+                           config.prepareTime, false, true, true);
+    world.egoRoadId = 2;
+    world.egoSectionIndex = 0;
+    world.egoLaneId = -1;
+    advanceLaneChangePhase(laneChange, config, world, 0.1,
+                           false, true, true);
+    assert(laneChange.phase == LaneChangePhase::Settle);
+}
+
+void testKeepTargetReconnectSmoothsOffsetRoute() {
+    PathGeneratorData map = makeStraightTwoLaneMap();
+    PathPlannerData globalPath = makeGlobalPathWithNextRoad(map);
+
+    // M05에서 나타난 경계 오차를 단순화한 회귀 테스트.
+    // map lane centerline과 checkpoint로 만든 전역경로가 2.8 m
+    // 엇갈리더라도 한 점에서 직각으로 붙이지 않아야 한다.
+    for (Waypoint& point : globalPath.waypoints) {
+        if (point.roadId == 2) point.y += 2.8;
+    }
+
+    WorldState world = makeWorldWithObstacle();
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    safetyConfig.collisionPredictionHorizon = 5.0;
+    if (!tryPrepareObstacleLaneChange(
+            laneChange, config, safetyConfig, world, map, globalPath, 10)) {
+        std::cerr << "offset keep-target reconnect was not generated\n";
+        std::abort();
+    }
+    if (laneChange.routeMode != LaneChangeRouteMode::KeepTargetLane) {
+        std::cerr << "offset reconnect unexpectedly fell back to source lane\n";
+        std::abort();
+    }
+    std::string reason;
+    if (!validateGeneratedPath(laneChange.path, &reason)) {
+        std::cerr << "offset reconnect retained invalid geometry: "
+                  << reason << '\n';
+        std::abort();
+    }
+}
+
+void testM05AvoidanceReconnectHasTrackableGeometry() {
+    PathGeneratorData map;
+    if (!loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr", 0.5)) {
+        std::cerr << "failed to load LivingLAB map for M05 regression\n";
+        std::abort();
+    }
+    PathPlannerData globalPath;
+    if (!loadWaypointsCsv(globalPath.waypoints,
+                          "scenario/mixed/M05/route.csv")) {
+        std::cerr << "failed to load M05 route for reconnect regression\n";
+        std::abort();
+    }
+
+    // m05_test에서 첫 회피가 생성된 frame 1198 상태.
+    WorldState world;
+    world.ego.x = 1079.87061F;
+    world.ego.y = 729.56842F;
+    world.ego.heading = 3.65332031F;
+    world.egoSpeed = 11.3100725;
+    world.egoLaneValid = true;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoRoadId = 2815;
+    world.egoLaneId = 3;
+    world.egoSectionIndex = 0;
+    world.egoRoadS = 100.85;
+    world.egoPathS = 387.794657;
+    world.frontBumperPathS = world.egoPathS + 3.8;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    WorldObjectState obstacle;
+    obstacle.raw.id = 2;
+    obstacle.raw.x = 1026.5824F;
+    obstacle.raw.y = 702.125244F;
+    obstacle.raw.heading = 3.62375998F;
+    obstacle.raw.speed = 0.0F;
+    obstacle.raw.length = 4.67399979F;
+    obstacle.raw.width = 1.77999997F;
+    obstacle.obb = makeObb2D(
+        obstacle.raw.x, obstacle.raw.y, obstacle.raw.heading,
+        obstacle.raw.length, obstacle.raw.width);
+    obstacle.laneValid = true;
+    obstacle.roadId = 2815;
+    obstacle.laneId = 4;
+    obstacle.sectionIndex = 0;
+    obstacle.roadS = 40.67146029;
+    obstacle.pathValid = true;
+    obstacle.pathS = 447.78821081;
+    obstacle.pathD = -2.16670011;
+    obstacle.relativeS = 59.90047;
+    obstacle.relativeD = -2.16670011;
+    obstacle.isAhead = true;
+    obstacle.isOnEgoPath = true;
+    world.objects.push_back(obstacle);
+
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    if (!tryPrepareObstacleLaneChange(
+            laneChange, config, safetyConfig, world, map, globalPath, 779)) {
+        std::cerr << "M05 avoidance candidate was not generated\n";
+        std::abort();
+    }
+    std::string reason;
+    if (!validateGeneratedPath(laneChange.path, &reason)) {
+        std::cerr << "M05 avoidance retained invalid reconnect geometry: "
+                  << reason << '\n';
+        std::abort();
+    }
+    if (laneChange.path.back().s < laneChange.rejoinRouteS + 25.0) {
+        std::cerr << "M05 return path has too little post-rejoin lookahead\n";
+        std::abort();
+    }
+
+    laneChange.phase = LaneChangePhase::Execute;
+    world.egoPathS = laneChange.rejoinRouteS;
+    world.egoPathD = 2.8;
+    advanceLaneChangePhase(laneChange, config, world, 0.1,
+                           false, true, true);
+    if (laneChange.phase != LaneChangePhase::Execute) {
+        std::cerr << "M05 return completed before lateral convergence\n";
+        std::abort();
+    }
+    world.egoPathD = 0.5;
+    advanceLaneChangePhase(laneChange, config, world, 0.1,
+                           false, true, true);
+    if (laneChange.phase != LaneChangePhase::Settle) {
+        std::cerr << "M05 return did not complete after lateral convergence\n";
+        std::abort();
+    }
+}
+
+void testM08StaticBlockerChoosesFreeLaneBeforeRoadConnection() {
+    PathGeneratorData map;
+    if (!loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr", 0.5)) {
+        std::cerr << "failed to load LivingLAB map for M08 regression\n";
+        std::abort();
+    }
+    PathPlannerData globalPath;
+    if (!loadWaypointsCsv(globalPath.waypoints,
+                          "scenario/mixed/M08/route.csv")) {
+        std::cerr << "failed to load M08 route for obstacle regression\n";
+        std::abort();
+    }
+
+    // m08_fix frame 198: road 429/lane 1에서 앞의 ID 6을 인식한
+    // 첫 프레임. 기존 코드는 다음 road 604로 연결되지 않는다는
+    // 이유로 빈 회피 차선을 600프레임 동안 거부했다.
+    WorldState world;
+    world.ego.x = 269.025238F;
+    world.ego.y = 69.5931091F;
+    world.ego.heading = 5.04341364F;
+    world.egoSpeed = 12.4377402;
+    const LaneMatch egoMatch = worldToLane(
+        map, world.ego.x, world.ego.y, world.ego.heading);
+    world.egoLaneValid = egoMatch.valid;
+    world.egoRoadId = egoMatch.roadId;
+    world.egoSectionIndex = egoMatch.sectionIndex;
+    world.egoLaneId = egoMatch.laneId;
+    world.egoRoadS = egoMatch.roadS;
+    world.egoLaneWidth = egoMatch.laneWidth;
+    world.egoPathValid = true;
+    world.egoPathS = 81.9163157;
+    world.egoPathD = -0.00101259093;
+    world.frontBumperPathS = world.egoPathS + 3.8;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    const auto addStaticObject = [&](int id, double x, double y,
+                                     double pathS, double pathD,
+                                     bool onEgoPath) {
+        WorldObjectState object;
+        object.raw.id = id;
+        object.raw.x = static_cast<float>(x);
+        object.raw.y = static_cast<float>(y);
+        object.raw.heading = 5.06248283F;
+        object.raw.speed = 0.0F;
+        object.raw.length = 4.39400005F;
+        object.raw.width = 1.80799997F;
+        object.obb = makeObb2D(x, y, object.raw.heading,
+                               object.raw.length, object.raw.width);
+        const LaneMatch match = worldToLane(
+            map, x, y, object.raw.heading);
+        object.laneValid = match.valid;
+        object.roadId = match.roadId;
+        object.sectionIndex = match.sectionIndex;
+        object.laneId = match.laneId;
+        object.roadS = match.roadS;
+        object.pathValid = true;
+        object.pathS = pathS;
+        object.pathD = pathD;
+        object.relativeS = pathS - world.egoPathS;
+        object.relativeD = pathD - world.egoPathD;
+        object.isAhead = true;
+        object.isOnEgoPath = onEgoPath;
+        world.objects.push_back(object);
+    };
+    addStaticObject(6, 289.461914, 13.6035557,
+                    world.egoPathS + 59.6056, 0.233827, true);
+    addStaticObject(5, 290.549413, 1.191794,
+                    world.egoPathS + 71.596, -3.07362, false);
+
+    const auto nearest = std::lower_bound(
+        globalPath.waypoints.begin(), globalPath.waypoints.end(),
+        world.egoPathS,
+        [](const Waypoint& point, double s) { return point.s < s; });
+    const std::size_t nearestIndex = static_cast<std::size_t>(
+        std::distance(globalPath.waypoints.begin(), nearest));
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    if (!tryPrepareObstacleLaneChange(
+            laneChange, config, safetyConfig, world, map, globalPath,
+            nearestIndex)) {
+        std::cerr << "M08 static blocker still did not produce an avoidance path\n";
+        std::abort();
+    }
+    if (laneChange.routeMode != LaneChangeRouteMode::KeepTargetLane ||
+        laneChange.roadConnectionManeuver) {
+        std::cerr << "M08 obstacle avoidance was still subordinated to road alignment\n";
+        std::abort();
+    }
+    if (laneChange.rejoinRouteS <=
+        world.egoPathS + config.transitionLength + 10.0) {
+        std::cerr << "M08 delayed lane shift still completes on the old fixed-distance timer\n";
+        std::abort();
+    }
+}
+
+void testM08DenseSecondBlockerUsesSafeLongitudinalSample() {
+    PathGeneratorData map;
+    if (!loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr", 0.5)) {
+        std::cerr << "failed to load LivingLAB map for dense M08 regression\n";
+        std::abort();
+    }
+    PathPlannerData globalPath;
+    if (!loadWaypointsCsv(globalPath.waypoints,
+                          "scenario/mixed/M08/route.csv")) {
+        std::cerr << "failed to load M08 route for dense obstacle regression\n";
+        std::abort();
+    }
+
+    // m08_lattice3_final frame 352: lane 4 앞 ID 7을 피할 때
+    // 왼쪽 lane 3의 ID 5가 11 m 앞에 있다. 고정된 완료점 하나를
+    // 강제하지 않고, 종방향 샘플 중 충돌 없는 인접 차선 경로가
+    // 선택되는지 검증한다. 어느 쪽이 비었는지는 후보 전체의 실제
+    // 기하 충돌 검사 결과에 맡긴다.
+    WorldState world;
+    world.ego.x = 283.160278F;
+    world.ego.y = 10.3804932F;
+    world.ego.heading = 5.08701897F;
+    world.egoSpeed = 6.65093027;
+    const LaneMatch egoMatch = worldToLane(
+        map, world.ego.x, world.ego.y, world.ego.heading);
+    world.egoLaneValid = egoMatch.valid;
+    world.egoRoadId = egoMatch.roadId;
+    world.egoSectionIndex = egoMatch.sectionIndex;
+    world.egoLaneId = egoMatch.laneId;
+    world.egoRoadS = egoMatch.roadS;
+    world.egoLaneWidth = egoMatch.laneWidth;
+    world.egoLaneCenterDistance = egoMatch.distance;
+    world.egoPathValid = true;
+    world.egoPathS = 142.384479;
+    world.egoPathD = -6.79130112;
+    world.frontBumperPathS = world.egoPathS + 3.8;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    const auto addObject = [&](int id, double x, double y,
+                               double relativeS, double relativeD,
+                               bool onPath) {
+        WorldObjectState object;
+        object.raw.id = id;
+        object.raw.x = static_cast<float>(x);
+        object.raw.y = static_cast<float>(y);
+        object.raw.heading = 5.06248283F;
+        object.raw.speed = 0.0F;
+        object.raw.length = 4.39400005F;
+        object.raw.width = 1.80799997F;
+        object.obb = makeObb2D(x, y, object.raw.heading,
+                               object.raw.length, object.raw.width);
+        const LaneMatch match = worldToLane(
+            map, x, y, object.raw.heading);
+        object.laneValid = match.valid;
+        object.roadId = match.roadId;
+        object.sectionIndex = match.sectionIndex;
+        object.laneId = match.laneId;
+        object.roadS = match.roadS;
+        object.pathValid = true;
+        object.pathS = world.egoPathS + relativeS;
+        object.pathD = world.egoPathD + relativeD;
+        object.relativeS = relativeS;
+        object.relativeD = relativeD;
+        object.isAhead = relativeS > 0.0;
+        object.isOnEgoPath = onPath;
+        world.objects.push_back(object);
+    };
+    addObject(5, 290.549413, 1.191794, 11.1279, 3.71768, false);
+    addObject(7, 291.787359, -10.614313, 22.3623, 0.516563, true);
+    addObject(8, 289.579656, -13.649157, 24.2968, -2.69769, false);
+    addObject(4, 293.738928, -15.577894, 27.6344, 0.359875, true);
+
+    const auto nearest = std::lower_bound(
+        globalPath.waypoints.begin(), globalPath.waypoints.end(),
+        world.egoPathS,
+        [](const Waypoint& point, double s) { return point.s < s; });
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    const std::vector<int> confirmed{4, 5, 7, 8};
+    if (!tryPrepareObstacleLaneChange(
+            laneChange, config, safetyConfig, world, map, globalPath,
+            static_cast<std::size_t>(std::distance(
+                globalPath.waypoints.begin(), nearest)),
+            nullptr, &confirmed)) {
+        std::cerr << "M08 dense blocker did not produce a lattice candidate\n";
+        std::abort();
+    }
+    if (laneChange.targetLaneId == world.egoLaneId || laneChange.path.empty() ||
+        laneChange.rejoinRouteS - world.egoPathS < 12.0) {
+        std::cerr << "M08 did not select a collision-free lattice sample"
+                  << " target_lane=" << laneChange.targetLaneId
+                  << " completion_distance="
+                  << (laneChange.rejoinRouteS - world.egoPathS)
+                  << " path_points=" << laneChange.path.size() << '\n';
+        std::abort();
+    }
+}
+
+void testM09DenseFutureRoadChecksEntireStaticManeuver() {
+    PathGeneratorData map;
+    if (!loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr", 0.5)) {
+        std::cerr << "failed to load LivingLAB map for dense M09 regression\n";
+        std::abort();
+    }
+    PathPlannerData globalPath;
+    if (!loadWaypointsCsv(globalPath.waypoints,
+                          "scenario/mixed/M09/route.csv")) {
+        std::cerr << "failed to load M09 route for dense obstacle regression\n";
+        std::abort();
+    }
+
+    // m09_full_fix frame 3950. 현재 차선의 object 11보다 옆 차선의
+    // object 16이 3.4 m 먼저 있다. 과거의 12초 정적 예측 horizon은
+    // object 16 직전에서 끝나 잘못된 조기 차선변경을 승인했다.
+    WorldState world;
+    world.ego.x = 874.124084F;
+    world.ego.y = -838.382935F;
+    world.ego.heading = -2.44506216F;
+    world.egoSpeed = 2.80346419;
+    const LaneMatch egoMatch = worldToLane(
+        map, world.ego.x, world.ego.y, world.ego.heading);
+    world.egoLaneValid = egoMatch.valid;
+    world.egoRoadId = egoMatch.roadId;
+    world.egoSectionIndex = egoMatch.sectionIndex;
+    world.egoLaneId = egoMatch.laneId;
+    world.egoRoadS = egoMatch.roadS;
+    world.egoLaneWidth = egoMatch.laneWidth;
+    world.egoLaneCenterDistance = egoMatch.distance;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoPathS = 556.372871;
+    world.egoPathD = 3.10229334;
+    world.frontBumperPathS = world.egoPathS + 3.8;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    const auto addStaticObject = [&](int id, double x, double y,
+                                     double heading, double length,
+                                     double width, double relativeS,
+                                     double relativeD, bool onPath) {
+        WorldObjectState object;
+        object.raw.id = id;
+        object.raw.x = static_cast<float>(x);
+        object.raw.y = static_cast<float>(y);
+        object.raw.heading = static_cast<float>(heading);
+        object.raw.speed = 0.0F;
+        object.raw.length = static_cast<float>(length);
+        object.raw.width = static_cast<float>(width);
+        object.obb = makeObb2D(x, y, heading, length, width);
+        const LaneMatch match = worldToLane(map, x, y, heading);
+        object.laneValid = match.valid;
+        object.roadId = match.roadId;
+        object.sectionIndex = match.sectionIndex;
+        object.laneId = match.laneId;
+        object.roadS = match.roadS;
+        object.pathValid = true;
+        object.pathS = world.egoPathS + relativeS;
+        object.pathD = world.egoPathD + relativeD;
+        object.relativeS = relativeS;
+        object.relativeD = relativeD;
+        object.isAhead = true;
+        object.isOnEgoPath = onPath;
+        world.objects.push_back(object);
+    };
+    addStaticObject(2, 852.3479, -851.416016, 3.80569911,
+                    4.39400005, 1.80799997, 25.1811, -3.15886, false);
+    addStaticObject(16, 821.072998, -875.616638, 0.669031203,
+                    0.900000036, 0.900000036, 64.7251, -3.5534, false);
+    addStaticObject(11, 815.6571655, -884.3120728, 3.80738265,
+                    4.39400005, 1.80799997, 68.1411, 0.0465695, true);
+
+    const auto nearest = std::lower_bound(
+        globalPath.waypoints.begin(), globalPath.waypoints.end(),
+        world.egoPathS,
+        [](const Waypoint& point, double s) { return point.s < s; });
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    PlanningBehaviorConfig safetyConfig;
+    if (!tryPrepareObstacleLaneChange(
+            laneChange, config, safetyConfig, world, map, globalPath,
+            static_cast<std::size_t>(std::distance(
+                globalPath.waypoints.begin(), nearest)))) {
+        std::cerr << "M09 dense future-road blockers produced no avoidance path\n";
+        std::abort();
+    }
+    // 정상 후보는 가까운 옆 차선 장애물보다 먼저 안착하는 조기 경로가
+    // 아니어야 한다. 실제 OBB 검사를 통과한 늦은 종방향 샘플이어야 한다.
+    if (laneChange.rejoinRouteS < world.egoPathS + 50.0) {
+        std::cerr << "M09 selected a lane shift before checking the closer target-lane blocker"
+                  << " completion_distance="
+                  << (laneChange.rejoinRouteS - world.egoPathS) << '\n';
+        std::abort();
+    }
+}
+
+void testM10StaggeredBlockersUseForwardLaneTopology() {
+    PathGeneratorData map;
+    if (!loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr", 0.5)) {
+        std::cerr << "failed to load LivingLAB map for M10 regression\n";
+        std::abort();
+    }
+    PathPlannerData globalPath;
+    if (!loadWaypointsCsv(globalPath.waypoints,
+                          "scenario/mixed/M10/route.csv")) {
+        std::cerr << "failed to load M10 route for obstacle regression\n";
+        std::abort();
+    }
+
+    // m10_avoidance_diagnosis frame 134. lane -2의 자전거를 피하려는
+    // 순간 다음 section의 lane -1에는 정차 차량이 24.5 m 앞에 있다.
+    // 과거 로직은 같은 section만 확인해 lane -1을 빈 차선으로 오인했고,
+    // 그곳에 안착한 뒤 남은 9.9 m에서는 다음 회피를 만들지 못했다.
+    WorldState world;
+    world.ego.x = 1215.07166F;
+    world.ego.y = -737.82135F;
+    world.ego.heading = 3.82659125F;
+    world.egoSpeed = 4.76115181;
+    const LaneMatch egoMatch = worldToLane(
+        map, world.ego.x, world.ego.y, world.ego.heading);
+    world.egoLaneValid = egoMatch.valid;
+    world.egoRoadId = egoMatch.roadId;
+    world.egoSectionIndex = egoMatch.sectionIndex;
+    world.egoLaneId = egoMatch.laneId;
+    world.egoRoadS = egoMatch.roadS;
+    world.egoLaneWidth = egoMatch.laneWidth;
+    world.egoLaneCenterDistance = egoMatch.distance;
+    world.egoPathValid = true;
+    world.inputValid = true;
+    world.egoPathS = 19.0111198;
+    world.egoPathD = 1.20839201;
+    world.frontBumperPathS = world.egoPathS + 3.8;
+    world.egoObb = makeObb2D(
+        world.ego.x, world.ego.y, world.ego.heading, 4.8, 1.9);
+
+    const auto addStaticObject = [&](int id, double x, double y,
+                                     double heading, double length,
+                                     double width, double pathS,
+                                     bool onPath) {
+        WorldObjectState object;
+        object.raw.id = id;
+        object.raw.x = static_cast<float>(x);
+        object.raw.y = static_cast<float>(y);
+        object.raw.heading = static_cast<float>(heading);
+        object.raw.speed = 0.0F;
+        object.raw.length = static_cast<float>(length);
+        object.raw.width = static_cast<float>(width);
+        object.obb = makeObb2D(x, y, heading, length, width);
+        // 자전거는 도로를 비스듬히 향해 있어 객체 heading 대신 Ego의
+        // 진행방향으로 물리 차선을 매칭한다.
+        const LaneMatch match = worldToLane(
+            map, x, y, world.ego.heading);
+        object.laneValid = match.valid;
+        object.roadId = match.roadId;
+        object.sectionIndex = match.sectionIndex;
+        object.laneId = match.laneId;
+        object.roadS = match.roadS;
+        object.pathValid = true;
+        object.pathS = pathS;
+        object.pathD = 0.0;
+        object.relativeS = pathS - world.egoPathS;
+        object.relativeD = 0.0;
+        object.isAhead = true;
+        object.isOnEgoPath = onPath;
+        world.objects.push_back(object);
+    };
+    addStaticObject(14, 1205.616333, -745.827087, 5.34381294,
+                    2.22000003, 0.200000003, 32.2013, true);
+    addStaticObject(3, 1198.65283, -755.245544, 3.82093191,
+                    4.39400005, 1.80799997, 43.4922, false);
+
+    const auto nearest = std::lower_bound(
+        globalPath.waypoints.begin(), globalPath.waypoints.end(),
+        world.egoPathS,
+        [](const Waypoint& point, double s) { return point.s < s; });
+    LaneChangeData laneChange;
+    LaneChangeConfig config;
+    config.transitionLength = 15.0;
+    config.maximumLaneChangeSpeed = 15.0 / 3.6;
+    PlanningBehaviorConfig safetyConfig;
+    const std::vector<int> confirmed{3, 14};
+    if (!tryPrepareObstacleLaneChange(
+            laneChange, config, safetyConfig, world, map, globalPath,
+            static_cast<std::size_t>(std::distance(
+                globalPath.waypoints.begin(), nearest)),
+            nullptr, &confirmed)) {
+        std::cerr << "M10 staggered blockers produced no avoidance path\n";
+        std::abort();
+    }
+    if (laneChange.targetLaneId == -1) {
+        std::cerr << "M10 still selected the next-section occupied lane -1"
+                  << " followup=" << laneChange.followupObstacleId
+                  << " clearance=" << laneChange.followupObstacleClearance
+                  << '\n';
+        std::abort();
+    }
+}
+
+void testNearbyAdjacentVehicleCapsSpeedBeforeCutIn() {
+    PlanningBehaviorConfig config;
+    config.followTimeGap = 1.8;
+    config.minimumFollowDistance = 5.0;
+    config.nearbyObjectCautionSpeed = 20.0 / 3.6;
+    config.nearbyObjectLateralDistance = 5.5;
+
+    WorldState world;
+    world.egoSpeed = 50.0 / 3.6;
+    WorldObjectState adjacent;
+    adjacent.raw.id = 2;
+    adjacent.raw.speed = 40.0F / 3.6F;
+    adjacent.raw.heading = 0.0F;
+    adjacent.pathValid = true;
+    adjacent.isAhead = true;
+    adjacent.isOnEgoPath = false;
+    adjacent.relativeS = 25.0;
+    adjacent.relativeD = 3.5;
+    world.objects.push_back(adjacent);
+
+    BehaviorState state;
+    BehaviorDecision output;
+    ConstraintSet constraints;
+    constraints.speedLimit = 50.0 / 3.6;
+    StopDecision stop;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Follow);
+    assert(std::abs(output.targetSpeed - 20.0 / 3.6) < 1e-9);
+
+    // 같은 객체여도 동적 주의거리(약 30 m) 밖이면 순항한다.
+    world.objects.front().relativeS = 35.0;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Cruise);
+    assert(std::abs(output.targetSpeed - 50.0 / 3.6) < 1e-9);
+
+    // 경로 옆의 콘·표지물은 끼어들기 차량이 아니므로 정지하지 않는다.
+    world.objects.front().relativeS = 10.0;
+    world.objects.front().raw.speed = 0.0F;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Cruise);
+    assert(std::abs(output.targetSpeed - 50.0 / 3.6) < 1e-9);
+}
+
+void testLeadBrakingUsesRelativeStoppingDistance() {
+    PlanningBehaviorConfig config;
+    config.comfortableDeceleration = 1.5;
+    config.followTimeGap = 1.8;
+    config.minimumFollowDistance = 5.0;
+    config.followGapGain = 0.35;
+
+    WorldState world;
+    world.egoSpeed = 10.0;
+    world.ego.heading = 0.0F;
+    WorldObjectState lead;
+    lead.raw.id = 4;
+    lead.raw.speed = 4.0F;
+    lead.raw.heading = 0.0F;
+    lead.isAhead = true;
+    lead.isOnEgoPath = true;
+    // 시간간격 문턱(23 m) 바로 밖이다. 예전 로직은 여기서 12.5 m/s로
+    // 계속 가속했지만 상대 정지거리까지 보면 이미 감속해야 한다.
+    lead.relativeS = 24.0;
+    world.objects.push_back(lead);
+
+    BehaviorState state;
+    BehaviorDecision output;
+    ConstraintSet constraints;
+    constraints.speedLimit = 12.5;
+    StopDecision stop;
+    updateBehavior(state, output, constraints, stop, world,
+                   12.5, config, 0.05);
+    if (output.longitudinal != LonMode::Follow ||
+        output.targetSpeed >= world.egoSpeed) {
+        std::cerr << "lead braking did not trigger braking-aware follow\n";
+        std::abort();
+    }
+}
+
+void testCloseMovingLeadMayCommandStop() {
+    PlanningBehaviorConfig config;
+
+    WorldState world;
+    world.egoSpeed = 20.0 / 3.6;
+    world.ego.heading = 0.0F;
+    WorldObjectState lead;
+    lead.raw.id = 9;
+    lead.raw.speed = 0.5F;
+    lead.raw.heading = 0.0F;
+    lead.isAhead = true;
+    lead.isOnEgoPath = true;
+    lead.relativeS = 1.0;
+    world.objects.push_back(lead);
+
+    BehaviorState state;
+    BehaviorDecision output;
+    ConstraintSet constraints;
+    constraints.speedLimit = 20.0 / 3.6;
+    StopDecision stop;
+    updateBehavior(state, output, constraints, stop, world,
+                   20.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Follow);
+    assert(std::abs(output.targetSpeed) < 1e-9);
+
+    // 신호·횡단보도 등 명시적인 정지 요청은 최소 진행속도로 덮지 않는다.
+    stop.valid = true;
+    stop.reason = StopReason::RedLight;
+    stop.distanceToStop = 0.0;
+    updateBehavior(state, output, constraints, stop, world,
+                   20.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Stop);
+    assert(std::abs(output.targetSpeed) < 1e-9);
+}
+
+void testPreparedLaneChangeCancelsWhenBlockerMoves() {
+    LaneChangeData laneChange;
+    laneChange.phase = LaneChangePhase::Prepare;
+    laneChange.obstacleId = 17;
+    LaneChangeConfig config;
+    WorldState world;
+    advanceLaneChangePhase(laneChange, config, world, 0.1,
+                           false, false, true);
+    if (laneChange.phase != LaneChangePhase::None ||
+        laneChange.obstacleId != -1) {
+        std::cerr << "prepared lane change survived a cleared blocker\n";
+        std::abort();
+    }
+}
+
+void testPreparedAvoidanceRequiresClearedContinuousSuccessor() {
+    const auto successor = makeStraightGlobalPath().waypoints;
+    LaneChangeData prepared;
+    prepared.phase = LaneChangePhase::Prepare;
+    prepared.obstacleId = 17;
+    WorldState world;
+    world.ego.x = 5.0F;
+    world.ego.y = -1.75F;
+    world.egoLaneWidth = 3.5;
+    WorldObjectState object;
+    object.raw.id = 17;
+    object.raw.x = 20.0F;
+    object.raw.y = -1.75F;
+    object.raw.length = 4.5F;
+    object.raw.width = 1.8F;
+    object.raw.speed = 2.0F;
+    world.objects.push_back(object);
+    // A moving actor which still occupies our original lane is not cleared.
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    // The SAME received ID moves away. Its old detour no longer has a cause.
+    world.objects.front().raw.y = -7.25F;
+    assert(canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    // A new danger or a detached successor must never cause route deletion.
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, false));
+    world.ego.y = -2.25F;
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    world.ego.y = -1.75F;
+    world.ego.heading = 0.3F;
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    world.ego.heading = 0.0F;
+    prepared.phase = LaneChangePhase::Execute;
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    prepared.phase = LaneChangePhase::Prepare;
+    prepared.roadConnectionManeuver = true;
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    prepared.roadConnectionManeuver = false;
+    prepared.localCorridorAvoidance = true;
+    assert(!canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    prepared.localCorridorAvoidance = false;
+    world.objects.clear();
+    assert(canCancelClearedPreparedAvoidance(prepared, world, successor, true));
+    advanceLaneChangePhase(prepared, LaneChangeConfig{}, world, 0.05,
+        false, !canCancelClearedPreparedAvoidance(prepared, world, successor, true), true);
+    assert(prepared.phase == LaneChangePhase::None);
+}
+
+void testStationaryAdjacentVehicleUsesShortRangeCaution() {
+    PlanningBehaviorConfig config;
+    config.stationaryAdjacentVehicleCautionSpeed = 20.0 / 3.6;
+    config.stationaryAdjacentVehicleMaximumDistance = 25.0;
+    config.nearbyObjectLateralDistance = 5.5;
+
+    WorldState world;
+    world.egoSpeed = 40.0 / 3.6;
+    world.ego.heading = 0.0F;
+    world.egoLaneValid = true;
+    world.egoRoadId = 10;
+    world.egoSectionIndex = 2;
+    world.egoLaneId = 3;
+
+    WorldObjectState parkedVehicle;
+    parkedVehicle.raw.id = 7;
+    parkedVehicle.raw.speed = 0.0F;
+    parkedVehicle.raw.heading = 0.0F;
+    parkedVehicle.raw.length = 4.85F;
+    parkedVehicle.raw.width = 1.89F;
+    parkedVehicle.laneValid = true;
+    parkedVehicle.roadId = 10;
+    parkedVehicle.sectionIndex = 2;
+    parkedVehicle.laneId = 2;
+    parkedVehicle.pathValid = true;
+    parkedVehicle.isAhead = true;
+    parkedVehicle.isOnEgoPath = false;
+    parkedVehicle.relativeS = 20.0;
+    parkedVehicle.relativeD = 3.5;
+    world.objects.push_back(parkedVehicle);
+
+    BehaviorState state;
+    BehaviorDecision output;
+    ConstraintSet constraints;
+    constraints.speedLimit = 50.0 / 3.6;
+    StopDecision stop;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Follow);
+    assert(std::abs(output.targetSpeed - 20.0 / 3.6) < 1e-9);
+
+    // 25 m 밖의 차량까지 미리 감속하지 않는다.
+    world.objects.front().relativeS = 26.0;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Cruise);
+
+    // 같은 위치라도 콘 크기의 정적 물체에는 기존처럼 순항한다.
+    world.objects.front().relativeS = 20.0;
+    world.objects.front().raw.length = 0.6F;
+    world.objects.front().raw.width = 0.6F;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Cruise);
+
+    // 두 차선 떨어진 정차 차량 역시 감속 대상이 아니다.
+    world.objects.front().raw.length = 4.85F;
+    world.objects.front().raw.width = 1.89F;
+    world.objects.front().laneId = 1;
+    updateBehavior(state, output, constraints, stop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Cruise);
+}
+
+void testCrossTrafficWaitingVehicleCapsBeforeLaunch() {
+    PlanningBehaviorConfig config;
+    config.crossTrafficCautionSpeed=10.0/3.6;
+    config.crossTrafficForwardDistance=55.0;
+    config.crossTrafficApproachDistance=35.0;
+
+    WorldState world;
+    world.ego.x=0.0F;world.ego.y=0.0F;world.ego.heading=0.0F;
+    world.egoSpeed=45.0/3.6;
+    WorldObjectState crossing;
+    crossing.raw.id=51;crossing.raw.x=20.0F;crossing.raw.y=30.0F;
+    crossing.raw.heading=-1.57079632679F;crossing.raw.speed=0.0F;
+    crossing.raw.length=4.85F;crossing.raw.width=1.89F;
+    world.objects.push_back(crossing);
+
+    BehaviorState state;BehaviorDecision output;
+    ConstraintSet constraints;constraints.speedLimit=45.0/3.6;
+    StopDecision stop;
+    updateBehavior(state,output,constraints,stop,world,
+                   45.0/3.6,config,.05);
+    assert(output.longitudinal==LonMode::Follow);
+    assert(std::abs(output.targetSpeed-10.0/3.6)<1e-9);
+
+    // Cross-traffic sizing must include trucks; the narrower passenger-car
+    // filter intentionally tops out below this M13-sized vehicle.
+    world.objects.front().raw.length=8.744F;
+    world.objects.front().raw.width=2.8F;
+    updateBehavior(state,output,constraints,stop,world,
+                   45.0/3.6,config,.05);
+    assert(output.longitudinal==LonMode::Follow);
+    assert(std::abs(output.targetSpeed-10.0/3.6)<1e-9);
+
+    // Some VTD actors move opposite their body heading while reporting a
+    // positive speed magnitude.  The measured velocity is authoritative.
+    world.objects.front().raw.length=4.85F;
+    world.objects.front().raw.width=1.89F;
+    world.objects.front().raw.heading=0.0F;
+    world.objects.front().velocityValid=true;
+    world.objects.front().velocityX=0.0;
+    world.objects.front().velocityY=-10.0;
+    updateBehavior(state,output,constraints,stop,world,
+                   45.0/3.6,config,.05);
+    assert(output.longitudinal==LonMode::Follow);
+    world.objects.front().velocityValid=false;
+
+    // A parallel parked vehicle is handled by the adjacent-lane rule, not
+    // mistaken for cross traffic merely because it is nearby.
+    world.objects.front().raw.heading=0.0F;
+    updateBehavior(state,output,constraints,stop,world,
+                   45.0/3.6,config,.05);
+    assert(output.longitudinal==LonMode::Cruise);
+
+    // Once the crossing vehicle has passed the geometric intersection and
+    // is moving away, the precaution must release.
+    world.objects.front().raw.heading=-1.57079632679F;
+    world.objects.front().raw.y=-8.0F;
+    updateBehavior(state,output,constraints,stop,world,
+                   45.0/3.6,config,.05);
+    assert(output.longitudinal==LonMode::Cruise);
+}
+
+void testMeasuredReverseObjectMotionDrivesPrediction() {
+    WorldState world;
+    world.ego.x=0.0F;world.ego.y=0.0F;world.ego.heading=0.0F;
+    world.egoSpeed=5.0;world.egoPathValid=true;world.egoPathS=0.0;
+    world.egoObb=makeObb2D(0.0,0.0,0.0,4.855,1.88);
+    WorldObjectState object;
+    object.raw.id=15;object.raw.x=20.0F;object.raw.y=0.0F;
+    object.raw.heading=0.0F;object.raw.speed=10.0F;
+    object.raw.length=4.394F;object.raw.width=1.808F;
+    object.velocityValid=true;object.velocityX=-10.0;object.velocityY=0.0;
+    object.pathValid=true;object.pathS=20.0;object.relativeS=20.0;
+    object.relativeD=0.0;object.isAhead=true;object.isOnEgoPath=true;
+    object.obb=makeObb2D(20.0,0.0,0.0,4.394,1.808);
+    world.objects.push_back(object);
+    LocalPathData path;path.valid=true;
+    for(int i=0;i<=60;++i) {
+        Waypoint point;point.x=i;point.s=i;point.yaw=0.0;
+        path.points.push_back(point);
+    }
+    PathSafetyResult safety;resetPathSafety(safety);
+    checkPredictedCollisions(safety,world,path,3.0,0.1);
+    assert(safety.predictedCollision);
+    assert(safety.riskObjectId==15);
+}
+
+void testCloserVehicleConstraintOverridesFarStopPlan() {
+    PlanningBehaviorConfig config;
+    config.followTimeGap = 1.8;
+    config.minimumFollowDistance = 5.0;
+    config.nearbyObjectCautionSpeed = 20.0 / 3.6;
+    config.nearbyObjectLateralDistance = 5.5;
+
+    WorldState world;
+    world.egoSpeed = 50.0 / 3.6;
+    WorldObjectState cuttingIn;
+    cuttingIn.raw.id = 6;
+    cuttingIn.raw.speed = 2.0F;
+    cuttingIn.raw.heading = 0.0F;
+    cuttingIn.pathValid = true;
+    cuttingIn.isAhead = true;
+    cuttingIn.relativeS = 10.0;
+    cuttingIn.relativeD = 3.5;
+    world.objects.push_back(cuttingIn);
+
+    ConstraintSet constraints;
+    constraints.speedLimit = 50.0 / 3.6;
+    StopDecision farSignalStop;
+    farSignalStop.valid = true;
+    farSignalStop.reason = StopReason::RedLight;
+    farSignalStop.distanceToStop = 76.0;
+
+    BehaviorState state;
+    BehaviorDecision output;
+    updateBehavior(state, output, constraints, farSignalStop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Follow);
+    assert(std::abs(output.targetSpeed - 2.0) < 1e-6);
+
+    // 정지점이 더 가까우면 신호 정지 제약이 그대로 우선한다.
+    farSignalStop.distanceToStop = 1.0;
+    updateBehavior(state, output, constraints, farSignalStop, world,
+                   50.0 / 3.6, config, 0.05);
+    assert(output.longitudinal == LonMode::Stop);
+    assert(std::abs(output.targetSpeed) < 1e-9);
+}
+
+void testSafeAvoidanceIgnoresStaticSiblingObstacles() {
+    PlanningBehaviorConfig config;
+    WorldState world;
+    world.egoSpeed = 5.0;
+    WorldObjectState staticSibling;
+    staticSibling.raw.id = 6;
+    staticSibling.raw.speed = 0.0F;
+    staticSibling.isAhead = true;
+    staticSibling.isOnEgoPath = true;
+    staticSibling.relativeS = 10.0;
+    staticSibling.ttc = 1.0;
+    world.objects.push_back(staticSibling);
+
+    BehaviorState state;
+    state.staticObstacleAvoidanceActive = true;
+    BehaviorDecision behavior;
+    ConstraintSet constraints;
+    constraints.speedLimit = 12.5;
+    StopDecision stop;
+    updateBehavior(state, behavior, constraints, stop, world,
+                   12.5, config, 0.05);
+    assert(behavior.longitudinal == LonMode::Cruise);
+    assert(std::abs(behavior.targetSpeed - 12.5) < 1e-9);
+
+    PathSafetyResult safety;
+    resetPathSafety(safety);
+    updateMinimumTTC(safety, world.objects, true);
+    assert(std::isinf(safety.minimumTTC));
+
+    // 움직이는 차량은 회피 중에도 추종/TTC 대상에서 제외하지 않는다.
+    world.objects.front().raw.speed = 1.0F;
+    state.safelyAvoidedObjectId = 6;
+    updateBehavior(state, behavior, constraints, stop, world,
+                   12.5, config, 0.05);
+    assert(behavior.longitudinal == LonMode::Cruise);
+    resetPathSafety(safety);
+    updateMinimumTTC(safety, world.objects, true, 6);
+    assert(std::isinf(safety.minimumTTC));
+
+    // 같은 ID가 움직여도 후보 경로가 안전할 때는 기동을 유지하지만,
+    // OBB 재검사에서 위험해지면 예외가 풀려 Follow/TTC가 즉시 복귀한다.
+    state.staticObstacleAvoidanceActive = false;
+    state.safelyAvoidedObjectId = -1;
+    updateBehavior(state, behavior, constraints, stop, world,
+                   12.5, config, 0.05);
+    assert(behavior.longitudinal == LonMode::Follow);
+    resetPathSafety(safety);
+    updateMinimumTTC(safety, world.objects, false);
+    assert(std::abs(safety.minimumTTC - 1.0) < 1e-9);
+}
+
+void testSharpCurveHasSeparateSpeed() {
+    PathPlannerConfig config;
+    config.curveThreshold = 0.02;
+    config.sharpCurveThreshold = 0.20;
+    config.straightSpeed = 50.0 / 3.6;
+    config.curveSpeed = 30.0 / 3.6;
+    config.sharpCurveSpeed = 20.0 / 3.6;
+    assert(std::abs(chooseTargetSpeed(0.01, config) -
+                    config.straightSpeed) < 1e-9);
+    assert(std::abs(chooseTargetSpeed(0.055, config) -
+                    config.curveSpeed) < 1e-9);
+    assert(std::abs(chooseTargetSpeed(0.22, config) -
+                    config.sharpCurveSpeed) < 1e-9);
+}
+
+void testNearestWaypointCannotJumpToOverlappingFutureBranch() {
+    std::vector<Waypoint> path;
+    for (int index = 0; index <= 20; ++index) {
+        Waypoint point;
+        point.x = static_cast<double>(index);
+        point.y = 0.0;
+        point.yaw = 0.0;
+        point.s = static_cast<double>(index);
+        path.push_back(point);
+    }
+    // 훨씬 뒤의 route branch가 같은 월드 위치를 반대방향으로 지난다.
+    for (int index = 0; index <= 20; ++index) {
+        Waypoint point;
+        point.x = static_cast<double>(20 - index);
+        point.y = 0.0;
+        point.yaw = 3.14159265358979323846;
+        point.s = 60.0 + index;
+        path.push_back(point);
+    }
+    GtFrame gt;
+    gt.ego.x = 5.0F;
+    gt.ego.y = 0.0F;
+    gt.ego.heading = 0.0F;
+    const std::size_t nearest = findNearestWaypoint(path, gt, 4);
+    if (nearest != 5) {
+        std::cerr << "nearest waypoint jumped to another route branch: "
+                  << nearest << '\n';
+        std::abort();
+    }
+}
+
+void testConsumedPathDoesNotSteerBackwards() {
+    for(double heading : {0., 1.2, -2.4}) {
+        PathPlannerData planner;
+        for(int i=0;i<=20;++i) {
+            Waypoint p;p.s=i;p.x=100.+i*std::cos(heading);
+            p.y=-30.+i*std::sin(heading);p.yaw=heading;
+            planner.waypoints.push_back(p);
+        }
+        planner.nearestIndex=19;
+        GtFrame gt;gt.ego.heading=heading;
+        const auto& end=planner.waypoints.back();
+        gt.ego.x=end.x+.3*std::cos(heading)-.4*std::sin(heading);
+        gt.ego.y=end.y+.3*std::sin(heading)+.4*std::cos(heading);
+        auto plan=runPurePursuit(planner,gt,1.4);
+        assert(plan.valid && plan.goalReached && plan.targetSpeed==0.);
+        assert(std::abs(plan.steering)<1e-9);
+        gt.ego.x=end.x+4.*std::cos(heading);
+        gt.ego.y=end.y+4.*std::sin(heading);
+        plan=runPurePursuit(planner,gt,1.4);
+        assert(!plan.valid && plan.targetSpeed==0.);
+        assert(std::abs(plan.steering)<1e-9);
+        gt.ego.x=end.x-8.*std::cos(heading);
+        gt.ego.y=end.y-8.*std::sin(heading);
+        planner.nearestIndex=12;
+        plan=runPurePursuit(planner,gt,1.4);
+        assert(plan.valid && !plan.goalReached && plan.targetSpeed>0.);
+    }
+}
+
+void testLaneGraphDoesNotInventMissingSectionLink() {
+    PathGeneratorData map;
+    map.sampleInterval = 0.5;
+    Road road;
+    road.id = 77;
+    road.length = 40.0;
+    Geometry geometry;
+    geometry.type = GeometryType::Line;
+    geometry.length = road.length;
+    road.geometries.push_back(geometry);
+    for (double sectionS : {0.0, 20.0}) {
+        LaneSection section;
+        section.s = sectionS;
+        LaneDefinition lane;
+        lane.id = -1;
+        lane.type = "driving";
+        lane.widths.push_back(constantWidth(3.5));
+        // successor/predecessor를 의도적으로 두지 않는다.
+        section.lanes.emplace(-1, lane);
+        road.sections.push_back(std::move(section));
+    }
+    map.roads.emplace(road.id, std::move(road));
+    sampleLaneCenters(map);
+    buildLaneGraph(map);
+    const LaneKey start{77, 0, -1};
+    const LaneKey goal{77, 1, -1};
+    if (!connectLanes(map, start, goal).empty()) {
+        std::cerr << "lane graph invented a missing laneSection link\n";
+        std::abort();
+    }
+}
+
+void testMixedCheckpointRoutesHaveValidGeometry() {
+    PathGeneratorData map;
+    if (!loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr", 0.5)) {
+        std::cerr << "failed to load LivingLAB map for route regression\n";
+        std::abort();
+    }
+    for (const char* checkpoints : {
+             "scenario/mixed/M03/checkpoints.csv",
+             "scenario/mixed/M04/checkpoints.csv",
+             "scenario/mixed/M09/checkpoints.csv"}) {
+        if (!loadCheckpointsCsv(map, checkpoints)) std::abort();
+        const std::vector<Waypoint> route = makePath(map);
+        std::string reason;
+        if (route.empty() || !validateGeneratedPath(route, &reason)) {
+            std::cerr << "invalid mixed route generated from " << checkpoints
+                      << ": " << reason << '\n';
+            std::abort();
+        }
+    }
+}
+
+void testMixedCheckpointMissionsUseEntryExitCorridors() {
+    PathGeneratorData map;
+    if (!loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr", 0.5)) {
+        std::abort();
+    }
+    for (const char* scenario : {
+             "M05", "M06", "M07", "M08",
+             "M09", "M10", "M11", "M12", "M13", "M14", "M15"}) {
+        MissionCorridorData mission;
+        const std::string checkpointPath =
+            std::string("scenario/mixed/") + scenario + "/checkpoints.csv";
+        if (!initializeMissionCorridor(mission, map, checkpointPath)) {
+            std::cerr << scenario
+                      << " checkpoint road corridor was disconnected\n";
+            std::abort();
+        }
+        const std::size_t expectedLegCount = mission.checkpoints.size() / 2;
+        if (mission.legs.size() != expectedLegCount) {
+            std::cerr << scenario
+                      << " mission corridor has wrong checkpoint/leg count\n";
+            std::abort();
+        }
+        std::vector<std::size_t> anchors{0};
+        for (std::size_t checkpoint = 2;
+             checkpoint < mission.checkpoints.size(); checkpoint += 2) {
+            anchors.push_back(checkpoint);
+        }
+        if (anchors.back() != mission.checkpoints.size() - 1) {
+            anchors.push_back(mission.checkpoints.size() - 1);
+        }
+        for (std::size_t index = 0; index < mission.legs.size(); ++index) {
+            mission.activeLegIndex = index;
+            const MissionLegData& leg = mission.legs[index];
+            const std::size_t expectedFrom = anchors[index];
+            const std::size_t expectedTo = anchors[index + 1];
+            const std::size_t expectedGateway =
+                expectedFrom + 1 < expectedTo
+                    ? expectedFrom + 1 : expectedTo;
+            const auto& gatewayLanes =
+                mission.checkpoints[expectedGateway].lanes;
+            const bool routePassesGateway = std::any_of(
+                leg.preferredRoute.begin(), leg.preferredRoute.end(),
+                [&](const LaneKey& lane) {
+                    return gatewayLanes.count(lane) != 0;
+                });
+            if (leg.fromCheckpoint != expectedFrom ||
+                leg.gatewayCheckpoint != expectedGateway ||
+                leg.toCheckpoint != expectedTo ||
+                !leg.valid || leg.allowedLanes.empty() ||
+                leg.targetLanes.empty() || leg.preferredRoute.empty() ||
+                !routePassesGateway ||
+                leg.allowedLanes.count(leg.preferredRoute.front()) == 0 ||
+                leg.targetLanes.count(leg.preferredRoute.back()) == 0) {
+                std::cerr << "invalid " << scenario
+                          << " mission corridor leg " << index << '\n';
+                std::abort();
+            }
+            // Corridor 범위는 roadMark와 무관하다. 한 section/direction이
+            // 들어왔으면 그 안의 모든 driving lane이 포함되고, 실제 실선
+            // 검사는 lane-change trajectory 생성 시점에만 수행한다.
+            for (const LaneKey& key : leg.allowedLanes) {
+                const Road& road = map.roads.at(key.roadId);
+                const LaneSection& section =
+                    road.sections.at(key.sectionIndex);
+                for (const auto& [laneId, lane] : section.lanes) {
+                    if (laneId == 0 || lane.type != "driving" ||
+                        (laneId > 0) != (key.laneId > 0)) {
+                        continue;
+                    }
+                    if (!leg.allowedLanes.count(
+                            {key.roadId, key.sectionIndex, laneId})) {
+                        std::cerr << scenario
+                                  << " corridor was narrowed by lane marking\n";
+                        std::abort();
+                    }
+                }
+            }
+        }
+        if (std::string(scenario) == "M09") {
+            // 좌표만 가까워도 통과로 오판되면 안 된다. 목표 directed
+            // road를 실제로 맵매칭한 후에만 다음 자유 회랑으로 넘어간다.
+            mission.activeLegIndex = 0;
+            mission.minimumTargetDistance =
+                std::numeric_limits<double>::infinity();
+            mission.targetRoadStableFrames = 0;
+            mission.targetRoadObserved = false;
+            const MissionLegData& first = mission.legs.front();
+            const Checkpoint& exit =
+                mission.checkpoints[first.toCheckpoint].checkpoint;
+            WorldState world;
+            world.ego.x = exit.x;
+            world.ego.y = exit.y;
+            world.egoLaneValid = true;
+            world.egoRoadId =
+                mission.checkpoints[first.fromCheckpoint].roadIds.front();
+            updateMissionCorridorProgress(mission, world);
+            if (mission.activeLegIndex != 0) {
+                std::cerr << "M09 advanced at an unobserved exit road\n";
+                std::abort();
+            }
+            world.egoRoadId =
+                mission.checkpoints[first.toCheckpoint].roadIds.front();
+            updateMissionCorridorProgress(mission, world);
+            if (mission.activeLegIndex != 1) {
+                std::cerr << "M09 did not advance after observing exit road\n";
+                std::abort();
+            }
+        }
+        if(std::string(scenario)=="M12") {
+            mission.activeLegIndex=2; // seq 5 -> 6 -> 7
+            if(!missionLegRequiresGuideContinuity(mission)) {
+                std::cerr<<"M12 kilometre-scale XODR detour was not "
+                            "classified as a guide connector gap\n";
+                std::abort();
+            }
+            mission.activeLegIndex=0; // ordinary seq 1 -> 2 -> 3
+            if(missionLegRequiresGuideContinuity(mission)) {
+                std::cerr<<"M12 ordinary approach was misclassified as an "
+                            "intersection connector gap\n";
+                std::abort();
+            }
+        }
+    }
+}
+
+void testM11DisplacedEgoStillGetsContinuousLocalPath() {
+    PathGeneratorData map;
+    if (!loadMap(map, "src/data/map/HL_FMA_VTD_LivingLab.xodr", 0.5)) {
+        std::abort();
+    }
+    PathPlannerData guide;
+    if (!loadWaypointsCsv(guide.waypoints,
+                          "scenario/mixed/M11/route.csv")) {
+        std::abort();
+    }
+    MissionCorridorData mission;
+    if (!initializeMissionCorridor(
+            mission, map, "scenario/mixed/M11/checkpoints.csv")) {
+        std::abort();
+    }
+    mission.activeLegIndex = 2;
+
+    const std::vector<std::pair<double, double>> samples{
+        {1455.30725, 587.564514}, {1455.55481, 587.562439},
+        {1455.77686, 587.560364}, {1456.63, 587.551}};
+    MapMatchState matchState;
+    for (const auto& [x, y] : samples) {
+        matchWorldPosition(matchState, map, x, y, -0.0091, std::nullopt);
+    }
+    const LaneMatch& match = matchState.lastMatch;
+    WorldState world;
+    world.ego.x = 1456.63F;
+    world.ego.y = 587.551F;
+    world.ego.heading = -0.0091F;
+    world.egoLaneValid = match.valid;
+    world.egoRoadId = match.roadId;
+    world.egoSectionIndex = match.sectionIndex;
+    world.egoLaneId = match.laneId;
+    world.egoRoadS = match.roadS;
+    world.egoLaneWidth = match.laneWidth;
+    world.egoLaneCenterDistance = match.distance;
+    GtFrame routeFrame;
+    routeFrame.ego = world.ego;
+    const WorldState routeProjection = makeWorldState(
+        routeFrame, map, guide.waypoints);
+    world.egoPathValid = routeProjection.egoPathValid;
+    world.egoPathS = routeProjection.egoPathS;
+    world.egoPathD = routeProjection.egoPathD;
+    world.inputValid = world.egoLaneValid;
+    world.egoSpeed = 0.0;
+    world.frontBumperOffset = 3.8;
+
+    PathPlannerData local;
+    PathPlannerConfig plannerConfig;
+    if (!buildRoadIdTrackingPath(
+            local, plannerConfig, world, map, guide, 0, 80.0,
+            nullptr, &mission) || local.waypoints.size() < 2) {
+        std::cerr << "M11 displaced Ego did not get a local lane path: road="
+                  << world.egoRoadId << " section=" << world.egoSectionIndex
+                  << " lane=" << world.egoLaneId << " road_s="
+                  << world.egoRoadS << '\n';
+        std::abort();
+    }
+    WorldState projected = world;
+    if (!projectWorldToActivePath(
+            projected, local.waypoints, world.frontBumperOffset)) {
+        std::cerr << "M11 displaced Ego local path could not be projected\n";
+        std::abort();
+    }
+    if (std::abs(projected.egoPathD) > 8.0) {
+        std::cerr << "M11 displaced Ego selected an unrelated local path\n";
+        std::abort();
+    }
+    const auto point = std::lower_bound(
+        local.waypoints.begin(), local.waypoints.end(), projected.egoPathS,
+        [](const Waypoint& waypoint, double pathS) {
+            return waypoint.s < pathS;
+        });
+    const Waypoint& nearest = point == local.waypoints.end()
+        ? local.waypoints.back() : *point;
+    const double remaining = local.waypoints.back().s - projected.egoPathS;
+    const double headingError = std::abs(normalizeAngle(
+        static_cast<double>(world.ego.heading) - nearest.yaw));
+    if (remaining < 2.0 || headingError > 1.35) {
+        std::cerr << "M11 displaced local path unusable: d="
+                  << projected.egoPathD << " remaining=" << remaining
+                  << " heading_error=" << headingError << " path_lane="
+                  << nearest.roadId << '/' << nearest.sectionIndex << '/'
+                  << nearest.laneId << '\n';
+        std::abort();
+    }
+}
+
+void testSafeAvoidanceSuccessorAndPhysicalStopLine() {
+    auto map=makeStraightTwoLaneMap();
+    WorldState world;
+    world.ego.x=10.;world.ego.y=-5.25;world.ego.heading=0.;
+    world.egoRoadId=1;world.egoSectionIndex=0;world.egoLaneId=-2;
+    world.egoRoadS=world.egoPathS=10.;world.egoSpeed=2.;
+    world.egoLaneWidth=3.5;world.egoLaneValid=world.egoPathValid=true;
+    world.frontBumperOffset=3.8;
+    world.egoObb=makeObb2D(11.3725,-5.25,0.,4.855,1.88);
+    PathPlannerData safe;
+    for(int x=0;x<=80;++x) {
+        Waypoint p;p.x=x;p.y=-5.25;p.s=p.roadS=x;
+        p.roadId=1;p.sectionIndex=0;p.laneId=-2;
+        safe.waypoints.push_back(p);
+    }
+    auto occupiedReturn=safe.waypoints;
+    for(auto& p:occupiedReturn) {
+        p.y+=3.5*std::clamp((p.x-10.)/20.,0.,1.);
+        if(p.x>10. && p.x<30.) p.yaw=std::atan2(3.5,20.);
+        if(p.x>=30.) p.laneId=-1;
+    }
+    WorldObjectState object;
+    object.raw.id=7;object.raw.x=45.;object.raw.y=-1.75;
+    object.raw.length=4.;object.raw.width=2.;object.obb=makeObjectObb(object.raw);
+    world.objects.push_back(object);
+    PlanningBehaviorConfig behavior;
+    assert(corridorTrackingPathIsSafe(safe.waypoints,world,.3,nullptr,&behavior,&map));
+    assert(!corridorTrackingPathIsSafe(occupiedReturn,world,.3,nullptr,&behavior,&map));
+    LaneChangeConfig config;
+    LaneChangeData state;state.phase=LaneChangePhase::Settle;
+    state.obstacleId=7;state.path=safe.waypoints;
+    // The triggering actor is still ahead on another lane: no unconditional
+    // overtaking/body-alignment gate is added. Only safe successor readiness.
+    advanceLaneChangePhase(state,config,world,config.settleTime+1.,
+                           false,true,true,nullptr,false);
+    assert(state.phase==LaneChangePhase::Settle && !state.path.empty());
+    advanceLaneChangePhase(state,config,world,.05,false,true,true,nullptr,true);
+    assert(state.phase==LaneChangePhase::None);
+    StopLine line;line.id=99;line.roadId=1;
+    line.begin={60.,0.};line.end={60.,-7.};line.routeS=-1000.;
+    map.staticZones.stopLines.push_back(line);
+    const auto deadline=laneAlignmentBeforeStopLine(world,map,safe,2.5,70.);
+    assert(deadline.stopLineId==99);
+    assert(std::abs(deadline.maximumCompletionDistance-43.7)<1e-6);
+    map.staticZones.stopLines[0].roadId=2;
+    assert(!std::isfinite(laneAlignmentBeforeStopLine(world,map,safe,2.5,70.)
+                              .maximumCompletionDistance));
+    map.staticZones.stopLines[0].roadId=1;
+    world.ego.x=61.;world.egoRoadS=world.egoPathS=61.;
+    world.egoObb=makeObb2D(62.3725,-5.25,0.,4.855,1.88);
+    assert(!std::isfinite(laneAlignmentBeforeStopLine(world,map,safe,2.5,70.)
+                              .maximumCompletionDistance));
+
+    // A final selected-path speed cap must beat the progress floor while
+    // preserving tracking geometry. Clearing the body releases it next frame.
+    PlanningProcessData planning;
+    planning.pathPlanner=safe;
+    world.ego.x=10.;world.egoRoadS=world.egoPathS=10.;world.inputValid=true;
+    world.egoObb=makeObb2D(11.3725,-5.25,0.,4.855,1.88);
+    map.staticZones.stopLines.clear();
+    world.objects.clear();
+    object.raw.x=17.;object.raw.y=-3.5;object.raw.width=8.;
+    object.raw.length=4.;object.raw.height=1.5;object.obb=makeObjectObb(object.raw);
+    world.objects.push_back(object);
+    GtFrame gt;gt.ego=world.ego;
+    runPlanningProcess(planning,gt,world,map,.05);
+    assert(planning.result.valid && planning.result.localPath.valid);
+    if(planning.result.targetSpeed!=0.) {
+        int blocker=-1;
+        std::cerr<<"selected-path guard speed="<<planning.result.targetSpeed
+                 <<" free="<<corridorStationaryFreeDistance(planning.result.localPath.points,
+                     world,.3,&map,&blocker)<<" blocker="<<blocker
+                 <<" stop_margin="<<planning.config.stopSafetyMargin
+                 <<" path_y="<<planning.result.localPath.points.front().y<<'\n';
+    }
+    assert(planning.result.targetSpeed==0.);
+    assert(planning.result.stopReason==StopReason::StationaryPathBlocked);
+    assert(!planning.result.emergencyBrake);
+    world.objects.clear();
+    runPlanningProcess(planning,gt,world,map,.05);
+    assert(planning.result.valid && planning.result.targetSpeed>0.);
+}
+
+void testCommittedGatewayRouteHandoff() {
+    auto world = makeWorldWithObstacle();
+    world.objects.clear();
+    LaneChangeData maneuver;
+    maneuver.phase = LaneChangePhase::Execute;
+    maneuver.localCorridorAvoidance = true;
+    maneuver.path = makeStraightGlobalPath().waypoints;
+
+    // The certified gateway route agrees with the executing local path near
+    // Ego, then turns toward the gateway farther ahead. Waiting for Execute
+    // to finish would drive past that future branch on the local path.
+    auto gateway = maneuver.path;
+    double arcLength = 0.0;
+    for (std::size_t i = 0; i < gateway.size(); ++i) {
+        auto& point = gateway[i];
+        const double t = std::clamp((point.x - 15.0) / 25.0, 0.0, 1.0);
+        point.y += 3.5 * t * t * (3.0 - 2.0 * t);
+        point.yaw = std::atan(3.5 * 6.0 * t * (1.0 - t) / 25.0);
+        if (i > 0) arcLength += std::hypot(point.x - gateway[i - 1].x,
+                                          point.y - gateway[i - 1].y);
+        point.s = arcLength;
+    }
+    const auto canResume = [&](const std::vector<Waypoint>& successor,
+                               bool safe = true) {
+        return canResumeCommittedGatewayRoute(maneuver, world, successor, safe);
+    };
+    assert(canResume(gateway));
+    assert(maneuver.phase == LaneChangePhase::Execute);
+    // The same handoff must work for ordinary obstacle avoidance, not only
+    // a path tagged as the local corridor fallback.
+    maneuver.localCorridorAvoidance = false;
+    maneuver.obstacleId = 7;
+    assert(canResume(gateway));
+    assert(!canResume(gateway, false));
+
+    auto disconnected = gateway;
+    for (auto& point : disconnected) point.y += 0.6;
+    assert(!canResume(disconnected));
+    auto oppositeHeading = gateway;
+    for (auto& point : oppositeHeading) point.yaw += 0.3;
+    assert(!canResume(oppositeHeading));
+
+    // Matching the very first pose is insufficient: a sharp sideways jump
+    // immediately ahead must not replace the incumbent trajectory.
+    auto incompatiblePrefix = gateway;
+    for (auto& point : incompatiblePrefix) {
+        point.y += 0.6 * std::clamp((point.x - 10.0) / 2.0, 0.0, 1.0);
+    }
+    assert(!canResume(incompatiblePrefix));
+    auto abruptSteeringPrefix = gateway;
+    for (auto& point : abruptSteeringPrefix) {
+        if (point.x >= 12.0) point.yaw += 0.3;
+    }
+    assert(!canResume(abruptSteeringPrefix));
+
+    // A genuine C2 bridge starts exactly at Ego with the old curvature but
+    // bends away within three metres. It must not remain hidden by Execute.
+    std::vector<Waypoint> earlyBridge;
+    for(int i=0;i<=120;++i) {
+        auto p=gateway.front();const double x=i*.2,u=std::clamp(x/12.,0.,1.);
+        p.x=world.ego.x+x;p.y=world.ego.y+3.5*u*u*u*(10.-15.*u+6.*u*u);
+        p.yaw=std::atan(3.5*30.*u*u*(1.-u)*(1.-u)/12.);
+        p.s=earlyBridge.empty()?200.:earlyBridge.back().s+
+            std::hypot(p.x-earlyBridge.back().x,p.y-earlyBridge.back().y);
+        earlyBridge.push_back(p);
+    }
+    assert(canResume(earlyBridge));
+    assert(!canResume(earlyBridge,false));
+    auto corruptBridge=earlyBridge;corruptBridge[2].y+=.5;
+    assert(!canResume(corruptBridge));
+
+    // A short corridor stub may look aligned but cannot supply a usable
+    // successor beyond Ego. Gateway topology itself is checked by the caller.
+    auto shortStub = gateway;
+    shortStub.resize(18);  // Ends at x=17; Ego x=10 leaves only seven metres.
+    assert(!canResume(shortStub));
+    assert(!canResume({}));
+    auto beyondTail = world;
+    beyondTail.ego.x = 89.0F;
+    beyondTail.ego.y = -1.75F;
+    assert(!canResumeCommittedGatewayRoute(maneuver, beyondTail,
+                                           maneuver.path, true));
+
+    maneuver.roadConnectionManeuver = true;
+    assert(!canResume(gateway));
+    maneuver.roadConnectionManeuver = false;
+    maneuver.phase = LaneChangePhase::None;
+    assert(!canResume(gateway));
+    maneuver.phase = LaneChangePhase::Execute;
+    maneuver.path.clear();
+    assert(!canResume(gateway));
+}
+
+void testProgressRecoveryYieldsToUsableOrdinaryPath() {
+    auto world = makeWorldWithObstacle();
+    world.objects.clear();
+    world.egoSpeed = 0.0;
+    const auto ordinary = makeStraightGlobalPath().waypoints;
+    // A fresh safe route is usable from standstill, before a recovery trial
+    // travels two metres. Its adoption must not need a timer or prior motion.
+    assert(canResumeOrdinaryPathAfterRecovery(world, ordinary, true));
+    assert(!canResumeOrdinaryPathAfterRecovery(world, ordinary, false));
+
+    auto detached = ordinary;
+    for (auto& point : detached) point.y += 0.5;
+    assert(!canResumeOrdinaryPathAfterRecovery(world, detached, true));
+    auto headingMismatch = ordinary;
+    for (auto& point : headingMismatch) point.yaw = 0.3;
+    assert(!canResumeOrdinaryPathAfterRecovery(world, headingMismatch, true));
+    auto shortStub = ordinary;
+    shortStub.resize(18);  // seven metres remain ahead of Ego
+    assert(!canResumeOrdinaryPathAfterRecovery(world, shortStub, true));
+    assert(!canResumeOrdinaryPathAfterRecovery(world, {}, true));
+    auto pastTail = world;
+    pastTail.ego.x = 89.0F;
+    assert(!canResumeOrdinaryPathAfterRecovery(pastTail, ordinary, true));
+
+    // Nominal clearance is a real safety constraint, even if a different
+    // tight-gap path could be approved with a smaller margin. Do not hand a
+    // blocked nominal path back to the stop/recovery cycle using .05 m here.
+    WorldObjectState sideObstacle;
+    sideObstacle.raw.id = 91;
+    sideObstacle.raw.x = 25.0F;
+    sideObstacle.raw.y = 0.35F;
+    sideObstacle.raw.length = 4.0F;
+    sideObstacle.raw.width = 2.0F;
+    sideObstacle.raw.height = 2.0F;
+    sideObstacle.obb = makeObjectObb(sideObstacle.raw);
+    world.objects = {sideObstacle};
+    const bool nominalSafe = corridorTrackingPathIsSafe(ordinary, world, 0.3);
+    const bool tightSafe = corridorTrackingPathIsSafe(ordinary, world, 0.05);
+    assert(!nominalSafe && tightSafe);
+    assert(!canResumeOrdinaryPathAfterRecovery(world, ordinary, nominalSafe));
+
+    // Removing the actual constraint restores immediate ordinary authority.
+    world.objects.clear();
+    assert(canResumeOrdinaryPathAfterRecovery(world, ordinary,
+        corridorTrackingPathIsSafe(ordinary, world, 0.3)));
+}
+
+PathGeneratorData makeRecoveryRuntimeMap() {
+    auto map=makeStraightTwoLaneMap();PrecomputedLaneNetwork network;
+    for(const auto& entry:map.laneSegments) {
+        PrecomputedLane raw;raw.key=entry.first;raw.topologyStatus="connected";
+        for(const auto& pose:entry.second.points) {
+            PrecomputedLanePoint p;p.id=network.points.size();p.pointIndex=raw.pointIds.size();
+            p.pose=pose;p.pose.s=pose.roadS;p.width=3.5;p.usable=true;
+            if(p.pointIndex+1<entry.second.points.size())p.nextPoint=p.id+1;
+            raw.pointIds.push_back(p.id);network.points.push_back(p);
+        }
+        network.lanes[raw.key]=raw;
+    }
+    std::string error;
+    assert(initializeCorridorRuntime(map,std::move(network),LaneChangeConfig{},&error));
+    return map;
+}
+
+void testDetachedStoredPlanArmsRecovery() {
+    auto map=makeRecoveryRuntimeMap();
+    PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
+    planning.roadLanePlanner=planning.pathPlanner;
+    planning.roadLanePlannerMissionLegValid=true;planning.roadLanePlannerMissionLeg=0;
+    planning.config.simulationProgressRecovery=1.;planning.config.progressRecoveryStopTimeout=.2;
+    auto& mission=planning.missionCorridor;mission.valid=mission.initialized=mission.topologyAuthority=true;
+    mission.checkpoints.resize(1);mission.checkpoints[0].checkpoint.x=250.;
+    MissionLegData leg;leg.valid=true;leg.allowedLanes={{1,0,-1},{1,0,-2}};
+    leg.targetLanes={{1,0,-1}};leg.topologyAuthority=true;
+    leg.targetRoadS[{1,0,-1}]=200.;mission.legs.push_back(leg);
+    auto world=makeWorldWithObstacle();world.objects.clear();world.egoSpeed=0.;
+    world.ego.x=110.;world.ego.y=-1.75;world.egoRoadS=world.egoPathS=110.;
+    world.inputValid=world.egoLaneValid=world.egoPathValid=true;
+    world.egoObb=makeObb2D(111.3725,-1.75,0.,4.855,1.88);
+    GtFrame gt;gt.ego=world.ego;
+    runPlanningProcess(planning,gt,world,map,.05);
+    // The old path is already behind Ego. It must arm recovery without
+    // advertising a valid PP target or steering back toward its endpoint.
+    assert(!planning.result.trackingPlan.valid && !planning.result.valid);
+    assert(std::abs(planning.result.trackingPlan.steering)<1e-9);
+    for(int i=0;i<10;++i) {world.receiveTime+=.05;runPlanningProcess(planning,gt,world,map,.05);}
+    assert(planning.progressRecovery.active && planning.progressRecovery.blockedTime>=.2);
+    // A failed map/path match with a finite measured pose must recover too.
+    world.inputValid=false;runPlanningProcess(planning,gt,world,map,.05);
+    assert(planning.result.valid && planning.result.progressRecoveryActive);
+    assert(planning.result.targetSpeed>.05);
+    // Corrupt telemetry is a different authority: never synthesize a pose.
+    world.ego.heading=std::numeric_limits<float>::quiet_NaN();
+    gt.ego=world.ego;runPlanningProcess(planning,gt,world,map,.05);
+    assert(!planning.progressRecovery.active && planning.progressRecovery.blockedTime==0.);
+}
+
+void testSimulationRecoveryStopEdgeCases() {
+    // Vary independent blockers through the production planner AND final
+    // actuator limiter; a positive planner speed alone is insufficient.
+    for(int variant=0;variant<8;++variant) {
+        auto map=makeRecoveryRuntimeMap();
+        PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
+        planning.config.simulationProgressRecovery=1.;
+        planning.config.progressRecoveryStopTimeout=.2;
+        auto& mission=planning.missionCorridor;
+        mission.valid=mission.initialized=mission.topologyAuthority=true;
+        mission.checkpoints.resize(1);mission.checkpoints[0].checkpoint.x=95.;
+        MissionLegData leg;leg.valid=leg.topologyAuthority=true;
+        leg.allowedLanes={{1,0,-1},{1,0,-2}};leg.gatewayLanes={{1,0,-1}};
+        leg.targetLanes={{1,0,-1}};leg.targetRoadS[{1,0,-1}]=95.;
+        mission.legs.push_back(leg);
+        auto world=makeWorldWithObstacle();world.egoSpeed=0.;world.trafficLight={};
+        WorldObjectState car;car.raw.id=91;car.raw.x=11.;car.raw.y=-1.75;
+        car.raw.length=8.;car.raw.width=8.;car.raw.height=1.5;
+        if(variant==1) car.raw.speed=1.; // moving-actor EBS must never time out
+        if(variant==2) {car.raw.length=1.;car.raw.width=1.;car.raw.height=1.8;}
+        car.obb=makeObb2D(car.raw.x,car.raw.y,0.,car.raw.length,car.raw.width);
+        world.objects={car};
+        if(variant==3) { // no lane-network geometry at all
+            map.corridorRuntime.reset();map.laneSegments.clear();
+            world.inputValid=world.egoLaneValid=world.egoPathValid=false;
+        }
+        if(variant==4) { // no reference or mission, but live finite telemetry
+            planning.pathPlanner.waypoints.clear();mission={};map.corridorRuntime.reset();
+        }
+        if(variant==5) { // missing graph start / consumed tail
+            world.ego.x=110.;world.ego.y=3.;world.egoRoadS=world.egoPathS=110.;
+            world.inputValid=world.egoLaneValid=world.egoPathValid=false;
+        }
+        if(variant==6 || variant==7) { // actual gateway queue, not an overlap
+            world.objects[0].raw.x=19.;
+            world.objects[0].obb=makeObb2D(19.,-1.75,0.,8.,8.);
+            planning.stationaryObjects={{91,100.,19.,-1.75,true,false}};
+        }
+        if(variant==7) {
+            // A red-light approach may not override a real queue wait.
+            mission.checkpoints[0].checkpoint.x=30.;
+            mission.legs[0].targetLanes={{1,0,-2}};
+            mission.legs[0].targetRoadS.clear();
+            mission.legs[0].targetRoadS[{1,0,-2}]=30.;
+            mission.legs[0].gatewayLanes={{1,0,-2}};
+            world.trafficLight.id=42;world.trafficLight.state=1;
+            StopLine stop;stop.id=88;stop.controllerId=42;stop.roadId=1;
+            stop.laneIds={-1};stop.routeS=30.;
+            stop.begin={30.,-3.5};stop.end={30.,0.};
+            map.staticZones.stopLines={stop};
+        }
+        world.egoObb=makeObb2D(world.ego.x+1.3725,world.ego.y,world.ego.heading,4.855,1.88);
+        GtFrame gt;gt.ego=world.ego;ControlProcessData control;
+        control.controller.hasPreviousAcceleration=true;control.controller.previousAcceleration=-10.;
+        bool sawRecovery=false;
+        for(int i=0;i<65;++i) {
+            world.receiveTime+=.05;
+            runPlanningProcess(planning,gt,world,map,.05);
+            runControlProcess(control,world,planning.result,.05);
+            if(variant==1 || variant==2) {
+                assert(planning.result.emergencyBrake && planning.result.targetSpeed==0.);
+                assert(!planning.result.progressRecoveryActive);
+                assert(control.latestCommand.targetAccel<0.);
+                continue;
+            }
+            if(i<15)continue;
+            if(variant==7) {
+                if(planning.result.progressRecoveryActive)
+                    std::cerr<<"signal queue frame="<<i<<" gap="
+                             <<soleGatewayQueueDistance(world,map,mission)
+                             <<" blockers="<<map.corridorRuntime->gatewayQueueBlockers.size()<<'\n';
+                assert(!planning.result.progressRecoveryActive);
+                assert(planning.result.stopReason==StopReason::RedLight);
+                assert(planning.result.stopDistanceValid && planning.result.stopDistance>2.);
+                assert(planning.result.targetSpeed==0. && control.latestCommand.targetAccel<0.);
+                continue;
+            }
+            if(!(planning.result.valid && planning.result.targetSpeed>.05 &&
+                 !planning.result.emergencyBrake && control.latestCommand.targetAccel>0.))
+                std::cerr<<"recovery edge variant="<<variant<<" frame="<<i
+                         <<" active="<<planning.result.progressRecoveryActive<<'\n';
+            assert(planning.result.valid && planning.result.targetSpeed>.05);
+            assert(!planning.result.emergencyBrake && control.latestCommand.targetAccel>0.);
+            sawRecovery=sawRecovery || planning.result.progressRecoveryActive;
+        }
+        if(variant==1 || variant==2) {
+            // Once danger is gone, a retained actuator brake must eventually
+            // release; keep Ego stationary to exercise the restart path.
+            world.objects.clear();
+            bool resumed=false;
+            for(int i=0;i<80;++i) {
+                world.receiveTime+=.05;
+                runPlanningProcess(planning,gt,world,map,.05);
+                runControlProcess(control,world,planning.result,.05);
+                resumed=resumed || (planning.result.valid && planning.result.targetSpeed>.05 &&
+                    !planning.result.emergencyBrake && control.latestCommand.targetAccel>0.);
+            }
+            assert(resumed);
+        } else if(variant!=7) assert(sawRecovery);
+        if(variant==3 || variant==4 || variant==5)
+            assert(planning.result.progressRecoveryGeometryFallback);
+        planning.config.simulationProgressRecovery=0.;
+        runPlanningProcess(planning,gt,world,map,.05);
+        assert(!planning.result.progressRecoveryActive);
+    }
+}
+
+void testStationaryContactRecoveryKeepsDriving() {
+    auto map=makeRecoveryRuntimeMap();
+    PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
+    planning.config.simulationProgressRecovery=1.;
+    planning.config.progressRecoveryStopTimeout=.2;
+    auto& mission=planning.missionCorridor;
+    mission.valid=mission.initialized=mission.topologyAuthority=true;
+    mission.checkpoints.resize(1);mission.checkpoints[0].checkpoint.x=95.;
+    MissionLegData leg;leg.valid=leg.topologyAuthority=true;
+    leg.allowedLanes={{1,0,-1},{1,0,-2}};leg.gatewayLanes={{1,0,-1}};
+    leg.targetLanes={{1,0,-1}};leg.targetRoadS[{1,0,-1}]=95.;
+    mission.legs.push_back(leg);
+    auto world=makeWorldWithObstacle();world.egoSpeed=0.;world.trafficLight={};
+    world.ego.x=10.;world.ego.y=-1.75;world.ego.heading=0.;
+    world.egoRoadS=world.egoPathS=10.;world.egoRoadId=1;world.egoLaneId=-1;
+    world.egoObb=makeObb2D(11.3725,-1.75,0.,4.855,1.88);
+    world.inputValid=world.egoLaneValid=world.egoPathValid=true;
+    WorldObjectState car;car.raw.id=91;car.raw.x=10.;car.raw.y=-1.75;
+    car.raw.length=4.4;car.raw.width=1.8;car.raw.height=1.5;
+    car.obb=makeObb2D(10.,-1.75,0.,4.4,1.8);world.objects={car};
+    planning.stationaryObjects={{91,100.,10.,-1.75,true,false}};
+    GtFrame gt;gt.ego=world.ego;ControlProcessData control;
+    for(int i=0;i<100;++i) {
+        world.receiveTime+=.05;
+        runPlanningProcess(planning,gt,world,map,.05);
+        runControlProcess(control,world,planning.result,.05);
+        if(i<60) continue; // confirmation, timeout and brake slew have expired
+        assert(planning.result.valid && planning.result.progressRecoveryActive);
+        assert(planning.result.progressRecoveryContactExpected);
+        assert(planning.result.targetSpeed>.05 && !planning.result.emergencyBrake);
+        assert(!control.safety.invalidInput && control.latestCommand.targetAccel>0.);
+    }
+    // A real transient emergency still overrides the contact drive command.
+    auto emergency=planning.result;emergency.emergencyBrake=true;
+    runControlProcess(control,world,emergency,.05);
+    assert(control.safety.emergencyBrakeApplied && control.latestCommand.targetAccel<0.);
+    // New moving actors must also interrupt an ALREADY active static escape.
+    world.objects.front().raw.speed=1.;
+    auto second=world.objects.front();second.raw.id=92;
+    world.objects.push_back(second);
+    for(int pass=0;pass<2;++pass) {
+        for(int i=0;i<35;++i) {
+            world.receiveTime+=.05;
+            runPlanningProcess(planning,gt,world,map,.05);
+            runControlProcess(control,world,planning.result,.05);
+            assert(planning.result.emergencyBrake && planning.result.targetSpeed==0.);
+            assert(!planning.result.progressRecoveryActive);
+            assert(control.safety.emergencyBrakeApplied && control.latestCommand.targetAccel<0.);
+        }
+        world.objects.erase(world.objects.begin());
+    }
+    bool resumed=false;
+    for(int i=0;i<80;++i) {
+        world.receiveTime+=.05;
+        runPlanningProcess(planning,gt,world,map,.05);
+        runControlProcess(control,world,planning.result,.05);
+        resumed=resumed || (planning.result.valid && planning.result.targetSpeed>.05 &&
+            !planning.result.emergencyBrake && control.latestCommand.targetAccel>0.);
+    }
+    assert(resumed);
+}
+
+void testGatewayHandoffChecksAttachedConnectorAndFullTail() {
+    auto world = makeWorldWithObstacle();
+    world.objects.clear();
+    auto gateway = makeStraightGlobalPath().waypoints;
+    for (auto& point : gateway) {
+        point.y = -5.25;
+        point.laneId = -2;
+    }
+    LaneChangeData maneuver;
+    maneuver.phase = LaneChangePhase::Execute;
+    maneuver.localCorridorAvoidance = true;
+    maneuver.path = makeStraightGlobalPath().waypoints;
+    std::vector<Waypoint> connector;
+    for (int x = 10; x <= 40; ++x) {
+        Waypoint point;
+        point.x = point.roadS = x;
+        point.roadId = 1;
+        const double t = std::clamp((x - 15.0) / 25.0, 0.0, 1.0);
+        point.y = -1.75 - 3.5 * t * t * (3.0 - 2.0 * t);
+        point.yaw = std::atan(-3.5 * 6.0 * t * (1.0 - t) / 25.0);
+        point.laneId = t < 0.5 ? -1 : -2;
+        point.s = connector.empty() ? 100.0 : connector.back().s +
+            std::hypot(point.x - connector.back().x, point.y - connector.back().y);
+        connector.push_back(point);
+    }
+    // Ego is 3.5m away from the raw gateway line, but a checked connector
+    // starts underneath it and merges at x=40. Rejecting the raw line's Ego
+    // attachment must not reject this usable, continuous combined route.
+    assert(!corridorTrackingPathIsSafe(gateway, world, 0.3));
+    assert(corridorTrackingPathIsSafe(connector, world, 0.3));
+    assert(canResumeCommittedGatewayRoute(maneuver, world, connector, true));
+    std::vector<Waypoint> continuation;
+    assert(buildGatewayHandoffContinuation(continuation, connector, gateway));
+    assert(continuation.back().x == gateway.back().x);
+    assert(continuation.front().s == 100.0);
+    for (std::size_t i = 1; i < continuation.size(); ++i) {
+        const double gap = std::hypot(continuation[i].x - continuation[i-1].x,
+                                      continuation[i].y - continuation[i-1].y);
+        assert(gap > 0.0 && gap < 1.1);
+        assert(std::abs(continuation[i].s - continuation[i-1].s - gap) < 1e-9);
+    }
+    assert(corridorTrackingPathIsSafe(continuation, world, 0.3));
+
+    // An obstacle after the connector's endpoint still invalidates handoff:
+    // checking only the attached prefix would silently discard this danger.
+    WorldObjectState blocker;
+    blocker.raw.id = 93;
+    blocker.raw.x = 65.0F;
+    blocker.raw.y = -5.25F;
+    blocker.raw.length = 4.0F;
+    blocker.raw.width = 2.0F;
+    blocker.obb = makeObjectObb(blocker.raw);
+    world.objects = {blocker};
+    assert(corridorTrackingPathIsSafe(connector, world, 0.3));
+    const bool completePathSafe = corridorTrackingPathIsSafe(continuation, world, 0.3);
+    assert(!completePathSafe);
+    assert(!canResumeCommittedGatewayRoute(maneuver, world, connector, completePathSafe));
+
+    // Coincident junction roads/lanes do not establish the required join.
+    auto wrongKey = connector;
+    wrongKey.back().roadId = 99;
+    assert(!buildGatewayHandoffContinuation(continuation, wrongKey, gateway));
+    wrongKey = connector;
+    wrongKey.back().sectionIndex = 1;
+    assert(!buildGatewayHandoffContinuation(continuation, wrongKey, gateway));
+    wrongKey = connector;
+    wrongKey.back().laneId = -1;
+    assert(!buildGatewayHandoffContinuation(continuation, wrongKey, gateway));
+}
+
+}  // namespace
+
+void testCrosswalkUsersAndStopDistanceGuard() {
+    Crosswalk crossing;
+    crossing.polygon={{20,-8},{26,-8},{26,8},{20,8}};
+    WorldState world;
+    WorldObjectState actor;
+    actor.raw.id=1;actor.raw.length=4.4;actor.raw.width=1.8;
+    actor.raw.speed=2.;actor.raw.x=23;actor.raw.y=0;
+    actor.obb=makeObb2D(23,0,0,4.4,1.8);
+    world.objects={actor};
+    assert(!crosswalkHasRiskObject(crossing,world,4.));
+    // A stopped car and its re-start must not toggle pedestrian yield.
+    world.objects[0].raw.speed=0.;
+    assert(!crosswalkHasRiskObject(crossing,world,4.));
+    actor.raw.length=.5;actor.raw.width=.6;actor.raw.speed=0.;
+    actor.raw.y=7.9;actor.obb=makeObb2D(23,7.9,0,.5,.6);
+    actor.isOnEgoPath=false;actor.isAhead=false;world.objects={actor};
+    assert(crosswalkHasRiskObject(crossing,world,4.));
+    // Centre outside the FAR edge, but body still on the entire crosswalk.
+    world.objects[0].obb=makeObb2D(23,8.2,0,.5,.6);
+    assert(crosswalkHasRiskObject(crossing,world,4.));
+    world.objects[0].obb=makeObb2D(23,8.4,0,.5,.6);
+    assert(!crosswalkHasRiskObject(crossing,world,4.));
+    actor.raw.x=23;actor.raw.y=-10;actor.raw.speed=1.;
+    actor.raw.heading=1.5707963267948966;
+    actor.obb=makeObb2D(23,-10,actor.raw.heading,.5,.6);world.objects={actor};
+    assert(crosswalkHasRiskObject(crossing,world,4.));
+    // Stationary small user inside must not time out into progress recovery.
+    actor.raw.speed=0.;actor.obb=makeObb2D(23,5,0,.5,.6);world.objects={actor};
+    for (int i=0;i<200;++i) assert(crosswalkHasRiskObject(crossing,world,4.));
+
+    // Simulator timeout starts only at the selected crossing stop, not when
+    // a stationary actor is first seen on approach. No shape classification.
+    PlanningBehaviorConfig propConfig;
+    propConfig.simulationCrosswalkStaticRelease=1.;
+    actor.raw.x=23;actor.raw.y=0;actor.raw.length=1.2;
+    actor.raw.width=1.2;actor.raw.height=1.28;
+    actor.obb=makeObb2D(23,0,0,1.2,1.2);world.objects={actor};
+    std::vector<StationaryObjectState> history={{1,600,23,0,true,false}};
+    std::vector<CrosswalkObjectWaitState> waits;
+    crossing.id=77;world.inputValid=true;world.egoSpeed=0.;
+    StopDecision previousStop;
+    auto step=[&]{return updateCrosswalkStationaryRelease(crossing,world,previousStop,
+        history,propConfig,.05,waits);};
+    for(int i=0;i<100;++i)assert(step().empty()); // not waiting at this crossing
+    previousStop.valid=true;previousStop.reason=StopReason::RedLight;
+    previousStop.sourceId=77;previousStop.distanceToStop=1.;
+    for(int i=0;i<100;++i)assert(step().empty()); // signal wait does not count
+    previousStop.reason=StopReason::CrosswalkBlocked;
+    previousStop.distanceToStop=15.;
+    for(int i=0;i<100;++i)assert(step().empty()); // still too far away
+    previousStop.distanceToStop=1.;world.egoSpeed=2.;
+    for(int i=0;i<100;++i)assert(step().empty()); // must actually stop
+    world.egoSpeed=0.;
+    for(int i=0;i<59;++i)assert(step().empty());
+    auto props=step();props=step();
+    assert(props.size()==1 && !crosswalkHasRiskObject(crossing,world,4.,props));
+    assert(world.objects.size()==1); // do not remove collision geometry
+    world.egoSpeed=1.;previousStop={};assert(step().size()==1); // allow departure
+    world.objects.clear();assert(step().empty());
+    world.objects={actor};assert(step().size()==1); // packet omission is not a new yield
+    auto later=actor;later.raw.id=2;world.objects.push_back(later);
+    history.push_back({2,600,23,0,true,false});
+    for(int i=0;i<58;++i)assert(step().size()==1);
+    for(int i=0;i<3;++i)props=step();
+    assert(props.size()==2); // same crossing: observe the next cone without stopping anew
+    world.objects.resize(1);
+    // Position-derived motion revokes an exemption even with stale scalar GT.
+    world.objects[0].raw.speed=0.;world.objects[0].velocityValid=true;
+    world.objects[0].velocityX=.5;
+    assert(step().empty());
+    assert(crosswalkHasRiskObject(crossing,world,4.,step()));
+    world.objects[0].velocityValid=false;
+    previousStop.valid=true;previousStop.reason=StopReason::CrosswalkBlocked;
+    previousStop.sourceId=77;previousStop.distanceToStop=1.;world.egoSpeed=0.;
+    for(int i=0;i<200;++i)assert(step().empty()); // stopping again never clears the moved latch
+    world.objects.clear();assert(step().empty());world.objects={actor};
+    for(int i=0;i<100;++i)assert(step().empty()); // preserve moving latch across packet loss
+    waits.clear();
+    actor.raw.length=.45;actor.raw.width=.55;actor.raw.height=1.1;
+    actor.obb=makeObb2D(23,0,0,.45,.55);world.objects={actor};
+    for(int i=0;i<61;++i)props=step();
+    assert(props.size()==1); // dimensions are irrelevant to the simulation policy
+    propConfig.simulationCrosswalkStaticRelease=0.;
+    assert(step().empty() && waits.empty());
+    world.objects.clear();
+
+    for (double initial:{2.78,5.56,8.33,11.11}) {
+        ControlProcessData control;
+        PlanningResult plan;plan.valid=true;plan.stopDistanceValid=true;
+        plan.stopReason=StopReason::CrosswalkBlocked;
+        double speed=initial,distance=initial*initial/3.+7.;
+        world.egoSpeed=speed;
+        for(int i=0;i<1600 && speed>.005;++i) {
+            plan.stopDistance=distance;
+            plan.targetSpeed=std::min(initial,std::sqrt(3.*std::max(0.,distance-1.5)));
+            runControlProcess(control,world,plan,.05);
+            const double next=std::max(0.,speed+control.safeCommand.targetAccel*.05);
+            distance-=(speed+next)*.025;speed=next;
+            world.egoSpeed=.25*speed+.75*world.egoSpeed;
+        }
+        std::cout<<"traffic-stop initial_kph="<<initial*3.6<<" front_margin="<<distance<<'\n';
+        assert(speed<=.005 && distance>=0.0 && distance<2.0);
+    }
+    ControlProcessData normal,untouched;
+    PlanningResult plan;plan.valid=true;plan.targetSpeed=5.;
+    world.egoSpeed=2.;runControlProcess(normal,world,plan,.05);
+    plan.stopDistanceValid=true;plan.stopDistance=.1;
+    runControlProcess(untouched,world,plan,.05);
+    assert(normal.safeCommand.targetAccel==untouched.safeCommand.targetAccel);
+}
+
+void testSoleGatewayEntranceQueue() {
+    WorldState world;world.egoObb=makeObb2D(0.,0.,0.,4.8,1.9);
+    WorldObjectState bus;bus.raw.id=11;bus.raw.x=12.;bus.raw.length=12.;
+    bus.raw.width=2.5;bus.obb=makeObb2D(12.,0.,0.,12.,2.5);world.objects={bus};
+    PathGeneratorData map;map.corridorRuntime=std::make_shared<CorridorRuntime>();
+    auto& r=*map.corridorRuntime;r.activeLeg=0;
+    MissionCorridorData mission;mission.valid=true;mission.legs.resize(1);
+    auto& leg=mission.legs[0];leg.valid=true;leg.gatewayLanes={{2,0,-1}};
+    // No route-search conclusion yet: distance alone does not create a queue.
+    StopLine line;line.begin={20.,0.};line.end=line.begin;
+    map.staticZones.stopLines={line};
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission)));
+    r.gatewayQueueBlockers={11}; // completed full search found no safe passage
+    const double gap=soleGatewayQueueDistance(world,map,mission);
+    assert(std::isfinite(gap));
+    r.activeGatewayObserved=true;world.trafficLight={};
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission)));
+    r.activeGatewayObserved=false;
+    assert(soleGatewayQueueDistance(world,map,mission)==gap);
+    assert(r.soleGatewayApproachPath.empty()); // no dependency on approach adoption
+    map.staticZones.stopLines[0].begin.x=200.;
+    map.staticZones.stopLines[0].end.x=200.;
+    assert(soleGatewayQueueDistance(world,map,mission)==gap);
+    map.staticZones.stopLines.clear();
+    assert(soleGatewayQueueDistance(world,map,mission)==gap);
+    world.ego.y=3.5;world.egoObb=makeObb2D(0.,3.5,0.,4.8,1.9);
+    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission)));
+    // An approved, attached complete bypass always wins over old queue evidence.
+    for(int i=0;i<60;++i) {
+        Waypoint p;p.x=p.s=i;p.y=3.5;r.committedGlobalPath.push_back(p);
+    }
+    r.committedGlobalPathReachesGateway=true;
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission)));
+    r.committedGlobalPathReachesGateway=false;
+    world.objects[0].raw.speed=1.;
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission)));
+    world.objects[0].raw.speed=0.;leg.gatewayLanes.insert({2,0,-2});
+    assert(std::isfinite(soleGatewayQueueDistance(world,map,mission)));
+    r.gatewayQueueBlockers.clear(); // new search found a passage
+    assert(std::isinf(soleGatewayQueueDistance(world,map,mission)));
+    leg.targetLanes={{2,0,-1}};leg.targetRoadS[{2,0,-1}]=30.;
+    Waypoint a;a.roadId=1;a.laneId=-1;
+    Waypoint b=a;b.roadS=50.;
+    assert(!queuedGatewayBypassIsComplete({a,b},mission));
+    b.roadId=2;b.roadS=10.;
+    assert(!queuedGatewayBypassIsComplete({a,b},mission));
+    b.roadS=31.;
+    assert(queuedGatewayBypassIsComplete({a,b},mission));
+}
+
+void testTrajectoryIndicatorPreview() {
+    auto map=makeStraightTwoLaneMap();
+    WorldState world;world.egoLaneValid=true;world.egoRoadId=1;
+    world.egoLaneId=-1;world.ego.x=0;world.ego.y=-1.75;world.egoSpeed=4.;
+    std::vector<Waypoint> path;
+    for(int i=0;i<40;++i) {
+        Waypoint p;p.x=i;p.y=-1.75;p.s=i;p.roadS=i;p.roadId=1;p.laneId=-1;
+        path.push_back(p);
+    }
+    assert(previewTrajectoryTurnSignal(world,map,path)==0);
+    for(auto& p:path)p.y-=3.5*std::clamp((p.s-4.)/12.,0.,1.);
+    assert(previewTrajectoryTurnSignal(world,map,path)==2); // BEFORE shift at 4 m
+    for(auto& p:path)p.y=-5.25+3.5*std::clamp((p.s-4.)/12.,0.,1.);
+    world.ego.y=-5.25;world.egoLaneId=-2;
+    assert(previewTrajectoryTurnSignal(world,map,path)==1); // return direction
+    // Ordinary curved lane-centre travel is not a lane change.
+    auto& geo=map.roads.at(1).geometries.front();geo.type=GeometryType::Arc;geo.curvature=.02;
+    world.ego.y=-1.75;world.egoLaneId=-1;
+    for(auto& p:path) {
+        const auto pose=roadToWorld(map.roads.at(1),p.roadS);
+        p.x=pose.x+1.75*std::sin(pose.yaw);p.y=pose.y-1.75*std::cos(pose.yaw);p.yaw=pose.yaw;
+    }
+    assert(previewTrajectoryTurnSignal(world,map,path)==0);
+}
+
+void testIndicatorStaysOnWhileStraddling() {
+    PlanningProcessData planning;
+    WorldState world;world.egoRoadId=1769;world.egoLaneValid=true;
+    world.egoLaneWidth=2.6;world.egoLaneCenterDistance=1.3;
+    world.egoObb=makeObb2D(1.384,0,0,4.848,1.886);
+    maintainTrajectoryTurnSignal(planning,world,1,.05);
+    for(int i=0;i<200;++i) {
+        maintainTrajectoryTurnSignal(planning,world,0,.05);
+        assert(planning.trajectoryTurnSignal==1);
+    }
+    maintainTrajectoryTurnSignal(planning,world,2,.05);
+    assert(planning.trajectoryTurnSignal==2); // new shift overrides old direction
+    world.egoLaneCenterDistance=0.;
+    for(int i=0;i<21;++i)maintainTrajectoryTurnSignal(planning,world,0,.05);
+    assert(planning.trajectoryTurnSignal==0);
+    maintainTrajectoryTurnSignal(planning,world,1,.05);
+    world.egoLaneCenterDistance=1.3;world.egoRoadId=999;
+    for(int i=0;i<21;++i)maintainTrajectoryTurnSignal(planning,world,0,.05);
+    assert(planning.trajectoryTurnSignal==0); // no stale hold across unrelated roads
+}
+
+void testFullCrosswalkClearanceHold() {
+    auto map=makeStraightTwoLaneMap();
+    PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
+    auto world=makeWorldWithObstacle();world.objects.clear();world.egoSpeed=0.;
+    world.frontBumperOffset=3.8;world.frontBumperPathS=13.8;
+    Crosswalk crossing;crossing.id=77;crossing.roadId=2;
+    crossing.entryRouteS=20.;crossing.exitRouteS=26.;
+    crossing.polygon={{20,-8},{26,-8},{26,8},{20,8}};
+    map.staticZones.crosswalks={crossing};
+    StopLine stop;stop.id=88;stop.roadId=1;stop.laneIds={-1};stop.routeS=15.;
+    stop.begin={15,-3.5};stop.end={15,0};map.staticZones.stopLines={stop};
+    auto unrelated=stop;unrelated.id=89;unrelated.roadId=99;unrelated.routeS=18.;
+    map.staticZones.stopLines.push_back(unrelated);
+    auto opposite=stop;opposite.id=90;opposite.laneIds={1};opposite.routeS=19.;
+    map.staticZones.stopLines.push_back(opposite);
+    auto farther=stop;farther.id=91;farther.routeS=12.;
+    map.staticZones.stopLines.push_back(farther);
+    assert(crosswalkStopRouteS(crossing,world,map.staticZones,
+        planning.pathPlanner.waypoints,15.)==15.);
+    WorldObjectState actor;actor.raw.id=9;actor.raw.x=23.;actor.raw.y=7.9;
+    actor.raw.length=.5;actor.raw.width=.6;actor.raw.height=1.7;
+    actor.obb=makeObb2D(23,7.9,0,.5,.6);world.objects={actor};
+    GtFrame gt;gt.ego=world.ego;
+    const auto step=[&](double dt) {runPlanningProcess(planning,gt,world,map,dt);};
+    for(int i=0;i<80;++i) {
+        step(.05);
+        assert(planning.result.stopReason==StopReason::CrosswalkBlocked);
+        assert(planning.result.targetSpeed==0.);
+        assert(std::abs(planning.result.stopDistance-1.2)<1e-6);
+    }
+    world.objects[0].raw.y=8.2;
+    world.objects[0].obb=makeObb2D(23,8.2,0,.5,.6);step(.05);
+    assert(planning.result.targetSpeed==0.); // far-side body still overlapping
+    world.objects.clear();step(.05);
+    for(int i=0;i<18;++i) {step(.05);assert(planning.result.targetSpeed==0.);}
+    // Another person entering anywhere on the crossing restarts the hold.
+    world.objects={actor};step(.05);assert(planning.result.targetSpeed==0.);
+    world.objects.clear();step(.05);
+    for(int i=0;i<21;++i)step(.05);
+    assert(planning.result.stopReason==StopReason::None);
+    assert(planning.result.targetSpeed>0.);
+}
+
+void testSettledStraightManeuverSpeedCap() {
+    LaneChangeConfig lane;PlanningBehaviorConfig config;
+    LaneChangeData maneuver;maneuver.phase=LaneChangePhase::Execute;
+    maneuver.shiftCompletedLaneValid=true;maneuver.shiftCompletedLane={1,0,-1};
+    WorldState world;world.ego.x=10.;world.egoLaneValid=true;
+    world.egoRoadId=1;world.egoLaneId=-1;world.egoLaneCenterDistance=0.;
+    std::vector<Waypoint> path;
+    for(int i=0;i<=100;++i){Waypoint p;p.x=p.s=i;p.roadId=1;p.laneId=-1;path.push_back(p);}
+    const double slow=lane.maximumLaneChangeSpeed,fast=40./3.6;
+    const auto cap=[&]{return settledStraightManeuverSpeedCap(maneuver,world,path,
+        fast,lane.latticeObstacleClearance,lane,config);};
+    assert(std::abs(cap()-fast)<1e-6);
+    WorldObjectState obstacle;obstacle.raw.x=25.;obstacle.raw.length=4.;obstacle.raw.width=2.;
+    world.objects={obstacle};assert(cap()==slow);
+    world.objects[0].raw.x=100.;assert(cap()==fast);
+    world.objects.clear();world.egoLaneCenterDistance=.8;assert(cap()==slow);
+    world.egoLaneCenterDistance=0.;maneuver.phase=LaneChangePhase::Prepare;assert(cap()==slow);
+    maneuver.phase=LaneChangePhase::Execute;maneuver.waitingForReturn=true;assert(cap()==slow);
+    maneuver.waitingForReturn=false;
+    assert(settledStraightManeuverSpeedCap(maneuver,world,path,fast,.05,lane,config)==slow);
+    // Upcoming shift/end shortens acceleration room before Ego reaches it.
+    for(std::size_t i=35;i<path.size();++i)path[i].y=1.;
+    assert(cap()>slow && cap()<fast);
+    for(std::size_t i=15;i<path.size();++i)path[i].y=1.;
+    assert(cap()==slow);
+}
+
+void testYellowAndFlashingRedStops() {
+    struct Scene {
+        PathGeneratorData map{makeStraightTwoLaneMap()};
+        PlanningProcessData planning;
+        WorldState world{makeWorldWithObstacle()};
+        Scene() {
+            planning.pathPlanner=makeStraightGlobalPath();
+            planning.config.simulationCrosswalkStaticRelease=1.;
+            planning.config.simulationProgressRecovery=1.;
+            world.objects.clear();world.egoSpeed=0.;world.frontBumperOffset=3.8;
+            world.trafficLight.id=42;world.trafficLight.state=6;
+            StopLine stop;stop.id=88;stop.controllerId=42;stop.roadId=1;
+            stop.laneIds={-1};stop.routeS=15.;
+            stop.begin={15.,-3.5};stop.end={15.,0.};
+            map.staticZones.stopLines={stop};
+            map.staticZones.flashingRedControllerIds={42};
+            Crosswalk crossing;crossing.id=77;crossing.roadId=1;
+            crossing.entryRouteS=20.;crossing.exitRouteS=26.;
+            crossing.polygon={{20.,-8.},{26.,-8.},{26.,8.},{20.,8.}};
+            map.staticZones.crosswalks={crossing};
+        }
+        void step(double dt=.05) {
+            world.receiveTime+=dt;GtFrame gt;gt.ego=world.ego;
+            runPlanningProcess(planning,gt,world,map,dt);
+        }
+        void distance(double d) {
+            world.frontBumperPathS=15.-d;
+            world.egoRoadS=world.egoPathS=world.frontBumperPathS-3.8;
+            world.ego.x=world.egoPathS;
+            world.egoObb=makeObb2D(world.ego.x+1.3725,-1.75,0.,4.855,1.88);
+        }
+    };
+    for(double distance:{1.2,2.9,15.}) {
+        Scene yellow;yellow.distance(distance);yellow.world.egoSpeed=4.2;
+        yellow.world.trafficLight.state=2;yellow.step();
+        assert(yellow.planning.result.stopReason==StopReason::RedLight);
+        const double target=yellow.planning.result.targetSpeed;
+        yellow.world.trafficLight.state=1;yellow.step();
+        assert(yellow.planning.result.stopReason==StopReason::RedLight);
+        assert(std::abs(yellow.planning.result.targetSpeed-target)<1e-9);
+        yellow.world.trafficLight.state=3;yellow.step();
+        assert(yellow.planning.result.stopReason==StopReason::None);
+    }
+    for(double distance:{0.,1.2,1.9,2.0}) {
+        Scene empty;empty.distance(distance);
+        for(int i=0;i<9;++i) {empty.step();assert(!empty.planning.stopManager.hold.holdSatisfied);}
+        empty.step();assert(empty.planning.stopManager.hold.holdSatisfied);
+        assert(empty.planning.result.stopReason==StopReason::None);
+        assert(empty.planning.result.targetSpeed>0.);
+        empty.world.egoSpeed=1.;empty.step();
+        assert(empty.planning.result.stopReason==StopReason::None); // one stop suffices
+        empty.world.trafficLight.state=0;empty.step();
+        empty.world.trafficLight.state=6;empty.step();
+        assert(empty.planning.result.stopReason==StopReason::None); // packet gap is not another stop
+        empty.map.staticZones.stopLines.front().id=89;empty.world.egoSpeed=0.;empty.step();
+        assert(!empty.planning.stopManager.hold.holdSatisfied); // another line needs its own stop
+    }
+    for(double distance:{-.1,2.01,4.}) {
+        Scene outside;outside.distance(distance);
+        for(int i=0;i<25;++i)outside.step();
+        assert(!outside.planning.stopManager.hold.holdSatisfied);
+        assert(outside.planning.result.stopReason==StopReason::FlashingRed);
+    }
+    Scene interrupted;interrupted.distance(1.2);
+    for(int i=0;i<6;++i)interrupted.step();
+    interrupted.world.egoSpeed=.1;interrupted.step();
+    assert(interrupted.planning.stopManager.hold.stoppedTime==0.);
+    interrupted.world.egoSpeed=0.;
+    for(int i=0;i<9;++i)interrupted.step();
+    assert(!interrupted.planning.stopManager.hold.holdSatisfied);
+    interrupted.step();assert(interrupted.planning.stopManager.hold.holdSatisfied);
+    Scene delayed;delayed.distance(1.2);delayed.step(3.);
+    assert(!delayed.planning.stopManager.hold.holdSatisfied);
+    Scene unspecified;unspecified.map.staticZones.flashingRedControllerIds.clear();
+    unspecified.step();assert(unspecified.planning.result.stopReason==StopReason::FlashingRed);
+    Scene pedestrian;pedestrian.distance(1.2);
+    WorldObjectState actor;actor.raw.id=9;actor.raw.x=23.;actor.raw.y=7.9;
+    actor.raw.length=.5;actor.raw.width=.6;actor.raw.height=1.7;
+    actor.obb=makeObb2D(23.,7.9,0.,.5,.6);pedestrian.world.objects={actor};
+    for(int i=0;i<100;++i) {
+        pedestrian.step();assert(pedestrian.planning.result.targetSpeed==0.);
+    }
+    assert(pedestrian.planning.stopManager.hold.holdSatisfied);
+    assert(pedestrian.planning.result.stopReason==StopReason::CrosswalkBlocked);
+    pedestrian.world.objects.front().raw.y=8.2;
+    pedestrian.world.objects.front().obb=makeObb2D(23.,8.2,0.,.5,.6);
+    pedestrian.step();assert(pedestrian.planning.result.targetSpeed==0.); // body still overlaps
+    pedestrian.world.objects.clear();
+    for(int i=0;i<22;++i)pedestrian.step(); // existing crossing clearance margin
+    assert(pedestrian.planning.result.stopReason==StopReason::None);
+    assert(pedestrian.planning.result.targetSpeed>0.);
+}
+
+void testRecoveryApproachesSignalStopLine() {
+    // Missing ordinary geometry must not turn a distant signal plan into
+    // immediate braking. Exercise the planner and final actuator together.
+    for (int signal : {1, 2, 6}) {
+        PathGeneratorData map;
+        StopLine stop; stop.id=88; stop.controllerId=42; stop.roadId=1;
+        stop.laneIds={-1}; stop.routeS=60.;
+        stop.begin={60.,-3.5}; stop.end={60.,0.};
+        map.staticZones.stopLines={stop};
+        PlanningProcessData planning;
+        planning.config.simulationProgressRecovery=1.;
+        planning.config.progressRecoveryStopTimeout=.2;
+        planning.config.progressRecoverySpeed=5./3.6;
+        planning.config.comfortableDeceleration=1.5;
+        planning.progressRecovery.active=true;
+        planning.progressRecovery.missionLeg=planning.missionCorridor.activeLegIndex;
+        planning.progressRecovery.planner=makeStraightGlobalPath();
+        // The recovery path has a different station origin from the guide.
+        // Regulatory distance must remain in the sensed guide coordinates.
+        for (auto& p:planning.progressRecovery.planner.waypoints) p.s+=1000.;
+        auto world=makeWorldWithObstacle(); world.objects.clear();
+        world.frontBumperOffset=3.8; world.egoSpeed=5./3.6;
+        world.trafficLight.id=42; world.trafficLight.state=3;
+        ControlProcessData control;
+        const auto step=[&] {
+            world.receiveTime+=.05;
+            world.egoRoadS=world.egoPathS=world.ego.x;
+            world.frontBumperPathS=world.egoPathS+world.frontBumperOffset;
+            world.egoObb=makeObb2D(world.ego.x+1.3725,-1.75,0.,4.855,1.88);
+            GtFrame gt; gt.ego=world.ego;
+            runPlanningProcess(planning,gt,world,map,.05);
+            runControlProcess(control,world,planning.result,.05);
+        };
+        step();
+        assert(planning.result.progressRecoveryActive && planning.result.targetSpeed>.05);
+        world.trafficLight.state=signal;
+        step();
+        assert(planning.result.progressRecoveryActive && planning.result.targetSpeed>.05);
+        assert(planning.result.stopDistanceValid);
+        assert(std::abs(planning.result.stopDistance-46.2)<1e-5);
+        assert(planning.result.stopReason==(signal==6?StopReason::FlashingRed:StopReason::RedLight));
+        assert(control.latestCommand.targetAccel>=-.01);
+        bool stoppedAtLine=false;
+        for (int i=0;i<1400;++i) {
+            step();
+            const double distance=60.-world.frontBumperPathS;
+            assert(planning.result.stopDistanceValid);
+            assert(std::abs(planning.result.stopDistance-distance)<1e-5);
+            assert(!planning.result.emergencyBrake);
+            assert(distance>=0.);
+            if (distance>2.) {
+                assert(planning.result.targetSpeed>.05);
+                assert(world.egoSpeed>.05);
+            }
+            if (world.egoSpeed<=.01 && planning.result.targetSpeed<=.05) {
+                assert(distance<=2.);
+                stoppedAtLine=true;
+                std::cout<<"recovery signal="<<signal<<" front_bumper_distance="<<distance<<'\n';
+                break;
+            }
+            const double nextSpeed=std::max(0.,world.egoSpeed+control.latestCommand.targetAccel*.05);
+            world.ego.x+=.5*(world.egoSpeed+nextSpeed)*.05;
+            world.egoSpeed=nextSpeed;
+        }
+        assert(stoppedAtLine);
+        if (signal==6) {
+            for (int i=0;i<5;++i) {step();assert(!planning.stopManager.hold.holdSatisfied);}
+            for (int i=0;i<10;++i) step();
+            assert(planning.stopManager.hold.holdSatisfied);
+        } else {
+            for (int i=0;i<40;++i) {
+                step();
+                assert(planning.result.targetSpeed==0.);
+                assert(control.latestCommand.targetAccel<0.);
+            }
+            world.trafficLight.state=3;
+        }
+        for (int i=0;i<20;++i) step();
+        assert(planning.result.stopReason==StopReason::None);
+        assert(planning.result.targetSpeed>.05 && control.latestCommand.targetAccel>0.);
+    }
+}
+
+void testUnmarkedCrossingMotionAndStationaryAvoidance() {
+    struct Scene {
+        PathGeneratorData map{makeStraightTwoLaneMap()};
+        PlanningProcessData planning;
+        WorldState world{makeWorldWithObstacle()};
+        ControlProcessData control;
+        Scene() {
+            planning.pathPlanner=makeStraightGlobalPath();
+            planning.config.simulationProgressRecovery=1.;
+            planning.config.progressRecoveryStopTimeout=.2;
+            world.objects.clear();world.egoSpeed=5.;world.egoLaneWidth=3.5;
+            world.frontBumperOffset=3.8;
+            WorldObjectState actor;actor.raw.id=91;actor.raw.x=28.;actor.raw.y=3.;
+            actor.raw.heading=-1.57079632679;actor.raw.length=.5;actor.raw.width=.6;actor.raw.height=1.7;
+            actor.velocityValid=true;actor.velocityY=-1.3;
+            world.objects={actor};
+        }
+        void step(double dt=.05) {
+            world.receiveTime+=dt;
+            for(auto& actor:world.objects) {
+                actor.obb=makeObjectObb(actor.raw);
+                actor.pathValid=actor.laneValid=true;actor.roadId=1;
+                actor.laneId=actor.raw.y < -3.5 ? -2 : -1;
+                actor.pathS=actor.raw.x;actor.pathD=actor.raw.y+1.75;
+                actor.relativeS=actor.pathS-world.egoPathS;actor.relativeD=actor.pathD;
+                actor.isAhead=actor.relativeS>0.;actor.isOnEgoPath=std::abs(actor.pathD)<1.75;
+            }
+            GtFrame gt;gt.ego=world.ego;
+            runPlanningProcess(planning,gt,world,map,dt);
+            runControlProcess(control,world,planning.result,dt);
+        }
+        void assertYield() {
+            assert(!planning.crossingObjectYields.empty());
+            assert(planning.result.emergencyBrake && planning.result.targetSpeed==0.);
+            assert(!planning.result.progressRecoveryActive && control.latestCommand.targetAccel<0.);
+        }
+    };
+    Scene crossing;
+    // Outside any mapped crosswalk, scalar speed can still be zero on the
+    // first movement frame; the measured vector must trigger the yield.
+    crossing.step();crossing.assertYield();
+    crossing.world.egoSpeed=0.;
+    for(int i=0;i<90;++i) {
+        crossing.world.objects[0].raw.y-=.06;
+        crossing.step();crossing.assertYield();
+    }
+    crossing.world.objects[0].raw.y=-3.65;
+    crossing.step();crossing.assertYield(); // rear of OBB still inside lane
+    crossing.world.objects[0].raw.y=-4.;
+    for(int i=0;i<20;++i)crossing.step();
+    assert(crossing.planning.crossingObjectYields.empty());
+    assert(!crossing.planning.result.emergencyBrake && crossing.planning.result.targetSpeed>.05);
+
+    Scene stopped;stopped.step();stopped.assertYield();stopped.world.egoSpeed=0.;
+    auto& actor=stopped.world.objects[0];actor.raw.y=-1.75;actor.velocityY=0.;
+    stopped.step();
+    for(int i=0;i<13;++i) {stopped.step();stopped.assertYield();}
+    for(int i=0;i<40;++i)stopped.step();
+    assert(stopped.planning.crossingObjectYields.empty());
+    assert(!stopped.planning.result.emergencyBrake);
+    assert(stopped.planning.result.targetSpeed>.05 && stopped.planning.result.localPath.valid);
+    assert(corridorTrackingPathIsSafe(stopped.planning.result.localPath.points,
+        stopped.world,0.,nullptr,&stopped.planning.config,&stopped.map));
+    bool detour=false;
+    for(const auto& p:stopped.planning.result.localPath.points) detour=detour || std::abs(p.y+1.75)>.5;
+    assert(detour); // stationary means avoid the body, never ignore it
+    actor.velocityY=-1.3;stopped.step();stopped.assertYield();
+
+    Scene multiple;auto second=multiple.world.objects[0];second.raw.id=92;second.raw.x=32.;
+    multiple.world.objects.push_back(second);multiple.step();multiple.world.egoSpeed=0.;
+    multiple.world.objects[0].velocityY=0.;
+    for(int i=0;i<40;++i) {multiple.step();multiple.assertYield();}
+    assert(multiple.planning.crossingObjectYields.size()==1);
+    assert(multiple.planning.crossingObjectYields.front().id==92);
+    // A missing packet cannot turn a recently moving actor into a static prop.
+    auto saved=multiple.world.objects;multiple.world.objects.clear();
+    for(int i=0;i<3;++i) {multiple.step();multiple.assertYield();}
+    saved[1].velocityY=0.;multiple.world.objects=saved;
+    for(int i=0;i<10;++i) {multiple.step();multiple.assertYield();}
+
+    Scene parallel;parallel.world.objects[0].velocityY=0.;parallel.world.objects[0].velocityX=1.;
+    parallel.step();assert(parallel.planning.crossingObjectYields.empty());
+    Scene distant;distant.world.objects[0].raw.x=85.;distant.step();
+    assert(distant.planning.crossingObjectYields.empty());
+    Scene delayed;delayed.step();delayed.world.egoSpeed=0.;
+    delayed.world.objects[0].velocityY=0.;delayed.step(3.);delayed.assertYield();
+}
+
+void testStationaryCrosswalkWaitReleasesOnlyYield() {
+    auto map=makeStraightTwoLaneMap();
+    PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
+    planning.config.simulationCrosswalkStaticRelease=1.;
+    auto world=makeWorldWithObstacle();world.objects.clear();world.egoSpeed=0.;
+    world.frontBumperOffset=3.8;world.frontBumperPathS=13.8;
+    Crosswalk crossing;crossing.id=77;crossing.roadId=2;
+    crossing.entryRouteS=20.;crossing.exitRouteS=26.;
+    crossing.polygon={{20,-8},{26,-8},{26,8},{20,8}};
+    map.staticZones.crosswalks={crossing};
+    StopLine stop;stop.id=88;stop.roadId=1;stop.laneIds={-1};stop.routeS=15.;
+    stop.begin={15,-3.5};stop.end={15,0};map.staticZones.stopLines={stop};
+    WorldObjectState prop;prop.raw.id=38;prop.raw.x=23.;prop.raw.y=7.9;
+    prop.raw.length=1.2;prop.raw.width=1.2;prop.raw.height=1.28;
+    prop.obb=makeObb2D(23,7.9,0,1.2,1.2);world.objects={prop};
+    GtFrame gt;gt.ego=world.ego;
+    const auto step=[&] {runPlanningProcess(planning,gt,world,map,.05);};
+    for(int i=0;i<59;++i) {
+        step();assert(planning.result.stopReason==StopReason::CrosswalkBlocked);
+        assert(planning.result.targetSpeed==0.);
+    }
+    for(int i=0;i<30;++i)step(); // confirmation plus existing clearance hold
+    assert(planning.result.stopReason==StopReason::None);
+    assert(planning.result.targetSpeed>0. && world.objects.size()==1);
+    auto pedestrian=prop;pedestrian.raw.id=9;pedestrian.raw.length=.5;
+    pedestrian.raw.width=.6;pedestrian.raw.height=1.7;
+    pedestrian.raw.speed=.2;
+    pedestrian.obb=makeObb2D(23,7.9,0,.5,.6);world.objects.push_back(pedestrian);
+    for(int i=0;i<120;++i) {
+        step();assert(planning.result.stopReason==StopReason::CrosswalkBlocked);
+        assert(planning.result.targetSpeed==0.);
+        world.objects.back().raw.speed=0.; // once seen moving, wait even if it pauses
+    }
+}
+
+int main(int argc, char** argv) {
+    if(argc==2 && std::string(argv[1])=="--unmarked-crossing-yield") {
+        testUnmarkedCrossingMotionAndStationaryAvoidance();
+        std::cout<<"unmarked crossing / full-body clearance / stationary avoidance / restart PASS\n";
+        return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--recovery-signal-approach") {
+        testRecoveryApproachesSignalStopLine();
+        std::cout<<"recovery signal approach / bumper stop / release PASS\n";
+        return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--signal-stop-policy") {
+        testYellowAndFlashingRedStops();
+        std::cout<<"yellow stop / flashing red continuous stop / pedestrian clearance PASS\n";
+        return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--consumed-path") {
+        testConsumedPathDoesNotSteerBackwards();
+        testDetachedStoredPlanArmsRecovery();
+        testPreviousLocalPathBridgesOneFrameSectionRebuildFailure();
+        std::cout<<"consumed path steering / recovery PASS\n";return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--contact-progress") {
+        testStationaryContactRecoveryKeepsDriving();
+        std::cout<<"stationary contact / positive actuator command / emergency override PASS\n";
+        return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--gateway-queue") {
+        testSoleGatewayEntranceQueue();
+        std::cout<<"gateway queue / adjacent lane / upstream obstacle PASS\n";return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--progress-recovery-handoff") {
+        testProgressRecoveryYieldsToUsableOrdinaryPath();
+        testDetachedStoredPlanArmsRecovery();
+        std::cout << "progress recovery / ordinary path authority PASS\n";
+        return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--recovery-stop-edges") {
+        testSimulationRecoveryStopEdgeCases();
+        std::cout<<"simulation recovery / repeated EBS / exhausted geometry / unsignalized queue PASS\n";
+        return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--gateway-route-handoff") {
+        testCommittedGatewayRouteHandoff();
+        testGatewayHandoffChecksAttachedConnectorAndFullTail();
+        std::cout << "committed gateway route / continuous Execute handoff PASS\n";
+        return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--crosswalk-indicator") {
+        testCrosswalkUsersAndStopDistanceGuard();
+        testSoleGatewayEntranceQueue();
+        testTrajectoryIndicatorPreview();
+        testIndicatorStaysOnWhileStraddling();
+        testFullCrosswalkClearanceHold();
+        testStationaryCrosswalkWaitReleasesOnlyYield();
+        testSettledStraightManeuverSpeedCap();
+        std::cout<<"crosswalk / stop-distance / trajectory indicators PASS\n";
+        return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--safe-tail-stopline") {
+        testSafeAvoidanceSuccessorAndPhysicalStopLine();
+        std::cout<<"safe avoidance successor / physical stop-line deadline PASS\n";
+        return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--dense-static-speed") {
+        PlanningBehaviorConfig config;BehaviorState state;BehaviorDecision output;
+        WorldState world;world.egoSpeed=15.0/3.6;
+        ConstraintSet constraints;constraints.speedLimit=45.0/3.6;
+        StopDecision stop;
+        auto add=[&](int id,double x,double y,double speed=0.) {
+            WorldObjectState o;o.raw.id=id;o.raw.x=x;o.raw.y=y;o.raw.speed=speed;
+            world.objects.push_back(o);
+        };
+        auto step=[&](double dt=.05) {updateBehavior(state,output,constraints,stop,world,15.0/3.6,config,dt);};
+        add(1,20,0);step();assert(output.targetSpeed>10.0/3.6);
+        add(2,27,3);state.staticObstacleAvoidanceActive=true;state.safelyAvoidedObjectId=1;
+        step();assert(std::abs(output.targetSpeed-10.0/3.6)<1e-9);
+        // Ending a manoeuvre or passing the first obstacle must not release
+        // the cap while the last obstacle remains ahead.
+        state.staticObstacleAvoidanceActive=false;state.safelyAvoidedObjectId=-1;
+        world.objects.erase(world.objects.begin());step(4.0);
+        assert(std::abs(output.targetSpeed-10.0/3.6)<1e-9);
+        stop.valid=true;stop.reason=StopReason::RedLight;stop.distanceToStop=0;
+        step();assert(output.targetSpeed==0);
+        stop.valid=false;constraints.speedLimit=5.0/3.6;
+        step();assert(output.targetSpeed<=5.0/3.6);
+        constraints.speedLimit=45.0/3.6;world.objects.clear();step(2.0);
+        assert(std::abs(output.targetSpeed-10.0/3.6)<1e-9);
+        step(1.1);assert(output.targetSpeed>10.0/3.6);
+        // Nearby moving objects and a distant static pair cannot latch it.
+        state={};add(1,20,0,2);add(2,23,3,2);step();assert(state.denseStaticHoldRemaining==0);
+        world.objects.clear();add(1,50,0);add(2,53,3);step();assert(state.denseStaticHoldRemaining==0);
+        // Reconstructed final M09 cluster, not a scenario-specific rule.
+        world.objects.clear();world.ego.x=844.403931;world.ego.y=-861.675598;world.ego.heading=-2.46779799;
+        add(11,820.611267,-880.5578);add(3,815.65717,-884.31207);add(16,821.073,-875.6166);
+        step();assert(std::abs(output.targetSpeed-10.0/3.6)<1e-9);
+        std::cout<<"dense static speed regression: PASS\n";return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--school-zone-approach") {
+        PathPlannerConfig planner;
+        PlanningBehaviorConfig behavior;
+        planner.schoolZoneSpeed = 20.0 / 3.6;
+        planner.schoolZoneApproachSpeed = 25.0 / 3.6;
+        behavior.comfortableDeceleration = 0.8;
+        behavior.schoolZoneApproachDistance = 20.0;
+        behavior.schoolZoneApproachReactionTime = 0.5;
+        const auto limit = [&](double distance, double speed = 40.0 / 3.6) {
+            return schoolZoneApproachSpeedLimit(planner, behavior, distance, speed);
+        };
+        assert(limit(100.0) > 40.0 / 3.6);
+        assert(limit(70.0) < 40.0 / 3.6);
+        assert(limit(20.0) <= 25.0 / 3.6);
+        assert(std::abs(limit(0.0) - 20.0 / 3.6) < 1e-9);
+        for (double distance = 1.0; distance < 100.0; distance += 1.0)
+            assert(limit(distance) >= limit(distance - 1.0));
+        assert(limit(40.0, 40.0 / 3.6) < limit(40.0, 20.0 / 3.6));
+        behavior.comfortableDeceleration = 1.5; // Current YAML setting.
+        assert(limit(51.0) > 40.0 / 3.6);
+        assert(limit(50.0) < 40.0 / 3.6);
+        // A lower obstacle/turn/traffic cap remains lower, never raised to 25.
+        assert(std::min(15.0 / 3.6, limit(20.0)) == 15.0 / 3.6);
+        behavior.schoolZoneApproachDistance = 0.0;
+        behavior.schoolZoneApproachReactionTime = 0.0;
+        behavior.comfortableDeceleration = 0.8;
+        assert(std::abs(limit(40.0) - std::sqrt(std::pow(20.0 / 3.6, 2) +
+            2.0 * 0.8 * 40.0)) < 1e-9);
+        std::cout << "school zone approach profile: PASS\n";
+        return 0;
+    }
+    // Focused regression entry point; the default still runs every test and
+    // reports the pre-existing close-moving-lead assertion failure.
+    if (argc == 2 && std::string(argv[1]) == "--preserved-safety") {
+        testRecoveryDoesNotCommandAStop();
+        testEmergencyBrakingLatchesEntrySteering();
+        testPositiveCrawlTargetDoesNotLatchStop();
+        testTrafficControllerParsing();
+        testRdbSimulationTimeMatchesGtInFrameOrder();
+        testStaticZoneRouteAlignment();
+        testScenarioRoutesKeepTheirOwnCrosswalksAndSchoolZone();
+        testPredictedCollisionIsNotCurrentCollision();
+        testConvergingOncomingVehicleIsPredictedOutsideNarrowCorridor();
+        testStaticObstacleFollowNeverCommandsZero();
+        testCrossTrafficWaitingVehicleCapsBeforeLaunch();
+        testMeasuredReverseObjectMotionDrivesPrediction();
+        std::cout << "preserved-safety subset: PASS (12 tests; not the full suite)\n";
+        return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--prepared-avoidance") {
+        testPreparedLaneChangeCancelsWhenBlockerMoves();
+        testPreparedAvoidanceRequiresClearedContinuousSuccessor();
+        std::cout << "prepared avoidance live-blocker/continuous-successor: PASS\n";
+        return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--traffic-stop-regression") {
+        testLaneChangeExecutionBlockedByTrafficStops();
+        return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--mission-corridors") {
+        testMixedCheckpointMissionsUseEntryExitCorridors();
+        std::cout << "sequential mission corridor regression: PASS\n";
+        return 0;
+    }
+    testRecoveryDoesNotCommandAStop();
+    testEmergencyBrakingLatchesEntrySteering();
+    testPositiveCrawlTargetDoesNotLatchStop();
+    testTrafficControllerParsing();
+    testRdbSimulationTimeMatchesGtInFrameOrder();
+    testStaticZoneRouteAlignment();
+    testSchoolZoneReferencePointConfig();
+    testScenarioRoutesKeepTheirOwnCrosswalksAndSchoolZone();
+    testPredictedCollisionIsNotCurrentCollision();
+    testConvergingOncomingVehicleIsPredictedOutsideNarrowCorridor();
+    testCloseMovingLeadMayCommandStop();
+    testBlockedReturnUsesWaitingSpeedUntilCollisionIsUrgent();
+    testMovingReturnConflictCanClearAtWaitingSpeed();
+    testObstacleLaneChange();
+    testBlockedAdjacentLanesPreferFartherObstacle();
+    testSolidLineForbidsObstacleLaneChange();
+    testAvoidanceLaneMustConnectToNextRoad();
+    testRoadIdTrackingKeepsCurrentLaneInsideRoad();
+    testStaticObstacleFollowNeverCommandsZero();
+    testLaneChangeWhenAdjacentLaneStartsAhead();
+    testO01ObstacleRoadLaneMerge();
+    testO02RouteSectionComesFromMapRoadS();
+    testO04RouteSectionComesFromMapRoadS();
+    testLaneChangeExecutionBlockedByTrafficStops();
+    testActivePathProjectionDoesNotRequireGuideRoute();
+    testPreviousLocalPathBridgesOneFrameSectionRebuildFailure();
+    testLaneChangeAcrossRenumberedLaneSection();
+    testLimitedLateralOffsetAvoidance();
+    testKeepTargetLaneWhenItRejoinsNextRoad();
+    testKeepTargetReconnectSmoothsOffsetRoute();
+    testM05AvoidanceReconnectHasTrackableGeometry();
+    testM08StaticBlockerChoosesFreeLaneBeforeRoadConnection();
+    testM08DenseSecondBlockerUsesSafeLongitudinalSample();
+    testM09DenseFutureRoadChecksEntireStaticManeuver();
+    testM10StaggeredBlockersUseForwardLaneTopology();
+    testNearbyAdjacentVehicleCapsSpeedBeforeCutIn();
+    testLeadBrakingUsesRelativeStoppingDistance();
+    testPreparedLaneChangeCancelsWhenBlockerMoves();
+    testPreparedAvoidanceRequiresClearedContinuousSuccessor();
+    testCommittedGatewayRouteHandoff();
+    testProgressRecoveryYieldsToUsableOrdinaryPath();
+    testGatewayHandoffChecksAttachedConnectorAndFullTail();
+    testStationaryAdjacentVehicleUsesShortRangeCaution();
+    testCrossTrafficWaitingVehicleCapsBeforeLaunch();
+    testMeasuredReverseObjectMotionDrivesPrediction();
+    testCloserVehicleConstraintOverridesFarStopPlan();
+    testSafeAvoidanceIgnoresStaticSiblingObstacles();
+    testSharpCurveHasSeparateSpeed();
+    testNearestWaypointCannotJumpToOverlappingFutureBranch();
+    testLaneGraphDoesNotInventMissingSectionLink();
+    testMixedCheckpointRoutesHaveValidGeometry();
+    testMixedCheckpointMissionsUseEntryExitCorridors();
+    testM11DisplacedEgoStillGetsContinuousLocalPath();
+    std::cout << "controller_logic_tests: PASS\n";
+    return 0;
+}

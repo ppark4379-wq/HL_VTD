@@ -3626,8 +3626,6 @@ bool prepareCorridorProgressRecovery(
     std::vector<RecoveryObject> objects;
     objects.reserve(world.objects.size());
     for (const auto& object : world.objects) {
-        const bool vulnerable = object.raw.length <= 2.5 &&
-            object.raw.width <= 1.5 && object.raw.height >= 1.;
         const bool confirmed = std::find(confirmedStationaryObjectIds.begin(),
             confirmedStationaryObjectIds.end(), static_cast<int>(object.raw.id)) !=
             confirmedStationaryObjectIds.end();
@@ -3639,7 +3637,9 @@ bool prepareCorridorProgressRecovery(
             object.raw.y + vy * behavior.collisionPredictionHorizon,
             object.raw.heading, object.raw.length, object.raw.width) : object.obb;
         // Immutable for this search invocation only; no stale-scene cache.
-        objects.push_back({&object, moving, moving || !confirmed || vulnerable, vx, vy,
+        const bool baselineVulnerable = !behavior.changedDefaultModel &&
+            object.raw.length <= 2.5 && object.raw.width <= 1.5 && object.raw.height >= 1.;
+        objects.push_back({&object, moving, moving || !confirmed || baselineVulnerable, vx, vy,
             recoveryBounds(object.obb), horizonBox, recoveryBounds(horizonBox)});
     }
     const auto consider = [&](std::vector<Waypoint> path, const char* source, bool incumbent = false) {

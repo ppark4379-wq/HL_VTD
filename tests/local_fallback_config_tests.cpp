@@ -97,11 +97,72 @@ int main() {
         const std::string repositorySource((std::istreambuf_iterator<char>(input)), {});
         TemporaryConfig file;
 
+        const auto selectModel=[](std::string text,const std::string& name) {
+            const auto start=text.find("model:");
+            require(start!=std::string::npos,"model selector not found");
+            const auto end=text.find('\n',start);
+            text.replace(start,end-start,"model: "+name);
+            return text;
+        };
+        const auto withoutModel=[](std::string text) {
+            const auto start=text.find("model:");
+            const auto end=text.find('\n',start);
+            text.erase(start,end-start+1);return text;
+        };
+        DrivingConfig baseline,named;
+        require(file.load(repositorySource,baseline) && baseline.model==DrivingModel::Default,
+                "repository must use named default");
+        for(const auto& name:{"default","change_default","traffic_light","speed_default","speed_traffic_light"}) {
+            require(file.load(selectModel(repositorySource,name),named),"named model rejected");
+            const bool fast=std::string(name).find("speed_")==0;
+            const bool signal=std::string(name).find("traffic_light")!=std::string::npos;
+            require(named.behavior.trafficSignalModel==(signal?1.:0.),"wrong signal model composition");
+            require(named.behavior.changedDefaultModel==(std::string(name)!="default"),
+                    "baseline and changed model behavior leaked across profiles");
+            require(std::abs(named.laneChange.localFallbackSpeed-(fast?10./3.6:baseline.laneChange.localFallbackSpeed))<1e-9,
+                    "local recovery speed model not applied");
+            require(std::abs(named.behavior.progressRecoverySpeed-(fast?10./3.6:baseline.behavior.progressRecoverySpeed))<1e-9,
+                    "progress recovery speed model not applied");
+            require(std::abs(named.planner.sharpCurveSpeed-(fast?10./3.6:baseline.planner.sharpCurveSpeed))<1e-9,
+                    "sharp-curve target remains below requested floor");
+            require(named.planner.straightSpeed==baseline.planner.straightSpeed &&
+                    named.planner.curveSpeed==baseline.planner.curveSpeed &&
+                    named.planner.schoolZoneSpeed==baseline.planner.schoolZoneSpeed &&
+                    named.planner.maximumLateralAcceleration==baseline.planner.maximumLateralAcceleration &&
+                    named.laneChange.maximumLaneChangeSpeed==baseline.laneChange.maximumLaneChangeSpeed &&
+                    named.laneChange.localFallbackOpenSpeed==baseline.laneChange.localFallbackOpenSpeed &&
+                    named.runtime.maxValidPositionSpeed==baseline.runtime.maxValidPositionSpeed,
+                    "speed model changed a general or physical upper limit");
+            require(named.behavior.stopHoldTime==baseline.behavior.stopHoldTime &&
+                    named.behavior.stoppedSpeedThreshold==baseline.behavior.stoppedSpeedThreshold &&
+                    named.behavior.emergencyTTC==baseline.behavior.emergencyTTC &&
+                    named.behavior.trafficStopPositionMargin==baseline.behavior.trafficStopPositionMargin,
+                    "speed model changed stop/EBS settings");
+        }
+        require(file.load(selectModel(repositorySource,"speed_traffic_light"),named) &&
+                file.load(selectModel(repositorySource,"default"),named) &&
+                named.behavior.progressRecoverySpeed==baseline.behavior.progressRecoverySpeed &&
+                named.behavior.progressRecoveryMaxSpeed==baseline.behavior.progressRecoveryMaxSpeed &&
+                named.behavior.trafficSignalModel==0. && !named.behavior.changedDefaultModel,
+                "switching back retained model overrides");
+        for(const auto& invalid:{"fast","2","speed",""})
+            require(!file.load(selectModel(repositorySource,invalid),named),"invalid named model accepted");
+        require(file.load(selectModel(repositorySource,"\"speed_default\""),named),"quoted model rejected");
+        require(file.load(withoutModel(repositorySource),named) && named.model==DrivingModel::Default,
+                "legacy configuration default changed");
+        require(file.load(change(selectModel(repositorySource,"speed_default"),
+                                 "local_fallback_open_speed_kph","7"),named) &&
+                std::abs(named.laneChange.localFallbackSpeed-7./3.6)<1e-9 &&
+                std::abs(named.laneChange.localFallbackOpenSpeed-7./3.6)<1e-9,
+                "speed model exceeded a lower custom fallback ceiling");
+
         DrivingConfig repositoryConfig;
         require(file.load(repositorySource, repositoryConfig), "repository config rejected");
         // Speed policy is tunable. Test the historical classification against
         // an explicit fixture rather than forbidding user YAML tuning.
-        auto source = change(repositorySource, "sharp_curve_target_kph", "6");
+        auto source = change(withoutModel(repositorySource), "sharp_curve_target_kph", "6");
+        source.insert(source.find("planning:\n")+std::string("planning:\n").size(),
+                      "  traffic_signal_model: 0\n");
         source = change(source, "curve_target_kph", "30");
         source = change(source, "school_zone_target_kph", "20");
         source = change(source, "local_fallback_speed_kph", "5");
@@ -229,6 +290,20 @@ int main() {
         auto valid = change(source, "local_fallback_activation_distance", "60");
         valid = change(valid, "local_fallback_retry_interval", "0.08");
         require(file.load(valid, boundary), "valid equal-boundary config rejected");
+
+        DrivingConfig modelConfig;
+        require(file.load(source,modelConfig) && modelConfig.behavior.trafficSignalModel==0.,
+                "repository must default to the original signal model");
+        require(file.load(change(source,"traffic_signal_model","1"),modelConfig) &&
+                modelConfig.behavior.trafficSignalModel==1., "signal model selection was not loaded");
+        require(file.load(withoutKey(source,"traffic_signal_model"),modelConfig) &&
+                modelConfig.behavior.trafficSignalModel==0., "legacy config retained the optional signal model");
+        for(const auto& invalid:{"-1","2","0.5","nan","inf"})
+            require(!file.load(change(source,"traffic_signal_model",invalid),modelConfig),
+                    "invalid signal model accepted");
+        for(const auto& invalid:{"0","2","2.5","nan","inf"})
+            require(!file.load(change(change(source,"traffic_signal_model","1"),
+                        "traffic_stop_position_margin",invalid),modelConfig), "invalid signal stop margin accepted");
 
         DrivingConfig signalConfig;
         require(file.load(change(source,"stop_hold_time","0.5"),signalConfig),
