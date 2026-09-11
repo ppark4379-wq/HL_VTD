@@ -3798,6 +3798,94 @@ void testRecoveryApproachesSignalStopLine() {
     }
 }
 
+void testUnmarkedCrossingMotionAndStationaryAvoidance() {
+    struct Scene {
+        PathGeneratorData map{makeStraightTwoLaneMap()};
+        PlanningProcessData planning;
+        WorldState world{makeWorldWithObstacle()};
+        ControlProcessData control;
+        Scene() {
+            planning.pathPlanner=makeStraightGlobalPath();
+            planning.config.simulationProgressRecovery=1.;
+            planning.config.progressRecoveryStopTimeout=.2;
+            world.objects.clear();world.egoSpeed=5.;world.egoLaneWidth=3.5;
+            world.frontBumperOffset=3.8;
+            WorldObjectState actor;actor.raw.id=91;actor.raw.x=28.;actor.raw.y=3.;
+            actor.raw.heading=-1.57079632679;actor.raw.length=.5;actor.raw.width=.6;actor.raw.height=1.7;
+            actor.velocityValid=true;actor.velocityY=-1.3;
+            world.objects={actor};
+        }
+        void step(double dt=.05) {
+            world.receiveTime+=dt;
+            for(auto& actor:world.objects) {
+                actor.obb=makeObjectObb(actor.raw);
+                actor.pathValid=actor.laneValid=true;actor.roadId=1;
+                actor.laneId=actor.raw.y < -3.5 ? -2 : -1;
+                actor.pathS=actor.raw.x;actor.pathD=actor.raw.y+1.75;
+                actor.relativeS=actor.pathS-world.egoPathS;actor.relativeD=actor.pathD;
+                actor.isAhead=actor.relativeS>0.;actor.isOnEgoPath=std::abs(actor.pathD)<1.75;
+            }
+            GtFrame gt;gt.ego=world.ego;
+            runPlanningProcess(planning,gt,world,map,dt);
+            runControlProcess(control,world,planning.result,dt);
+        }
+        void assertYield() {
+            assert(!planning.crossingObjectYields.empty());
+            assert(planning.result.emergencyBrake && planning.result.targetSpeed==0.);
+            assert(!planning.result.progressRecoveryActive && control.latestCommand.targetAccel<0.);
+        }
+    };
+    Scene crossing;
+    // Outside any mapped crosswalk, scalar speed can still be zero on the
+    // first movement frame; the measured vector must trigger the yield.
+    crossing.step();crossing.assertYield();
+    crossing.world.egoSpeed=0.;
+    for(int i=0;i<90;++i) {
+        crossing.world.objects[0].raw.y-=.06;
+        crossing.step();crossing.assertYield();
+    }
+    crossing.world.objects[0].raw.y=-3.65;
+    crossing.step();crossing.assertYield(); // rear of OBB still inside lane
+    crossing.world.objects[0].raw.y=-4.;
+    for(int i=0;i<20;++i)crossing.step();
+    assert(crossing.planning.crossingObjectYields.empty());
+    assert(!crossing.planning.result.emergencyBrake && crossing.planning.result.targetSpeed>.05);
+
+    Scene stopped;stopped.step();stopped.assertYield();stopped.world.egoSpeed=0.;
+    auto& actor=stopped.world.objects[0];actor.raw.y=-1.75;actor.velocityY=0.;
+    stopped.step();
+    for(int i=0;i<13;++i) {stopped.step();stopped.assertYield();}
+    for(int i=0;i<40;++i)stopped.step();
+    assert(stopped.planning.crossingObjectYields.empty());
+    assert(!stopped.planning.result.emergencyBrake);
+    assert(stopped.planning.result.targetSpeed>.05 && stopped.planning.result.localPath.valid);
+    assert(corridorTrackingPathIsSafe(stopped.planning.result.localPath.points,
+        stopped.world,0.,nullptr,&stopped.planning.config,&stopped.map));
+    bool detour=false;
+    for(const auto& p:stopped.planning.result.localPath.points) detour=detour || std::abs(p.y+1.75)>.5;
+    assert(detour); // stationary means avoid the body, never ignore it
+    actor.velocityY=-1.3;stopped.step();stopped.assertYield();
+
+    Scene multiple;auto second=multiple.world.objects[0];second.raw.id=92;second.raw.x=32.;
+    multiple.world.objects.push_back(second);multiple.step();multiple.world.egoSpeed=0.;
+    multiple.world.objects[0].velocityY=0.;
+    for(int i=0;i<40;++i) {multiple.step();multiple.assertYield();}
+    assert(multiple.planning.crossingObjectYields.size()==1);
+    assert(multiple.planning.crossingObjectYields.front().id==92);
+    // A missing packet cannot turn a recently moving actor into a static prop.
+    auto saved=multiple.world.objects;multiple.world.objects.clear();
+    for(int i=0;i<3;++i) {multiple.step();multiple.assertYield();}
+    saved[1].velocityY=0.;multiple.world.objects=saved;
+    for(int i=0;i<10;++i) {multiple.step();multiple.assertYield();}
+
+    Scene parallel;parallel.world.objects[0].velocityY=0.;parallel.world.objects[0].velocityX=1.;
+    parallel.step();assert(parallel.planning.crossingObjectYields.empty());
+    Scene distant;distant.world.objects[0].raw.x=85.;distant.step();
+    assert(distant.planning.crossingObjectYields.empty());
+    Scene delayed;delayed.step();delayed.world.egoSpeed=0.;
+    delayed.world.objects[0].velocityY=0.;delayed.step(3.);delayed.assertYield();
+}
+
 void testStationaryCrosswalkWaitReleasesOnlyYield() {
     auto map=makeStraightTwoLaneMap();
     PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
@@ -3834,6 +3922,11 @@ void testStationaryCrosswalkWaitReleasesOnlyYield() {
 }
 
 int main(int argc, char** argv) {
+    if(argc==2 && std::string(argv[1])=="--unmarked-crossing-yield") {
+        testUnmarkedCrossingMotionAndStationaryAvoidance();
+        std::cout<<"unmarked crossing / full-body clearance / stationary avoidance / restart PASS\n";
+        return 0;
+    }
     if(argc==2 && std::string(argv[1])=="--recovery-signal-approach") {
         testRecoveryApproachesSignalStopLine();
         std::cout<<"recovery signal approach / bumper stop / release PASS\n";

@@ -297,6 +297,7 @@ add_test(NAME simulation_recovery_stop_edges COMMAND controller_logic_tests --re
 add_test(NAME consumed_path_steering COMMAND controller_logic_tests --consumed-path)
 add_test(NAME signal_stop_policy COMMAND controller_logic_tests --signal-stop-policy)
 add_test(NAME recovery_signal_approach COMMAND controller_logic_tests --recovery-signal-approach)
+add_test(NAME unmarked_crossing_yield COMMAND controller_logic_tests --unmarked-crossing-yield)
 set_tests_properties(crosswalk_indicator_regression PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME dense_static_speed_regression COMMAND controller_logic_tests --dense-static-speed)

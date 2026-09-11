@@ -236,6 +236,9 @@ std::vector<int> updateConfirmedStationaryObjects(
     std::vector<int> confirmed;
     current.reserve(world.objects.size());
 
+    const double observationDt = std::isfinite(dt) ? std::max(0., dt) : 0.;
+    const double elapsed = std::min(.1, observationDt);
+    if (world.respawnDetected) data.stationaryObjects.clear();
     for (const auto& object : world.objects) {
         const auto previous = std::find_if(
             data.stationaryObjects.begin(), data.stationaryObjects.end(),
@@ -243,16 +246,20 @@ std::vector<int> updateConfirmedStationaryObjects(
                 return state.id == object.raw.id;
             });
         const bool wasTracked = previous != data.stationaryObjects.end();
-        const double elapsed = std::max(0.0, dt);
         const double displacementSpeed =
-            wasTracked && previous->hasPosition && elapsed > 1e-3
+            wasTracked && previous->hasPosition && observationDt > 1e-3
                 ? std::hypot(object.raw.x - previous->lastX,
-                             object.raw.y - previous->lastY) / elapsed
+                             object.raw.y - previous->lastY) / observationDt
                 : 0.0;
-        const bool moving = std::abs(object.raw.speed) >= 0.5 ||
-                            displacementSpeed >= 0.5;
-        const bool stationary = std::abs(object.raw.speed) < 0.3 &&
-                                (!wasTracked || displacementSpeed < 0.3);
+        const bool smallActor = object.raw.length > 0. && object.raw.width > 0. &&
+            std::max(object.raw.length, object.raw.width) <= 2.5;
+        const double movingThreshold = smallActor ? .1 : .5;
+        const double stationaryThreshold = smallActor ? .1 : .3;
+        const double motion = std::max(std::abs(static_cast<double>(object.raw.speed)),
+                                       objectMotionSpeed(object));
+        const bool moving = motion >= movingThreshold || displacementSpeed >= movingThreshold;
+        const bool stationary = motion < stationaryThreshold &&
+                                (!wasTracked || displacementSpeed < stationaryThreshold);
         const bool hasEverMoved = moving ||
             (wasTracked && previous->hasEverMoved);
         const double stationaryDuration = stationary
@@ -270,8 +277,106 @@ std::vector<int> updateConfirmedStationaryObjects(
             confirmed.push_back(static_cast<int>(object.raw.id));
         }
     }
+    for (auto previous : data.stationaryObjects) {
+        if (std::any_of(current.begin(), current.end(),
+            [&](const auto& state) { return state.id == previous.id; })) continue;
+        previous.missingDuration += elapsed;
+        if (previous.missingDuration > data.config.emergencyMinimumHoldTime) continue;
+        previous.stationaryDuration = 0.; // missing telemetry is not stationary evidence
+        previous.hasPosition = false;
+        current.push_back(previous);
+    }
     data.stationaryObjects = std::move(current);
     return confirmed;
+}
+
+bool updateCrossingObjectYields(PlanningProcessData& data, const WorldState& world,
+    const std::vector<Waypoint>& route, std::size_t nearestIndex,
+    const PathGeneratorData& map, double dt, DecisionTraceData* trace) {
+    auto& waits = data.crossingObjectYields;
+    if (world.respawnDetected) { waits.clear(); return false; }
+    const double elapsed = std::isfinite(dt) ? std::clamp(dt, 0., .1) : 0.;
+    waits.erase(std::remove_if(waits.begin(), waits.end(), [&](auto& wait) {
+        const auto object = std::find_if(world.objects.begin(), world.objects.end(),
+            [&](const auto& o) { return o.raw.id == wait.id; });
+        if (object == world.objects.end()) {
+            wait.missingDuration += elapsed;
+            return wait.missingDuration > data.config.emergencyMinimumHoldTime;
+        }
+        wait.missingDuration = 0.;
+        const auto history = std::find_if(data.stationaryObjects.begin(), data.stationaryObjects.end(),
+            [&](const auto& s) { return s.id == wait.id; });
+        if (history != data.stationaryObjects.end() && history->hasPosition &&
+            history->stationaryDuration + 1e-9 >= data.laneChangeConfig.stoppedDynamicConfirmationTime) {
+            traceDecision(trace, "crossing_yield", "stationary_avoidance_allowed",
+                          "object=" + std::to_string(wait.id));
+            return true;
+        }
+        const double c = std::cos(wait.heading), s = std::sin(wait.heading);
+        double low = std::numeric_limits<double>::infinity(), high = -low;
+        for (const auto& p : object->obb.corners) {
+            const double d = -(p.x-wait.x)*s + (p.y-wait.y)*c;
+            low = std::min(low,d); high = std::max(high,d);
+        }
+        const bool crossed = wait.entrySide > 0. ? high < -wait.halfWidth : low > wait.halfWidth;
+        const double center = .5*(low+high);
+        const double lateralSpeed = -objectVelocityX(*object)*s + objectVelocityY(*object)*c;
+        const bool returned = (low > wait.halfWidth || high < -wait.halfWidth) &&
+            center*lateralSpeed > .01;
+        if (crossed || returned)
+            traceDecision(trace, "crossing_yield", "body_cleared", "object=" + std::to_string(wait.id));
+        return crossed || returned;
+    }), waits.end());
+
+    const double speed = std::max(0., world.egoSpeed);
+    const double forwardLimit = std::max(data.config.crosswalkApproachDistance,
+        speed*data.config.emergencyReactionTime + speed*speed/(2.*data.config.emergencyBrakingDeceleration) +
+        data.config.minimumFollowDistance);
+    const auto body = vehicleFootprintFromObb(world.egoObb,
+        {world.ego.x, world.ego.y, world.ego.heading});
+    const double halfWidth = .5*std::max({3., world.egoLaneWidth, body.width});
+    const std::size_t start = route.empty() ? 0 : std::min(nearestIndex,route.size()-1);
+    const double origin = route.empty() ? 0. : route[start].s;
+    for (const auto& object : world.objects) {
+        if (object.raw.length <= 0. || object.raw.width <= 0. ||
+            std::max(object.raw.length,object.raw.width) > 2.5 || objectMotionSpeed(object) < .1 ||
+            std::any_of(waits.begin(), waits.end(), [&](const auto& w) { return w.id == object.raw.id; })) continue;
+        // Use a bounded window of the already selected reference. No new
+        // global search, lane match or dependency on a marked crosswalk.
+        Waypoint nearest;
+        nearest.x=world.ego.x; nearest.y=world.ego.y; nearest.yaw=world.ego.heading;
+        nearest.roadId=world.egoRoadId; nearest.laneId=world.egoLaneId;
+        double along=(object.raw.x-world.ego.x)*std::cos(nearest.yaw)+
+                     (object.raw.y-world.ego.y)*std::sin(nearest.yaw);
+        if (!route.empty()) {
+            double best=std::numeric_limits<double>::infinity();
+            for (std::size_t i=start; i<route.size() && route[i].s-origin<=forwardLimit; ++i) {
+                const double distance=std::hypot(route[i].x-object.raw.x,route[i].y-object.raw.y);
+                if (distance<best) {best=distance; nearest=route[i];}
+            }
+            along=nearest.s-origin+(object.raw.x-nearest.x)*std::cos(nearest.yaw)+
+                                  (object.raw.y-nearest.y)*std::sin(nearest.yaw);
+        }
+        if (along <= 0. || along > forwardLimit ||
+            !roadPointSharesObjectLevel(map,nearest,object.raw.x,object.raw.y,object.raw.z)) continue;
+        const double c=std::cos(nearest.yaw), s=std::sin(nearest.yaw);
+        const double lateral=-(object.raw.x-nearest.x)*s+(object.raw.y-nearest.y)*c;
+        const double lateralSpeed=-objectVelocityX(object)*s+objectVelocityY(object)*c;
+        double low=std::numeric_limits<double>::infinity(), high=-low;
+        for (const auto& p:object.obb.corners) {
+            const double d=-(p.x-nearest.x)*s+(p.y-nearest.y)*c;
+            low=std::min(low,d); high=std::max(high,d);
+        }
+        const bool overlapping=low<=halfWidth && high>=-halfWidth;
+        const bool approaching=lateral*lateralSpeed < -.01 &&
+            std::abs(lateral)<=halfWidth+data.config.crosswalkNearbyObjectDistance;
+        if (!overlapping && !approaching) continue;
+        const double entrySide=std::abs(lateral)>.01 ? lateral : -lateralSpeed;
+        waits.push_back({object.raw.id,nearest.x,nearest.y,nearest.yaw,halfWidth,entrySide});
+        traceDecision(trace, "crossing_yield", "motion_started",
+                      "object=" + std::to_string(object.raw.id));
+    }
+    return !waits.empty();
 }
 
 }  // namespace
@@ -2167,6 +2272,8 @@ void runPlanningProcess(PlanningProcessData& data,
     bool crosswalkControlActive = false;
     const std::vector<int> confirmedStationaryObjectIds =
         updateConfirmedStationaryObjects(data, world, dt);
+    const bool crossingYield = updateCrossingObjectYields(data, world,
+        maneuverReference.waypoints, nearestManeuverIndex, map, dt, trace);
 
     // 횡단보도 점유는 여러 속도/정지 판단에서 공유한다. 한 프레임에
     // 한 번만 갱신해 점유 해제 타이머가 중복으로 감소하지 않게 한다.
@@ -3092,7 +3199,7 @@ void runPlanningProcess(PlanningProcessData& data,
     }
     const bool collisionEmergency =
         data.frame.pathSafety.collision && !confirmedStaticCollision;
-    const bool rawEmergency = collisionEmergency ||
+    const bool rawEmergency = collisionEmergency || crossingYield ||
         requiresEmergencyBrake(
             dynamicEmergencySafety, speedAwareEmergencyTTC) ||
         crossingEmergency || leadEmergency;

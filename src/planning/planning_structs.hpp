@@ -222,6 +222,15 @@ struct StationaryObjectState {
     double lastY{};
     bool hasPosition{};
     bool hasEverMoved{};
+    double missingDuration{};
+};
+
+// Remember the crossing corridor while Ego brakes or replans. A changed
+// speed/path must not release a pedestrian still crossing the original lane.
+struct CrossingObjectYieldState {
+    std::uint32_t id{};
+    double x{}, y{}, heading{}, halfWidth{}, entrySide{};
+    double missingDuration{};
 };
 
 struct CrosswalkOccupancyState {
@@ -268,8 +277,9 @@ struct PlanningProcessData {
     // Keep the local worker's speed contract across a cached-tail handoff;
     // finishing the manoeuvre alone is not proof of a safe global rejoin.
     // 움직이던 차량이 정지하면 짧은 확인 후 정적 회피 대상으로
-    // 전환하기 위한 ID별 이력이다. 사라진 ID는 다음 프레임에 제거된다.
+    // 전환하기 위한 ID별 이력이다. 짧은 관측 누락 동안 이동 이력을 보존한다.
     std::vector<StationaryObjectState> stationaryObjects;
+    std::vector<CrossingObjectYieldState> crossingObjectYields;
     PlanningFrameData frame;
     PlanningResult result;
     // 횡단보도 점유·해제 유지 상태. 점유 해제 후에도 잠시 정지하고,
