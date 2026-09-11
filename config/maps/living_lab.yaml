@@ -2,8 +2,8 @@
 map:
   xodr: src/data/map/HL_FMA_VTD_LivingLab.xodr
   static_features: config/maps/living_lab.generated.yaml
-  # VTD에서 측정한 46개 원본 좌표. 실행 경로 가까이에 투영되는 점들을
-  # route_s 구간으로 묶어 해당 시나리오의 보호구역으로 활성화한다.
+  # VTD 측정점 46개와 Track 173 전 구간의 지도 기준점 91개.
+  # 실행 경로 가까이에 투영되는 점들을 route_s 구간으로 묶어 보호구역으로 활성화한다.
   school_zone_reference_points: config/maps/living_lab_school_zone_points.yaml
 
 # 운영측 좌표를 받으면 채운다. 완료 지점은 정지점이 아니라 통과선이다.
@@ -22,8 +22,8 @@ finish:
 #   route_s 635.8  30 km/h  (roadmark_speed_30.flt)
 #   -> 이후 50 km/h 표시가 없으므로 보호구역이 경로 끝까지 이어질 가능성이 있다.
 #
-# 수동 구간이 있으면 아래 배열에 추가한다. 배열이 비어 있어도 위 46개
-# 측정점과 현재 route.csv가 교차하면 런타임에 보호구역을 자동 생성한다.
+# 수동 구간이 있으면 아래 배열에 추가한다. 배열이 비어 있어도 위
+# 기준점과 현재 route.csv가 교차하면 런타임에 보호구역을 자동 생성한다.
 speed_zones: []
 # speed_zones:
 #   - id: school_zone_1
