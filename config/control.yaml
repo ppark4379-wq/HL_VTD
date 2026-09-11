@@ -106,7 +106,7 @@ planning:
   # 동적 위험/정적 전환 확인 중에는 기존 비상제동 유지, 복구 타이머 초기화.
   # 신호·보행자·횡단보도 정지는 시간 제한 없이 유지한다. 0이면 비활성.
   simulation_progress_recovery: 1
-  progress_recovery_stop_timeout: 3.0     # [s] 동적 위험 해소/정적 확정 이후 정체
+  progress_recovery_stop_timeout: 1.0     # [s] 동적 위험 해소/정적 확정 이후 정체
   progress_recovery_speed_kph: 5.0        # [km/h] 충돌 감수 탈출 속도
   progress_recovery_max_speed_kph: 5.0    # [km/h] 이전 코드 기본 허용 상한과 동일
   progress_recovery_retry_interval: 0.5   # [s] 실패/정체 및 접촉 진행 중 후보 재탐색

@@ -60,6 +60,7 @@ add_executable(corridor_lattice_tests tests/corridor_lattice_tests.cpp ${CORRIDO
 target_compile_features(corridor_lattice_tests PRIVATE cxx_std_17)
 target_include_directories(corridor_lattice_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_test(NAME corridor_lattice_tests COMMAND corridor_lattice_tests)
+add_test(NAME physically_feasible_map_corner COMMAND corridor_lattice_tests --tight-map-corner)
 add_test(NAME progress_recovery_selection COMMAND corridor_lattice_tests --progress-recovery-selection)
 add_test(NAME bounded_corridor_reentry COMMAND corridor_lattice_tests --bounded-reentry)
 add_test(NAME lost_corridor_recovery COMMAND corridor_lattice_tests --lost-corridor-recovery)

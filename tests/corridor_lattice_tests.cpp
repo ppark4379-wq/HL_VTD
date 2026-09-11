@@ -79,6 +79,57 @@ void m08StaticObjects(WorldState& w) {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2 && std::string(argv[1])=="--tight-map-corner") {
+            // Generic right-angle connector: no scenario/road ID dependency.
+            // The broad driving surface admits a larger-radius body sweep.
+            for(double radius:{4.,10.}) {
+                PathGeneratorData map;PrecomputedLaneNetwork network;
+                Road road;road.id=1;road.length=100.;
+                LaneSection section;LaneDefinition lane;lane.id=-1;lane.type="driving";
+                lane.widths.push_back({0.,8.,0.,0.,0.});section.lanes[-1]=lane;
+                road.sections.push_back(section);map.roads[1]=road;
+                PrecomputedLane raw;raw.key={1,0,-1};raw.topologyStatus="connected";
+                LaneSegment segment;segment.key=raw.key;
+                const double arcLength=radius*std::acos(-1.)/2.;
+                for(int i=0;i<=400;++i) {
+                    const double s=i*.25;
+                    PrecomputedLanePoint p;p.id=i;p.pointIndex=i;p.width=8.;p.usable=true;
+                    p.pose.s=p.pose.roadS=s;p.pose.roadId=1;p.pose.laneId=-1;
+                    if(s<=30.) {p.pose.x=s;p.pose.y=0.;}
+                    else if(s<30.+arcLength) {
+                        const double a=(s-30.)/radius;
+                        p.pose.x=30.+radius*std::sin(a);p.pose.y=radius*(std::cos(a)-1.);
+                        p.pose.yaw=-a;p.curvature=-1./radius;
+                    } else {
+                        p.pose.x=30.+radius;p.pose.y=-radius-(s-30.-arcLength);
+                        p.pose.yaw=-std::acos(-1.)/2.;
+                    }
+                    if(i<400)p.nextPoint=i+1;
+                    raw.pointIds.push_back(i);segment.points.push_back(p.pose);network.points.push_back(p);
+                }
+                network.lanes[raw.key]=raw;map.laneSegments[raw.key]=segment;
+                std::string error;
+                require(initializeCorridorRuntime(map,std::move(network),LaneChangeConfig{},&error),error.c_str());
+                MissionCorridorData m;m.valid=m.initialized=true;
+                MissionLegData leg;leg.valid=true;leg.finalLeg=true;
+                leg.allowedLanes.insert(raw.key);leg.targetLanes.insert(raw.key);
+                leg.targetRoadS[raw.key]=95.;m.legs.push_back(leg);
+                auto w=world();w.ego.y=0.;w.egoObb=makeObb2D(11.3725,0.,0.,4.855,1.88);
+                PathPlannerData path;
+                require(buildCorridorTrackingPath(path,PathPlannerConfig{},w,map,m,80.,nullptr),
+                        "mapped turn lost all tracking geometry");
+                double maxK=0.;
+                for(std::size_t i=1;i<path.waypoints.size();++i) {
+                    const auto& a=path.waypoints[i-1];const auto& b=path.waypoints[i];
+                    const double d=std::hypot(a.x-b.x,a.y-b.y);
+                    if(d>.01)maxK=std::max(maxK,std::abs(std::remainder(b.yaw-a.yaw,2.*std::acos(-1.)))/d);
+                }
+                require(maxK<=.17785,"map arc above physical steering curvature survived smoothing");
+                require(path.waypoints.back().s-path.waypoints.front().s>40.,
+                        "corner repair returned only a short stop stub");
+            }
+            std::cout<<"physically feasible mapped corner PASS\n";return 0;
+        }
         if(argc==2 && std::string(argv[1])=="--clear-center-return") {
             auto map=fixture();auto m=mission();auto w=world(30.);
             PathPlannerData seed;
@@ -1253,8 +1304,13 @@ int main(int argc,char** argv) {
             std::cout<<"M08 obstacle selected="<<chosen<<" blocker_distance="<<blockerDistance<<'\n';
             require(chosen,"M08 obstacle avoidance candidate missing");
             require(!maneuver.roadConnectionManeuver,"obstacle maneuver incorrectly became gateway maneuver");
-            for(const auto& event:trace.frameEvents)
-                require(event.find("gateway_unreachable")==std::string::npos,"gateway rejected an obstacle escape candidate");
+            // Irreversible wrong-exit candidates are now deliberately
+            // rejected even for urgent obstacles. Assert that a reachable
+            // escape is SELECTED, not that no discarded candidate was bad.
+            require(std::any_of(trace.frameEvents.begin(),trace.frameEvents.end(),[](const auto& event) {
+                return event.find("corridor_lattice: selected")!=std::string::npos &&
+                       event.find("selected_mission_reachable=1")!=std::string::npos;
+            }),"obstacle escape failed to preserve gateway reachability");
             require(maneuver.followupObstacleId>=0 || !maneuver.bestProgressFallback,
                     "fallback did not preserve its next blocker for an early chained avoidance");
             std::cout<<"target_lane="<<maneuver.targetLaneId

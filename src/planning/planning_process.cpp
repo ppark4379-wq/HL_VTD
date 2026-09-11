@@ -1185,7 +1185,11 @@ bool applySimulationProgressRecovery(
     // A paused simulator or one delayed frame must not expire the timer.
     const double elapsed = std::clamp(dt, 0., .1);
     const bool stopped = std::abs(sensedWorld.egoSpeed) <= data.config.stoppedSpeedThreshold;
-    const bool blocked = stationaryPathStop || emergency || !tracking.valid ||
+    // Match final command validity. A stored PP plan can be valid while it
+    // no longer projects under Ego; the limiter then brakes for invalid input.
+    // Treat that geometric failure as a recovery request, not as progress.
+    // The independently sensed input guard above still rejects bad telemetry.
+    const bool blocked = stationaryPathStop || emergency || !tracking.valid || !world.inputValid ||
         (!data.frame.stop.valid && data.frame.behavior.targetSpeed <= .05) || data.frame.pathSafety.collision;
     if (!state.anchorValid || std::hypot(sensedWorld.ego.x - state.anchorX,
                                         sensedWorld.ego.y - state.anchorY) >= .5) {
@@ -1228,7 +1232,7 @@ bool applySimulationProgressRecovery(
     // caused stop/recovery cycles without any change in the scene.
     const bool ordinaryReady = canResumeOrdinaryPathAfterRecovery(
         sensedWorld, data.frame.localPath.points,
-        tracking.valid && data.frame.localPath.valid && !stationaryPathStop &&
+        tracking.valid && world.inputValid && data.frame.localPath.valid && !stationaryPathStop &&
         !emergency && data.frame.behavior.targetSpeed > .05 &&
         !data.frame.pathSafety.collision && !data.frame.pathSafety.predictedCollision) &&
         corridorTrackingPathIsSafe(data.frame.localPath.points, sensedWorld,
@@ -1532,17 +1536,43 @@ bool canResumeCommittedGatewayRoute(
         std::abs(normalizeAngle(first->yaw - world.ego.heading)) > .12) return false;
     // A new route may branch later, but the steering being executed now
     // must join continuously. Never jump sideways to a nearby gateway line.
+    bool samePrefix=true;
     for (auto point = first; point != successor.end() &&
          point->s <= projected.egoPathS + 3.; ++point) {
         WorldState sample = world;
         sample.ego.x = point->x; sample.ego.y = point->y;
         sample.ego.heading = point->yaw;
         if (!projectWorldToActivePath(sample, maneuver.path, world.frontBumperOffset) ||
-            std::abs(sample.egoPathD) > .35) return false;
+            std::abs(sample.egoPathD) > .35) {samePrefix=false;break;}
         const auto old = std::lower_bound(maneuver.path.begin(), maneuver.path.end(),
             sample.egoPathS, [](const Waypoint& p, double s) { return p.s < s; });
         if (old == maneuver.path.end() ||
-            std::abs(normalizeAngle(point->yaw - old->yaw)) > .12) return false;
+            std::abs(normalizeAngle(point->yaw - old->yaw)) > .12) {samePrefix=false;break;}
+    }
+    if(samePrefix)return true;
+    // A measured-pose C2 bridge is allowed to diverge from the old local
+    // prefix. Demanding identical geometry for 3 m postponed such a bridge
+    // until the required fork was already missed. Require actual attachment,
+    // consistent sample tangents, bounded curvature and initial continuity;
+    // the caller separately verifies the complete gateway tail and collision.
+    if(std::hypot(first->x-world.ego.x,first->y-world.ego.y)>.05 ||
+       std::abs(normalizeAngle(first->yaw-world.ego.heading))>.02)return false;
+    WorldState oldProjection=world;
+    if(!projectWorldToActivePath(oldProjection,maneuver.path,world.frontBumperOffset))return false;
+    const auto old=std::lower_bound(maneuver.path.begin(),maneuver.path.end(),oldProjection.egoPathS,
+        [](const Waypoint& p,double s){return p.s<s;});
+    if(old==maneuver.path.end() || old+1==maneuver.path.end())return false;
+    const double oldDs=std::hypot((old+1)->x-old->x,(old+1)->y-old->y);
+    if(oldDs<.01)return false;
+    const double oldK=normalizeAngle((old+1)->yaw-old->yaw)/oldDs;
+    for(auto p=first;p+1!=successor.end() && p->s<first->s+8.;++p) {
+        const auto& next=*(p+1);
+        const double dx=next.x-p->x,dy=next.y-p->y,ds=std::hypot(dx,dy);
+        if(ds<.01 || ds>.51)return false;
+        const double dyaw=normalizeAngle(next.yaw-p->yaw),k=dyaw/ds;
+        if(std::abs(k)>.17785 ||
+           std::abs(normalizeAngle(std::atan2(dy,dx)-(p->yaw+.5*dyaw)))>.03 ||
+           (p==first && std::abs(k-oldK)>.03))return false;
     }
     return true;
 }
@@ -2247,10 +2277,21 @@ void runPlanningProcess(PlanningProcessData& data,
         data.laneChange.phase != LaneChangePhase::None && map.corridorRuntime) {
         const auto footprint=vehicleFootprintFromObb(world.egoObb,
             {world.ego.x,world.ego.y,world.ego.heading});
+        // A retained partial manoeuvre is not a certificate for the next
+        // obstacle cluster. Search a successor with the ordinary planning
+        // preview, not only after entering the 15 m emergency-avoidance zone.
+        // This probes the actual swept trajectory, so a clear neighbouring
+        // object cannot trigger cosmetic lane changes. Replacement is atomic
+        // and remains contingent on all existing safety/mission checks.
+        const double successorPreview = std::max(
+            data.laneChangeConfig.obstacleMandatoryAvoidanceDistance,
+            std::min(data.laneChangeConfig.localFallbackHorizon-12.,
+                std::max(data.laneChangeConfig.localFallbackActivationDistance,
+                    std::abs(world.egoSpeed)*data.laneChangeConfig.localFallbackTimeHeadway)));
         for (const auto& point : data.laneChange.path) {
             const double ahead = point.s - world.egoPathS;
             if (ahead < 0.0) continue;
-            if (ahead > data.laneChangeConfig.obstacleMandatoryAvoidanceDistance) break;
+            if (ahead > successorPreview) break;
             const auto box=vehicleFootprintAt(footprint,{point.x,point.y,point.yaw});
             for (const auto& object : world.objects) {
                 if(!corridorObstacleAtPathLevel(map,point,object)) continue;

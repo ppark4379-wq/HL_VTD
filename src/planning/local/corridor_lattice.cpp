@@ -565,14 +565,16 @@ std::array<double,3> jet(const std::array<double,6>& c,double u) {
     return {p,v,a};
 }
 bool curve(std::vector<Waypoint>& out,const Waypoint& start,double startK,
-           const PrecomputedLanePoint& target,double* maximum) {
+           const PrecomputedLanePoint& target,double* maximum,
+           double tangentScale=1.,double headingLimit=1.4) {
     const auto& end=target.pose;const double length=gap(start,end);
-    if(length<3. || std::abs(normalizeAngle(end.yaw-start.yaw))>1.4) return false;
-    const auto x=polynomial(start.x,length*std::cos(start.yaw),-length*length*startK*std::sin(start.yaw),
-                            end.x,length*std::cos(end.yaw),-length*length*target.curvature*std::sin(end.yaw));
-    const auto y=polynomial(start.y,length*std::sin(start.yaw),length*length*startK*std::cos(start.yaw),
-                            end.y,length*std::sin(end.yaw),length*length*target.curvature*std::cos(end.yaw));
-    const int count=static_cast<int>(std::ceil(length/.2));*maximum=0.;
+    if(length<3. || std::abs(normalizeAngle(end.yaw-start.yaw))>headingLimit) return false;
+    const double tangent=length*tangentScale;
+    const auto x=polynomial(start.x,tangent*std::cos(start.yaw),-tangent*tangent*startK*std::sin(start.yaw),
+                            end.x,tangent*std::cos(end.yaw),-tangent*tangent*target.curvature*std::sin(end.yaw));
+    const auto y=polynomial(start.y,tangent*std::sin(start.yaw),tangent*tangent*startK*std::cos(start.yaw),
+                            end.y,tangent*std::sin(end.yaw),tangent*tangent*target.curvature*std::cos(end.yaw));
+    const int count=static_cast<int>(std::ceil(std::max(length,tangent)/.2));*maximum=0.;
     for(int i=0;i<=count;++i) {
         const auto a=jet(x,double(i)/count),b=jet(y,double(i)/count);
         const double speed=std::hypot(a[1],b[1]);if(speed<.1) return false;
@@ -712,10 +714,13 @@ bool stationaryPathClear(const std::vector<Waypoint>& path,
                          std::size_t begin=0,int* objectId=nullptr,
                          const PathGeneratorData* map=nullptr,
                          Waypoint* collisionPoint=nullptr);
+std::shared_ptr<CorridorReentryScope> makeReentryScope(
+    const CorridorRuntime&,const PathGeneratorData&,const WorldState&,bool,bool);
 bool smoothSourceJoins(std::vector<Waypoint>& path,const CorridorRuntime& r,
                        const PathGeneratorData& map,const WorldState& world,
                        std::string* failure=nullptr,bool corridorOnly=true,
                        double obstacleClearance=-1.,Waypoint* failurePoint=nullptr) {
+    std::shared_ptr<CorridorReentryScope> cornerSurface;
     for(std::size_t i=1;i<path.size();++i) {
         const double distance=gap(path[i-1],path[i]);
         const double yawDelta=normalizeAngle(path[i].yaw-path[i-1].yaw);
@@ -739,12 +744,18 @@ bool smoothSourceJoins(std::vector<Waypoint>& path,const CorridorRuntime& r,
                     std::abs(segmentCurvature-previousCurvature)<0.04;
             }
         }
-        // A sustained tight XODR connector is real road geometry and is
-        // handled by the curvature speed cap.  Only an isolated yaw jump is
-        // a broken join that needs C2 replacement.
-        if(std::abs(yawDelta)<=.19*distance+1e-6 || sustainedMapCurve) continue;
+        // Slowing down reduces lateral acceleration, not the steering angle
+        // required by a geometric radius. Repair over-limit map arcs too,
+        // before entering them, with a wider C2 join on the legal surface.
+        // Small derivative noise retains the existing isolated-join rule.
+        const bool infeasibleMapCurve = sustainedMapCurve &&
+            std::abs(segmentCurvature)>maximumCurvature+1e-3;
+        if(!infeasibleMapCurve &&
+           (std::abs(yawDelta)<=.19*distance+1e-6 || sustainedMapCurve)) continue;
         bool fixed=false;
-        for(double radius:{3.,5.,8.}) {
+        std::ostringstream repairFailures;
+        for(double radius:{3.,5.,8.,12.,16.,24.}) {
+            if(!infeasibleMapCurve && radius>8.) break;
             std::size_t first=i-1,last=i;
             while(first>0 && path[i].s-path[first].s<radius) --first;
             while(last+1<path.size() && path[last].s-path[i-1].s<radius) ++last;
@@ -758,8 +769,54 @@ bool smoothSourceJoins(std::vector<Waypoint>& path,const CorridorRuntime& r,
             if(a<0 || b<0) continue;
             auto end=r.network.points[b];end.pose=path[last];
             std::vector<Waypoint> replacement;double maxK{};std::string reason;
-            if(!curve(replacement,path[first],r.network.points[a].curvature,end,&maxK) ||
-               !surfaceAndMarks(r,map,replacement,world,reason,corridorOnly)) continue;
+            bool feasible=false;
+            // The ordinary lane-change primitive deliberately limits heading
+            // change to 80 degrees. A mapped right-angle corner needs its own
+            // bounded tangent family, with the SAME curvature/body checks.
+            for(double tangentScale:{1.,1.2,1.4,1.6}) {
+                if(!infeasibleMapCurve && tangentScale!=1.) break;
+                replacement.clear();
+                reason.clear();
+                if(!curve(replacement,path[first],r.network.points[a].curvature,end,&maxK,
+                          tangentScale,infeasibleMapCurve?1.75:1.4)) continue;
+                Waypoint rejected;
+                bool onSurface=surfaceAndMarks(r,map,replacement,world,reason,corridorOnly,&rejected);
+                if(!onSurface && infeasibleMapCurve && corridorOnly &&
+                   reason=="footprint_outside_corridor") {
+                    // Keep the centre trajectory on the official corridor;
+                    // only the rotating body's envelope can borrow reviewed,
+                    // same-direction, same-level adjacent driving pavement.
+                    // No new graph edge, goal, centre-line or solid crossing.
+                    auto originalMetadata=replacement;
+                    const bool centresInside=std::all_of(originalMetadata.begin(),originalMetadata.end(),
+                        [&](Waypoint& p) {
+                            const auto id=containing(r,p.x,p.y,p.yaw,true);
+                            if(id<0)return false;
+                            const auto& centre=r.network.points[id].pose;
+                            p.roadId=centre.roadId;p.sectionIndex=centre.sectionIndex;
+                            p.laneId=centre.laneId;p.roadS=centre.roadS;return true;
+                        });
+                    if(centresInside) {
+                        if(!cornerSurface)cornerSurface=makeReentryScope(r,map,world,true,false);
+                        onSurface=surfaceAndMarks(r,map,replacement,world,reason,true,&rejected,&cornerSurface->surface);
+                        if(onSurface)replacement=std::move(originalMetadata);
+                    }
+                }
+                if(!onSurface && failure) {
+                    repairFailures<<" [radius="<<radius<<" tangent="<<tangentScale
+                        <<" rejected="<<reason<<" xy="<<rejected.x<<':'<<rejected.y<<']';
+                }
+                if(onSurface &&
+                   (obstacleClearance<0. || stationaryPathClear(
+                       replacement,world,obstacleClearance,0,nullptr,&map))) {
+                    feasible=true;break;
+                }
+            }
+            if(!feasible) {
+                if(failure) repairFailures<<" [radius="<<radius<<" max_k="<<maxK
+                    <<" reason="<<(reason.empty()?"curve":reason)<<']';
+                continue;
+            }
             // Global materialization must try another joining radius if the
             // first geometrically valid smoothing cuts across an obstacle.
             // Other callers keep their established validation unchanged.
@@ -771,6 +828,24 @@ bool smoothSourceJoins(std::vector<Waypoint>& path,const CorridorRuntime& r,
             path=std::move(joined);i=first+replacement.size()-1;fixed=true;break;
         }
         if(!fixed) {
+            // Do not turn an existing low-speed map continuation into an
+            // empty path solely because this bounded repair family failed.
+            // This is NOT a curvature-feasibility certificate: retain the
+            // original curvature and its speed cap, and expose the failure.
+            if(infeasibleMapCurve) {
+                if(failure)*failure="mapped_curve_repair_unavailable curvature="+
+                    std::to_string(std::abs(segmentCurvature))+repairFailures.str();
+                // One unsuccessful attempt per contiguous over-limit arc,
+                // not the same radius family at every 0.5 m source sample.
+                while(i+1<path.size()) {
+                    const double d=gap(path[i],path[i+1]);
+                    const double k=d>minimumTrackingSampleSpacing
+                        ?normalizeAngle(path[i+1].yaw-path[i].yaw)/d:0.;
+                    if(k*segmentCurvature<=0. || std::abs(k)<=maximumCurvature+1e-3)break;
+                    ++i;
+                }
+                continue;
+            }
             if(failurePoint) *failurePoint=path[i];
             if(failure) {
                 std::ostringstream detail;
@@ -780,7 +855,8 @@ bool smoothSourceJoins(std::vector<Waypoint>& path,const CorridorRuntime& r,
                       <<" from="<<path[i-1].roadId<<':'
                       <<path[i-1].sectionIndex<<':'<<path[i-1].laneId
                       <<" to="<<path[i].roadId<<':'
-                      <<path[i].sectionIndex<<':'<<path[i].laneId;
+                      <<path[i].sectionIndex<<':'<<path[i].laneId
+                      <<repairFailures.str();
                 *failure=detail.str();
             }
             return false;
@@ -3993,6 +4069,8 @@ static bool buildCorridorTrackingGeometry(PathPlannerData& output,const PathPlan
         output.waypoints.clear();
         return recoverAndCache();
     }
+    if(!joinFailure.empty())traceDecision(trace,"corridor_lattice",
+        "mapped_curve_repair_unavailable",joinFailure);
     // A nearest XODR sample can be on the correct lane graph yet still be a
     // lane-width away after an avoidance manoeuvre.  Such a path is not a
     // valid successor for Settle: Pure Pursuit cuts sideways toward it, while
@@ -4668,8 +4746,15 @@ bool prepareCorridorLattice(LaneChangeData& state,const LaneChangeConfig& config
             ++rejected["official_route_not_rejoined"];
             continue;
         }
-        if(!gatewayOnly && !mandatoryAvoidance && !missionReachable) {
-            ++rejected["distant_gateway_unreachable"];
+        // Urgency changes clearance/search effort, not the mandatory exit.
+        // If the current position can still reach this gateway, an ordinary
+        // detour may not terminate on an irreversible different successor.
+        // After crossing the gateway, the next-leg handoff may legitimately
+        // have no finite current-gateway cost; retain that existing fallback.
+        if(!gatewayOnly && !missionReachable &&
+           (!mandatoryAvoidance || (!r.activeGatewayObserved &&
+                                    std::isfinite(r.gatewayCost[startId])))) {
+            ++rejected["required_gateway_unreachable"];
             continue;
         }
         // A distant blocker may justify preparing an escape, but it may not

@@ -2938,6 +2938,22 @@ void testCommittedGatewayRouteHandoff() {
     }
     assert(!canResume(abruptSteeringPrefix));
 
+    // A genuine C2 bridge starts exactly at Ego with the old curvature but
+    // bends away within three metres. It must not remain hidden by Execute.
+    std::vector<Waypoint> earlyBridge;
+    for(int i=0;i<=120;++i) {
+        auto p=gateway.front();const double x=i*.2,u=std::clamp(x/12.,0.,1.);
+        p.x=world.ego.x+x;p.y=world.ego.y+3.5*u*u*u*(10.-15.*u+6.*u*u);
+        p.yaw=std::atan(3.5*30.*u*u*(1.-u)*(1.-u)/12.);
+        p.s=earlyBridge.empty()?200.:earlyBridge.back().s+
+            std::hypot(p.x-earlyBridge.back().x,p.y-earlyBridge.back().y);
+        earlyBridge.push_back(p);
+    }
+    assert(canResume(earlyBridge));
+    assert(!canResume(earlyBridge,false));
+    auto corruptBridge=earlyBridge;corruptBridge[2].y+=.5;
+    assert(!canResume(corruptBridge));
+
     // A short corridor stub may look aligned but cannot supply a usable
     // successor beyond Ego. Gateway topology itself is checked by the caller.
     auto shortStub = gateway;
@@ -3005,6 +3021,44 @@ void testProgressRecoveryYieldsToUsableOrdinaryPath() {
     world.objects.clear();
     assert(canResumeOrdinaryPathAfterRecovery(world, ordinary,
         corridorTrackingPathIsSafe(ordinary, world, 0.3)));
+}
+
+void testDetachedStoredPlanArmsRecovery() {
+    auto map=makeStraightTwoLaneMap();PrecomputedLaneNetwork network;
+    for(const auto& entry:map.laneSegments) {
+        PrecomputedLane raw;raw.key=entry.first;raw.topologyStatus="connected";
+        for(const auto& pose:entry.second.points) {
+            PrecomputedLanePoint p;p.id=network.points.size();p.pointIndex=raw.pointIds.size();
+            p.pose=pose;p.pose.s=pose.roadS;p.width=3.5;p.usable=true;
+            if(p.pointIndex+1<entry.second.points.size())p.nextPoint=p.id+1;
+            raw.pointIds.push_back(p.id);network.points.push_back(p);
+        }
+        network.lanes[raw.key]=raw;
+    }
+    std::string error;
+    assert(initializeCorridorRuntime(map,std::move(network),LaneChangeConfig{},&error));
+    PlanningProcessData planning;planning.pathPlanner=makeStraightGlobalPath();
+    planning.roadLanePlanner=planning.pathPlanner;
+    planning.roadLanePlannerMissionLegValid=true;planning.roadLanePlannerMissionLeg=0;
+    planning.config.simulationProgressRecovery=1.;planning.config.progressRecoveryStopTimeout=.2;
+    auto& mission=planning.missionCorridor;mission.valid=mission.initialized=mission.topologyAuthority=true;
+    mission.checkpoints.resize(1);mission.checkpoints[0].checkpoint.x=250.;
+    MissionLegData leg;leg.valid=true;leg.allowedLanes={{1,0,-1},{1,0,-2}};
+    leg.targetLanes={{1,0,-1}};leg.topologyAuthority=true;
+    leg.targetRoadS[{1,0,-1}]=200.;mission.legs.push_back(leg);
+    auto world=makeWorldWithObstacle();world.objects.clear();world.egoSpeed=0.;
+    world.ego.x=110.;world.ego.y=-1.75;world.egoRoadS=world.egoPathS=110.;
+    world.inputValid=world.egoLaneValid=world.egoPathValid=true;
+    world.egoObb=makeObb2D(111.3725,-1.75,0.,4.855,1.88);
+    GtFrame gt;gt.ego=world.ego;
+    runPlanningProcess(planning,gt,world,map,.05);
+    assert(planning.result.trackingPlan.valid && !planning.result.valid);
+    assert(planning.result.targetSpeed>.05);
+    for(int i=0;i<10;++i) {world.receiveTime+=.05;runPlanningProcess(planning,gt,world,map,.05);}
+    assert(planning.progressRecovery.active && planning.progressRecovery.blockedTime>=.2);
+    // Recovery activation must never bypass invalid sensor observations.
+    world.inputValid=false;runPlanningProcess(planning,gt,world,map,.05);
+    assert(!planning.progressRecovery.active && planning.progressRecovery.blockedTime==0.);
 }
 
 void testGatewayHandoffChecksAttachedConnectorAndFullTail() {
@@ -3389,6 +3443,7 @@ void testStationaryCrosswalkWaitReleasesOnlyYield() {
 int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--progress-recovery-handoff") {
         testProgressRecoveryYieldsToUsableOrdinaryPath();
+        testDetachedStoredPlanArmsRecovery();
         std::cout << "progress recovery / ordinary path authority PASS\n";
         return 0;
     }
