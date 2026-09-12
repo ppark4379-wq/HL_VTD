@@ -43,6 +43,7 @@ bool readYamlNumbers(const std::string& yamlPath, std::map<std::string, double>&
             else if (name=="traffic_light") model=DrivingModel::TrafficLight;
             else if (name=="speed_default") model=DrivingModel::SpeedDefault;
             else if (name=="speed_traffic_light") model=DrivingModel::SpeedTrafficLight;
+            else if (name=="speed_final") model=DrivingModel::SpeedFinal;
             else { std::cerr<<"[config-error] unknown model: "<<name<<'\n'; return false; }
             namedModel=true;
             continue;
@@ -480,6 +481,24 @@ bool loadDrivingConfig(DrivingConfig& config,
         // This is the local recovery guard, not the road/cruise speed ceiling.
         config.behavior.progressRecoveryMaxSpeed=std::max(config.behavior.progressRecoveryMaxSpeed,
                                                           config.behavior.progressRecoverySpeed);
+    }
+    if (model==DrivingModel::SpeedFinal) {
+        constexpr double obstacleSpeed=20./3.6;
+        config.planner.straightSpeed=45./3.6;
+        config.planner.schoolZoneSpeed=25./3.6;
+        config.behavior.minimumObjectResponseSpeed=obstacleSpeed;
+        config.behavior.nearbyObjectCautionSpeed=obstacleSpeed;
+        config.behavior.stationaryAdjacentVehicleCautionSpeed=obstacleSpeed;
+        config.behavior.crossTrafficCautionSpeed=obstacleSpeed;
+        config.behavior.denseStaticSpeed=obstacleSpeed;
+        config.behavior.progressRecoverySpeed=obstacleSpeed;
+        config.behavior.progressRecoveryMaxSpeed=obstacleSpeed;
+        config.behavior.fixedObstacleManeuverSpeed=true;
+        config.behavior.ignoreOpposingLaneOncomingDynamic=true;
+        config.laneChange.maximumLaneChangeSpeed=obstacleSpeed;
+        config.laneChange.returnWaitingSpeed=obstacleSpeed;
+        config.laneChange.localFallbackSpeed=obstacleSpeed;
+        config.laneChange.localFallbackOpenSpeed=obstacleSpeed;
     }
     return isDrivingConfigValid(config);
 }

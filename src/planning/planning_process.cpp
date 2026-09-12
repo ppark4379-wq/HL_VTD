@@ -447,6 +447,8 @@ double settledStraightManeuverSpeedCap(const LaneChangeData& maneuver,
     double cruiseSpeed, double clearance, const LaneChangeConfig& laneConfig,
     const PlanningBehaviorConfig& config) {
     const double slow=laneConfig.maximumLaneChangeSpeed;
+    if (config.fixedObstacleManeuverSpeed && maneuver.obstacleId >= 0 &&
+        !maneuver.roadConnectionManeuver) return slow;
     if ((maneuver.phase!=LaneChangePhase::Execute && maneuver.phase!=LaneChangePhase::Settle) ||
         maneuver.waitingForReturn || maneuver.bestProgressFallback ||
         !maneuver.shiftCompletedLaneValid || !world.egoLaneValid ||
@@ -1870,6 +1872,21 @@ void runPlanningProcess(PlanningProcessData& data,
     // checkpoint mission의 주행/장애물 판단은 아래에서 실제 추종할
     // lane-center 또는 보관된 maneuver path로 다시 투영한 복사본을 쓴다.
     WorldState world = sensedWorld;
+    if (data.config.ignoreOpposingLaneOncomingDynamic) {
+        world.objects.erase(std::remove_if(world.objects.begin(), world.objects.end(),
+            [&](const WorldObjectState& object) {
+                if (objectMotionSpeed(object) < .3) return false;
+                const double headingDifference=std::abs(normalizeAngle(
+                    objectMotionHeading(object)-static_cast<double>(world.ego.heading)));
+                const bool ignored=headingDifference>=2.792526803190927; // 160 degrees
+                if (ignored) traceDecision(trace,"obstacle_filter","opposing_lane_oncoming_ignored",
+                    "object="+std::to_string(object.raw.id));
+                return ignored;
+            }), world.objects.end());
+    }
+    // Preserve the raw pose/path annotation while using the filtered object
+    // set in code paths that intentionally require sensed (unprojected) Ego.
+    const WorldState obstacleFilteredSensedWorld=world;
     const bool missionActive =
         activeMissionLeg(data.missionCorridor) != nullptr;
     const std::size_t activeMissionLegIndex =
@@ -2441,7 +2458,7 @@ void runPlanningProcess(PlanningProcessData& data,
 
     // 횡단보도 점유는 여러 속도/정지 판단에서 공유한다. 한 프레임에
     // 한 번만 갱신해 점유 해제 타이머가 중복으로 감소하지 않게 한다.
-    updateCrosswalkStates(data, sensedWorld, map.staticZones, dt, previousStop, trace);
+    updateCrosswalkStates(data, obstacleFilteredSensedWorld, map.staticZones, dt, previousStop, trace);
 
     // 신호/횡단보도 정지 여부를 먼저 판정한다. 빨간불 전에 만든
     // 회피 경로를 정지한 동안 보관했다가 녹색불에서 중간부터
@@ -3384,7 +3401,7 @@ void runPlanningProcess(PlanningProcessData& data,
             data, sensedWorld, map.staticZones,
             !data.missionCorridor.valid && globalTracking.goalReached));
     const bool progressOverride = applySimulationProgressRecovery(
-        data, gt, sensedWorld, world, map, tracking, emergency,
+        data, gt, obstacleFilteredSensedWorld, world, map, tracking, emergency,
         stationaryPathStop, stationaryBlocker, selectedPathClearance, finalGoalReached,
         gatewayQueue, queueGreen, gatewayQueueSpeedCap,
         confirmedStationaryObjectIds, dt, trace);

@@ -68,7 +68,14 @@ struct ControlRuntimeConfig {
     double inputTimeout{0.25};
 };
 
-enum class DrivingModel { Default, ChangeDefault, TrafficLight, SpeedDefault, SpeedTrafficLight };
+enum class DrivingModel {
+    Default,
+    ChangeDefault,
+    TrafficLight,
+    SpeedDefault,
+    SpeedTrafficLight,
+    SpeedFinal
+};
 
 // control.yaml에서 읽은 전체 주행 설정.
 struct DrivingConfig {

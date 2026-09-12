@@ -371,7 +371,8 @@ int main(int argc, char* argv[]) {
         const char* modelName = drivingConfig.model==DrivingModel::Default ? "default" :
             drivingConfig.model==DrivingModel::ChangeDefault ? "change_default" :
             drivingConfig.model==DrivingModel::TrafficLight ? "traffic_light" :
-            drivingConfig.model==DrivingModel::SpeedDefault ? "speed_default" : "speed_traffic_light";
+            drivingConfig.model==DrivingModel::SpeedDefault ? "speed_default" :
+            drivingConfig.model==DrivingModel::SpeedTrafficLight ? "speed_traffic_light" : "speed_final";
         std::cout << "[model] " << modelName
                   << " behavior=" << (drivingConfig.behavior.changedDefaultModel ? "working_changes" : "d42fd708")
                   << '\n';

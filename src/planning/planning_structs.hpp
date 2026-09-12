@@ -112,6 +112,11 @@ struct PlanningBehaviorConfig {
     double trafficSignalModel{0.0};
     // false preserves d42fd708; true enables the subsequent local changes.
     bool changedDefaultModel{false};
+    // speed_final only: keep obstacle manoeuvres at their configured cap and
+    // discard moving traffic whose motion heading is unambiguously opposite
+    // to Ego, without relying on lane/road/section map matching.
+    bool fixedObstacleManeuverSpeed{};
+    bool ignoreOpposingLaneOncomingDynamic{};
     // 횡단보도 진입/점유가 예상되는 객체가 있을 때만 적용하는 접근속도.
     // 처음부터 빈 횡단보도는 전역경로의 원래 목표속도로 통과한다.
     double crosswalkApproachSpeed{5.5};      // [m/s]

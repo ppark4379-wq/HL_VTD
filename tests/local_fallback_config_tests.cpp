@@ -110,8 +110,9 @@ int main() {
             text.erase(start,end-start+1);return text;
         };
         DrivingConfig baseline,named;
-        require(file.load(repositorySource,baseline) && baseline.model==DrivingModel::Default,
-                "repository must use named default");
+        require(file.load(selectModel(repositorySource,"default"),baseline) &&
+                baseline.model==DrivingModel::Default,
+                "named default must preserve the baseline");
         for(const auto& name:{"default","change_default","traffic_light","speed_default","speed_traffic_light"}) {
             require(file.load(selectModel(repositorySource,name),named),"named model rejected");
             const bool fast=std::string(name).find("speed_")==0;
@@ -139,6 +140,20 @@ int main() {
                     named.behavior.trafficStopPositionMargin==baseline.behavior.trafficStopPositionMargin,
                     "speed model changed stop/EBS settings");
         }
+        DrivingConfig speedFinal;
+        require(file.load(repositorySource,speedFinal) &&
+                speedFinal.model==DrivingModel::SpeedFinal &&
+                std::abs(speedFinal.planner.straightSpeed-45./3.6)<1e-9 &&
+                std::abs(speedFinal.planner.schoolZoneSpeed-25./3.6)<1e-9 &&
+                std::abs(speedFinal.behavior.denseStaticSpeed-20./3.6)<1e-9 &&
+                std::abs(speedFinal.behavior.nearbyObjectCautionSpeed-20./3.6)<1e-9 &&
+                std::abs(speedFinal.behavior.progressRecoverySpeed-20./3.6)<1e-9 &&
+                std::abs(speedFinal.laneChange.maximumLaneChangeSpeed-20./3.6)<1e-9 &&
+                std::abs(speedFinal.laneChange.localFallbackSpeed-20./3.6)<1e-9 &&
+                std::abs(speedFinal.laneChange.localFallbackOpenSpeed-20./3.6)<1e-9 &&
+                speedFinal.behavior.fixedObstacleManeuverSpeed &&
+                speedFinal.behavior.ignoreOpposingLaneOncomingDynamic,
+                "speed_final composition disagrees with its requested limits");
         require(file.load(selectModel(repositorySource,"speed_traffic_light"),named) &&
                 file.load(selectModel(repositorySource,"default"),named) &&
                 named.behavior.progressRecoverySpeed==baseline.behavior.progressRecoverySpeed &&

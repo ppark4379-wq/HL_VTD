@@ -1,9 +1,11 @@
-model: default
+model: speed_final
 # default: d42fd708 (보도 밖 보행자 미리 감속)
 # change_default: 현재 변경본
 # traffic_light
 # speed_default
 # speed_traffic_light
+# speed_final: 직선 45, 스쿨존 25, 정적·동적 장애물 대응/회피 20km/h
+#              차선/road/section과 무관하게 Ego와 정반대 헤딩인 동적 객체 제외
 # 스피드 모델: 저속 회피·복구 5→10km/h, 급커브 목표 6→10km/h. 최고속도·정지/제동·곡률 제한 유지.
 
 # Pure Pursuit 경로추종 설정
